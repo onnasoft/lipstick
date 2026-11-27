@@ -1,10 +1,6 @@
 package helper
 
-import "fmt"
-
-var BadGatewayHeader = `HTTP/1.1 502 Bad Gateway
-Content-Type: text/html
-Content-Length: `
+import "strconv"
 
 var BadGatewayBody = `<!DOCTYPE html>
 <html>
@@ -17,4 +13,11 @@ var BadGatewayBody = `<!DOCTYPE html>
 </body>
 </html>`
 
-var BadGatewayResponse = BadGatewayHeader + fmt.Sprint(len(BadGatewayBody)) + "\n\n" + BadGatewayBody
+// BadGatewayResponse is a complete HTTP/1.1 502 response. HTTP requires CRLF
+// line endings, and the connection is closed after it.
+var BadGatewayResponse = "HTTP/1.1 502 Bad Gateway\r\n" +
+	"Content-Type: text/html\r\n" +
+	"Content-Length: " + strconv.Itoa(len(BadGatewayBody)) + "\r\n" +
+	"Connection: close\r\n" +
+	"\r\n" +
+	BadGatewayBody

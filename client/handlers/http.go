@@ -1,13 +1,14 @@
 package handlers
 
 import (
+	"bufio"
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
-	"net/url"
 	"slices"
 	"strings"
 	"time"
@@ -40,64 +41,92 @@ var client = &http.Client{
 	},
 }
 
+// HandleHTTP serves the requests of one visitor connection, one after another,
+// until the visitor closes it or a message says the connection must end.
+//
+// The reader is shared by all requests. A buffered reader reads ahead, so a new
+// reader per request would lose the start of the next request.
 func HandleHTTP(connection net.Conn, proxyTarget, protocol string) {
-	req, err := helper.ParseHTTPRequest(connection)
-	if err != nil {
-		fmt.Println("Error parsing HTTP request:", err)
-		sendErrorResponse(connection)
-		return
+	reader := bufio.NewReader(connection)
+	for {
+		req, err := http.ReadRequest(reader)
+		if err != nil {
+			// The visitor closed between requests: a normal end of keep-alive.
+			if errors.Is(err, io.EOF) || errors.Is(err, net.ErrClosed) {
+				return
+			}
+			fmt.Println("Error parsing HTTP request:", err)
+			sendErrorResponse(connection)
+			return
+		}
+		if !serveRequest(connection, reader, req, proxyTarget, protocol) {
+			return
+		}
 	}
+}
 
-	host := strings.Split(proxyTarget, ":")[0]
+// serveRequest forwards one request to the local service and writes its
+// response. It reports whether the connection can carry another request.
+func serveRequest(connection net.Conn, reader *bufio.Reader, req *http.Request, proxyTarget, protocol string) bool {
 	if protocol != "http" && protocol != "https" {
 		protocol = "http"
 	}
-	serverURL := protocol + "://" + proxyTarget + req.URL.String()
+	host := strings.Split(proxyTarget, ":")[0]
+	serverURL := protocol + "://" + proxyTarget + req.URL.RequestURI()
 
-	requestToServer, err := http.NewRequest(req.Method, serverURL, req.Body)
+	out, err := http.NewRequest(req.Method, serverURL, req.Body)
 	if err != nil {
 		fmt.Println("Error creating request to server:", err)
-		return
+		sendErrorResponse(connection)
+		return false
 	}
-	requestToServer.Header = req.Header
-	requestToServer.Host = host
-	requestToServer.Header.Add("Host", host)
+	out.Header = req.Header.Clone()
+	// The body length and framing are passed on as they were received. Letting
+	// Go pick them would send chunked data to servers that expect a length.
+	out.Header.Del("Content-Length")
+	out.Header.Del("Transfer-Encoding")
+	out.ContentLength = req.ContentLength
+	out.TransferEncoding = req.TransferEncoding
+	out.Host = host
 
-	// Check if the request is an Upgrade (WebSocket) request
-	hconn := strings.ToLower(req.Header.Get("Connection"))
-	hupgrade := strings.ToLower(req.Header.Get("Upgrade"))
-	validUpgrade := []string{"websocket"}
-
-	isWebSocket := strings.Contains(hconn, "upgrade") && slices.Contains(validUpgrade, hupgrade)
-
-	if !isWebSocket {
-		handleHTTPRequest(connection, serverURL, requestToServer, host)
-		return
+	if isWebSocket(req) {
+		handleWebSocket(connection, reader, proxyTarget, protocol, out)
+		return false
 	}
-	handleWebSocket(connection, proxyTarget, protocol, requestToServer)
-}
 
-// handleHTTPRequest forwards HTTP requests using Go's http.Client.
-func handleHTTPRequest(connection net.Conn, serverURL string, req *http.Request, host string) {
-
-	// Prepare the request for the target server
-	req.URL, _ = url.Parse(serverURL)
-	req.RequestURI = "" // Clear RequestURI since http.Client uses URL instead
-	req.Host = host
-
-	// Forward the request to the target server
-	resp, err := client.Do(req)
+	resp, err := client.Do(out)
 	if err != nil {
 		fmt.Println("Error forwarding request to server:", err)
 		sendErrorResponse(connection)
-		return
+		return false
 	}
 	defer resp.Body.Close()
 
-	resp.Write(connection)
+	if err := resp.Write(connection); err != nil {
+		return false
+	}
+	// Drain what the service did not read, so the next request starts clean.
+	io.Copy(io.Discard, req.Body)
+
+	if req.Close || resp.Close {
+		return false
+	}
+	// A body with no length and no chunking ends when the connection closes.
+	if resp.ContentLength < 0 && len(resp.TransferEncoding) == 0 && resp.Request.Method != http.MethodHead {
+		return false
+	}
+	return true
 }
 
-func handleWebSocket(connection net.Conn, proxyTarget, protocol string, requestToServer *http.Request) {
+func isWebSocket(req *http.Request) bool {
+	hconn := strings.ToLower(req.Header.Get("Connection"))
+	hupgrade := strings.ToLower(req.Header.Get("Upgrade"))
+	return strings.Contains(hconn, "upgrade") && slices.Contains([]string{"websocket"}, hupgrade)
+}
+
+// handleWebSocket hands the connection to the service after the upgrade request.
+// The reader is used as the visitor side, so bytes read ahead are not lost.
+func handleWebSocket(connection net.Conn, reader io.Reader, proxyTarget, protocol string, requestToServer *http.Request) {
 	var serverConnection net.Conn
 	var err error
 
@@ -122,11 +151,11 @@ func handleWebSocket(connection net.Conn, proxyTarget, protocol string, requestT
 	}
 
 	go io.Copy(connection, serverConnection)
-	io.Copy(serverConnection, connection)
+	io.Copy(serverConnection, reader)
 
 	fmt.Println("Fin de la conexión WebSocket")
 }
 
 func sendErrorResponse(connection net.Conn) {
-	connection.Write([]byte(helper.BadGatewayBody))
+	connection.Write([]byte(helper.BadGatewayResponse))
 }

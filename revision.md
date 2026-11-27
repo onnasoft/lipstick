@@ -365,6 +365,23 @@ Lipstick exposes local ports to the internet through a reverse tunnel. The main 
 - **Possible fix:** the client sends its target label in the upgrade request, and the hub refuses a client whose label differs from the others on the same domain (403). Or the policy names one target per domain in the server configuration.
 - **Status:** open. Not changed.
 
+### 35. HTTP through the tunnel: keep-alive, request bodies and the 502 response (relay bugs)
+- **Where:** `client/handlers/http.go` (`HandleHTTP`, `serveRequest`, `sendErrorResponse`), `helper/errors.go` (`BadGatewayResponse`)
+- **What found by testing a normal HTTP server:**
+  - **Keep-alive:** the client served one request per reverse connection, then closed. A second request on the same visitor connection got no response. Clients that reuse connections (most API clients) failed.
+  - **POST bodies:** the body was forwarded without a length, so Go sent it chunked. The server read `Content-Length` and got `0` bytes, so a POST arrived empty.
+  - **502:** when the service was down, the visitor got only the HTML body, with no status line, so it saw no HTTP response at all. `BadGatewayResponse` also used LF line endings, which HTTP does not allow.
+- **Fix:**
+  - One buffered reader is shared by all requests on a visitor connection, so the read-ahead of one request is not lost.
+  - Length and framing (`ContentLength`, `TransferEncoding`) are passed on as received. The body is drained after each response.
+  - The connection stays open for the next request unless either message says `Connection: close`, or the response has no length.
+  - WebSocket reads from the same reader.
+  - `BadGatewayResponse` is a complete HTTP/1.1 502 with CRLF endings and `Connection: close`. All paths use it.
+- **Verified** (`/tmp/.../scratchpad/http_suite.py`, normal Python HTTP server behind the tunnel, certificate verified as a visitor would):
+  - 7 of 7 checks: GET small text, GET a 5 MiB binary body, POST a 1 MiB body with matching SHA-256, HEAD, 404 pass-through, keep-alive (10 requests on one connection), and 20 parallel clients doing 3 GETs and 1 POST each.
+  - With the backend down, the visitor got `HTTP/1.1 502 Bad Gateway`. After the backend came back, the next request returned 200.
+- **Not verified:** chunked responses from the backend, `Expect: 100-continue`, and long-lived streams (SSE or MJPEG) across the keep-alive loop.
+
 ## Recommended order
 
 1. Items 1, 2, 3, and 4: authentication, unpredictable tickets, TLS verification, and admin API hardening.
