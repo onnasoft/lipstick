@@ -123,7 +123,7 @@ Muchas organizaciones tienen recursos **on-premise** (una oficina, una planta, u
 | **Impresora de red** | IPP sobre HTTP (puerto 631), la web de administración (HTTP o HTTPS), impresión RAW (9100) | Funciona | IPP y la web de administración son HTTP, así que van por el túnel sin cambios. RAW no tiene TLS ni nombre: usa un puerto reservado con `-intranet-port` (ver [Puertos sin TLS](#puertos-sin-tls-para-la-intranet)). |
 | **Cámara IP** | Interfaz web, instantánea JPEG, MJPEG, HLS por HTTP, ONVIF | Funciona | El video en vivo por HTTP funciona mientras la conexión esté abierta. RTSP con RTP usa UDP y **no** pasa por el túnel. |
 | **Control de robótica** | HTTP y WebSocket, gRPC, MQTT sobre TLS, Modbus TCP | Funciona para supervisión | El control en tiempo real no es adecuado. Ver [Robótica](#robótica). |
-| **Apache Spark** | Interfaz web de Spark (4040 por defecto), Spark Connect (gRPC, 15002 por defecto), Livy (REST, 8998 por defecto) | Funciona para interfaz y APIs | Ver la nota sobre Spark abajo. |
+| **Apache Spark** | Interfaz web (4040), Spark Connect (gRPC, 15002), Livy (REST, 8998), envío REST del master (6066) | Funciona cuando el envío es de una sola vía | Ver la nota sobre Spark abajo: las aplicaciones de dos vías no funcionan. |
 | **Notebooks** (Jupyter y similares) | HTTP y WebSocket | Funciona | Protege el notebook con contraseña o token. |
 | **Acceso SSH** a equipos locales | TCP | Funciona | Usa claves, no contraseñas. |
 | **Bases de datos** | TCP (PostgreSQL 5432, MySQL 3306) | Funciona, con cuidado | Adecuado para administración. No lo uses como canal de datos de alto volumen. |
@@ -147,8 +147,9 @@ Cada archivo de configuración tiene su propio subdominio y su propia clave. As�
 
 #### Spark: qué sí y qué no
 
-- **Sí:** la interfaz web (4040), la REST de Livy (8998) y Spark Connect (gRPC, 15002). Un cliente remoto usa Spark Connect o Livy para enviar trabajos, y el cluster no tiene que ser alcanzable directamente.
-- **No:** el tráfico interno de Spark entre el driver, los executores y el master (RPC en 7077 y los puertos de bloques). Ese tráfico va en **ambas direcciones** entre máquinas del cluster, y el túnel solo lleva conexiones que empiezan fuera del servicio y entran hacia él. Mantén el cluster en una red donde esas conexiones funcionen, y expón solo las interfaces de entrada.
+- **Sí, si el envío es de una sola vía.** La interfaz web (4040), la REST de Livy (8998), Spark Connect (gRPC, 15002) y el envío REST del master standalone (6066, en modo cluster). El cliente solo abre conexiones hacia el servicio, y el driver corre dentro del cluster, así que nunca necesita que el cluster se conecte de vuelta. Este es el caso de encolar tareas desde fuera.
+- **No, si la aplicación necesita comunicación en ambos sentidos.** Por ejemplo, `spark-submit` contra el master en 7077 en modo client: el driver queda en tu máquina y los executors tienen que conectarse de vuelta a él. Tampoco funciona el tráfico interno entre master, workers, driver y executors (RPC en 7077 entre nodos y puertos de bloques), porque el túnel solo lleva conexiones que empiezan fuera del servicio y entran hacia él.
+- Antes de depender de un flujo concreto, pruébalo con tu versión de Spark. Los detalles de puertos y modos de despliegue cambian entre versiones.
 
 #### Principio general
 
@@ -179,7 +180,7 @@ Lipstick no es el mejor punto de partida si necesitas **producción con SLA**, *
 
 ### Operativas
 
-- **Sin panel de usuario.** La administración es por API, con la clave de admin.
+- **Panel sin clave.** El panel de `/` lee datos sin clave, por lo que depende de que el puerto 5052 quede solo en loopback. Las escrituras siguen protegidas con la clave.
 - **Sin límites de tasa.** Los visitantes no tienen límite por IP ni por dominio, más allá de los 1024 en espera por hub.
 - **Sin alertas ni métricas exportadas.** Hay logs y consulta de tráfico diario, nada más.
 - **Un solo punto de fallo.** Si el servidor cae, todos los dominios caen.
@@ -355,7 +356,7 @@ Los flags reemplazan el valor del archivo cuando los escribes, y se validan igua
 
 ### Admin API
 
-Todas las rutas, salvo `/health`, requieren la clave de admin en el header `Authorization`, tal cual, sin prefijo `Bearer`.
+Las rutas de escritura (`POST`, `PATCH`, `DELETE`) requieren la clave de admin en el header `Authorization`, tal cual, sin prefijo `Bearer`. Las de lectura (`GET`) y `/health` no la piden, y solo son accesibles desde loopback.
 
 | Método y ruta | Descripción |
 |---------------|-------------|
@@ -367,8 +368,8 @@ Todas las rutas, salvo `/health`, requieren la clave de admin en el header `Auth
 | `DELETE /domains/:name` | Borra el dominio. Desconecta sus clientes. |
 | `GET /domains/:name/traffic?from=YYYY-MM-DD&to=YYYY-MM-DD` | Bytes transferidos por día. |
 | `GET /stats` | Estado en vivo de cada dominio: estado, clientes, sesiones activas, visitantes en espera, bytes desde el arranque y puertos de intranet. |
-| `GET /ui` | Panel web que consume `/stats` y el tráfico del día. Pide la clave en el navegador y no guarda datos en la página. |
-| `GET /requests?domain=&limit=` | Peticiones HTTP recientes (método, ruta sin query, estado, duración y tamaño de respuesta), de más reciente a más antigua. Sin cabeceras ni cuerpos. Máximo 500. |
+| `GET /` | Panel web (`https://127.0.0.1:5052/`) con dominios, conexiones, tráfico y peticiones recientes. No pide clave: los endpoints de lectura son públicos solo dentro del puerto de administración (loopback). `/ui` redirige aquí. |
+| `GET /requests?domain=&port=&limit=&from=&to=` | Peticiones HTTP terminadas (dominio, puerto de entrada, método, ruta sin query, estado, duración y tamaño de respuesta), de más reciente a más antigua. `port` filtra por puerto: `5050` es el proxy y los demás son puertos de intranet. Solo se registran peticiones HTTP; las conexiones TCP crudas de intranet no aparecen. Sin cabeceras ni cuerpos. Sin rango de fechas, devuelve las más recientes de memoria. Con `from` y/o `to` (`YYYY-MM-DD` o RFC 3339) consulta PostgreSQL, donde se guardan 7 días. Máximo 500. |
 
 Ejemplo:
 
@@ -468,7 +469,7 @@ Los flags reemplazan al archivo. Una clave desconocida es un error.
 - **TLS obligatorio** hacia visitantes, clientes y admin API. La única excepción son los puertos de `intranet_ports`: opcionales, en una interfaz de la intranet, un dominio por puerto y redes permitidas por la política (ver [Puertos sin TLS](#puertos-sin-tls-para-la-intranet)).
 - **Claves de dominio** comparadas en tiempo constante. Una clave vacía nunca autoriza.
 - **Tickets** de 128 bits aleatorios, de un solo uso.
-- **Admin API** solo en loopback por defecto, con la clave de admin.
+- **Admin API** solo en loopback por defecto. Las lecturas (`GET`) no piden clave; crear, cambiar o borrar dominios sí, con la clave de admin. Si expones el puerto 5052 fuera de la máquina, cualquiera podrá ver dominios y tráfico.
 - **Secretos fuera del repositorio.** `config.yml`, `client_key.txt`, `certs/` y las claves privadas están en `.gitignore`, y `.dockerignore` los excluye de la imagen.
 - **Pendiente:** ver [`revision.md`](revision.md). Incluye la clave de un certificado que estuvo en el historial del repositorio y el estado de las referencias de pull request, que GitHub no permite reescribir con un push normal.
 

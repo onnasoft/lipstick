@@ -1,6 +1,7 @@
 package manager
 
 import (
+	"errors"
 	"strings"
 	"sync"
 	"time"
@@ -18,6 +19,7 @@ const (
 type RequestRecord struct {
 	Time          time.Time `json:"time"`
 	Domain        string    `json:"domain"`
+	Port          int       `json:"port"` // proxy port or an intranet port; 0 when unknown
 	Method        string    `json:"method"`
 	Path          string    `json:"path"`
 	Status        int       `json:"status"`
@@ -32,6 +34,15 @@ type RequestLog struct {
 	records []RequestRecord
 	next    int
 	full    bool
+	hook    func(RequestRecord) // called after each Add, outside the lock
+}
+
+// setHook sets the function called for every added record, such as the
+// persister's queue.
+func (l *RequestLog) setHook(fn func(RequestRecord)) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.hook = fn
 }
 
 // NewRequestLog returns a log that keeps the last size requests.
@@ -54,19 +65,27 @@ func (l *RequestLog) Add(r RequestRecord) {
 	if r.DurationMS < 0 {
 		r.DurationMS = 0
 	}
+	if r.Port < 0 || r.Port > 65535 {
+		r.Port = 0
+	}
 
 	l.mu.Lock()
-	defer l.mu.Unlock()
 	l.records[l.next] = r
 	l.next = (l.next + 1) % len(l.records)
 	if l.next == 0 {
 		l.full = true
 	}
+	hook := l.hook
+	l.mu.Unlock()
+
+	if hook != nil {
+		hook(r)
+	}
 }
 
-// Recent returns up to limit records, newest first. An empty domain matches all
-// domains.
-func (l *RequestLog) Recent(domain string, limit int) []RequestRecord {
+// Recent returns up to q.Limit records, newest first, that match q. An empty
+// domain matches all domains; a zero port matches all ports.
+func (l *RequestLog) Recent(q RequestQuery) []RequestRecord {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
@@ -74,11 +93,14 @@ func (l *RequestLog) Recent(domain string, limit int) []RequestRecord {
 	if l.full {
 		n = len(l.records)
 	}
-	out := make([]RequestRecord, 0, limit)
-	for i := 0; i < n && len(out) < limit; i++ {
+	out := make([]RequestRecord, 0, q.Limit)
+	for i := 0; i < n && len(out) < q.Limit; i++ {
 		idx := (l.next - 1 - i + len(l.records)) % len(l.records)
 		r := l.records[idx]
-		if domain != "" && r.Domain != domain {
+		if q.Domain != "" && r.Domain != q.Domain {
+			continue
+		}
+		if q.Port != 0 && r.Port != q.Port {
 			continue
 		}
 		out = append(out, r)
@@ -86,10 +108,22 @@ func (l *RequestLog) Recent(domain string, limit int) []RequestRecord {
 	return out
 }
 
-// RecentRequests is the manager's view of the log, used by the admin API.
-func (m *Manager) RecentRequests(domain string, limit int) []RequestRecord {
-	if m.reqlog == nil {
-		return []RequestRecord{}
+// RecentRequests answers the admin API. With a time range it reads the database,
+// which keeps history across restarts. Without one it reads the in-memory ring,
+// which is always current, including requests not yet written.
+func (m *Manager) RecentRequests(q RequestQuery) ([]RequestRecord, error) {
+	if !q.From.IsZero() || !q.To.IsZero() {
+		if m.persist == nil {
+			return nil, ErrHistoryUnavailable
+		}
+		return m.persist.store.Query(q)
 	}
-	return m.reqlog.Recent(domain, limit)
+	if m.reqlog == nil {
+		return []RequestRecord{}, nil
+	}
+	return m.reqlog.Recent(q), nil
 }
+
+// ErrHistoryUnavailable means a time range was asked for but no database is
+// configured to hold the history.
+var ErrHistoryUnavailable = errors.New("request history is not stored: no database persistence")

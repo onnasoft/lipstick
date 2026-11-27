@@ -17,13 +17,13 @@ func statsAdmin() *Admin {
 	return a
 }
 
-func TestStatsRequiresAdminKey(t *testing.T) {
+// /stats is read-only, so it needs no key, with or without a key sent.
+func TestStatsNeedsNoKey(t *testing.T) {
 	a := statsAdmin()
-	if rec := do(a, http.MethodGet, "/stats", ""); rec.Code != http.StatusUnauthorized {
-		t.Fatalf("stats without key: got %d, want 401", rec.Code)
-	}
-	if rec := do(a, http.MethodGet, "/stats", "wrong"); rec.Code != http.StatusUnauthorized {
-		t.Fatalf("stats with wrong key: got %d, want 401", rec.Code)
+	for _, h := range []string{"", "wrong"} {
+		if rec := do(a, http.MethodGet, "/stats", h); rec.Code != http.StatusOK {
+			t.Fatalf("stats with header %q: got %d, want 200", h, rec.Code)
+		}
 	}
 }
 
@@ -51,12 +51,15 @@ func TestStatsWithoutSourceIsEmpty(t *testing.T) {
 	}
 }
 
-// The panel is public HTML with no data in it, and carries the security headers.
+// The panel is public HTML with no data in it, served at /, and carries the security headers.
 func TestPanelHasNoDataAndSecurityHeaders(t *testing.T) {
 	a := statsAdmin()
-	rec := do(a, http.MethodGet, "/ui", "")
+	rec := do(a, http.MethodGet, "/", "")
 	if rec.Code != http.StatusOK {
-		t.Fatalf("panel: got %d", rec.Code)
+		t.Fatalf("panel at /: got %d", rec.Code)
+	}
+	if old := do(a, http.MethodGet, "/ui", ""); old.Code != http.StatusFound || old.Header().Get("Location") != "/" {
+		t.Fatalf("/ui should redirect to /: got %d %q", old.Code, old.Header().Get("Location"))
 	}
 	body := rec.Body.String()
 	if strings.Contains(body, "robot-42") || strings.Contains(body, testKey) {

@@ -18,11 +18,11 @@ type Admin struct {
 	tlsConfig   *tls.Config
 	onChanged   func(domain string)
 	stats       func() []manager.DomainStats
-	requests    func(domain string, limit int) []manager.RequestRecord
+	requests    func(q manager.RequestQuery) ([]manager.RequestRecord, error)
 }
 
-// SetRequestSource sets the function that returns recent requests.
-func (a *Admin) SetRequestSource(fn func(domain string, limit int) []manager.RequestRecord) {
+// SetRequestSource sets the function that returns finished requests.
+func (a *Admin) SetRequestSource(fn func(q manager.RequestQuery) ([]manager.RequestRecord, error)) {
 	a.requests = fn
 }
 

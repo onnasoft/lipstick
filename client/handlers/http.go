@@ -45,6 +45,7 @@ var client = &http.Client{
 // bodies, so it cannot carry cookies or credentials. The query string is also
 // left out of Path.
 type RequestReport struct {
+	Port          int    `json:"port"` // server port the visitor came in on; set by the caller
 	Method        string `json:"method"`
 	Path          string `json:"path"`
 	Status        int    `json:"status"`

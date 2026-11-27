@@ -13,7 +13,7 @@ func TestRequestLogKeepsNewestFirstAndBounded(t *testing.T) {
 	for i := 1; i <= 5; i++ {
 		l.Add(RequestRecord{Domain: "a", Path: "/" + string(rune('0'+i)), Status: 200})
 	}
-	got := l.Recent("", 10)
+	got := l.Recent(RequestQuery{Limit: 10})
 	if len(got) != 3 {
 		t.Fatalf("ring of 3 kept %d", len(got))
 	}
@@ -27,11 +27,11 @@ func TestRequestLogFiltersByDomainAndLimit(t *testing.T) {
 	l.Add(RequestRecord{Domain: "a.example.com", Path: "/a1"})
 	l.Add(RequestRecord{Domain: "b.example.com", Path: "/b1"})
 	l.Add(RequestRecord{Domain: "a.example.com", Path: "/a2"})
-	a := l.Recent("a.example.com", 10)
+	a := l.Recent(RequestQuery{Domain: "a.example.com", Limit: 10})
 	if len(a) != 2 || a[0].Path != "/a2" || a[1].Path != "/a1" {
 		t.Fatalf("domain filter wrong: %+v", a)
 	}
-	if got := l.Recent("", 1); len(got) != 1 {
+	if got := l.Recent(RequestQuery{Limit: 1}); len(got) != 1 {
 		t.Fatalf("limit ignored: %d", len(got))
 	}
 }
@@ -41,7 +41,7 @@ func TestRequestLogFiltersByDomainAndLimit(t *testing.T) {
 func TestRequestLogCleansValues(t *testing.T) {
 	l := NewRequestLog(2)
 	l.Add(RequestRecord{Method: "get", Path: strings.Repeat("p", 2000), Status: 99999, DurationMS: -5})
-	r := l.Recent("", 1)[0]
+	r := l.Recent(RequestQuery{Limit: 1})[0]
 	if r.Method != "GET" || len(r.Path) != maxPathLen || r.Status != 0 || r.DurationMS != 0 {
 		t.Fatalf("not cleaned: method=%q pathlen=%d status=%d dur=%d", r.Method, len(r.Path), r.Status, r.DurationMS)
 	}
@@ -58,7 +58,7 @@ func TestClientLinesAreRecordedForTheHubDomain(t *testing.T) {
 	hub.handleClientLine("something new from a newer client")
 	hub.handleClientLine(`log {not json`)
 
-	got := hub.requests.Recent("", 10)
+	got := hub.requests.Recent(RequestQuery{Limit: 10})
 	if len(got) != 1 {
 		t.Fatalf("recorded %d lines, want 1", len(got))
 	}
@@ -92,5 +92,30 @@ func TestOversizedClientLineDropsTheClient(t *testing.T) {
 	case <-done:
 	case <-time.After(3 * time.Second):
 		t.Fatal("oversized line did not drop the client")
+	}
+}
+
+// A port filter keeps only requests that came in on that port. The proxy and an
+// intranet port are told apart by their port number.
+func TestRequestLogFiltersByPort(t *testing.T) {
+	l := NewRequestLog(10)
+	l.Add(RequestRecord{Domain: "robot", Port: 5050, Path: "/proxy"})
+	l.Add(RequestRecord{Domain: "robot", Port: 9100, Path: "/printer"})
+	l.Add(RequestRecord{Domain: "robot", Port: 9101, Path: "/camera"})
+	got := l.Recent(RequestQuery{Domain: "robot", Port: 9100, Limit: 10})
+	if len(got) != 1 || got[0].Path != "/printer" {
+		t.Fatalf("port 9100 filter: %+v", got)
+	}
+	if n := len(l.Recent(RequestQuery{Limit: 10})); n != 3 {
+		t.Fatalf("no port filter should keep all 3, got %d", n)
+	}
+}
+
+// A port outside 1..65535 is stored as unknown (0), not kept as given.
+func TestRequestLogCleansPort(t *testing.T) {
+	l := NewRequestLog(2)
+	l.Add(RequestRecord{Port: 70000})
+	if r := l.Recent(RequestQuery{Limit: 1})[0]; r.Port != 0 {
+		t.Fatalf("port 70000 kept as %d", r.Port)
 	}
 }

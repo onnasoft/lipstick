@@ -72,3 +72,12 @@ func TestStatsOfStoppedHubDoNotHang(t *testing.T) {
 		t.Fatal("stats waited too long on a stopped hub")
 	}
 }
+
+// With no domains, the snapshot is an empty slice, not nil: nil encodes as JSON
+// null, which the admin panel cannot read.
+func TestSnapshotWithoutDomainsIsEmptyNotNil(t *testing.T) {
+	m := &Manager{}
+	if got := m.Snapshot(); got == nil || len(got) != 0 {
+		t.Fatalf("Snapshot() = %#v, want empty non-nil slice", got)
+	}
+}

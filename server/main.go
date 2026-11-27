@@ -54,8 +54,14 @@ func main() {
 	signal.Notify(interrupt, os.Interrupt)
 
 	db.Migrate(conf.Database)
+	conn, err := db.GetConnection(conf.Database)
+	if err != nil {
+		log.Fatal(err)
+	}
 
+	requestStore := manager.NewGormRequestStore(conn)
 	manager := manager.SetupManager(tlsConfig)
+	manager.StartRequestPersistence(requestStore)
 	admin := admin.SetupAdmin(conf.Admin.Address, conf.AdminSecretKey, tlsConfig)
 	admin.SetDomainChangedHook(manager.DropHub)
 	admin.SetStatsSource(manager.Snapshot)

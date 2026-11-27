@@ -70,7 +70,7 @@ func Migrate(conf config.DatabaseConfig) {
 		log.Fatal(err)
 	}
 
-	if err := connection.AutoMigrate(&Domain{}, &DailyConsumption{}); err != nil {
+	if err := connection.AutoMigrate(&Domain{}, &DailyConsumption{}, &RequestLogEntry{}); err != nil {
 		log.Fatal(err.Error())
 	}
 }

@@ -74,6 +74,7 @@ type Manager struct {
 	tlsConfig      *tls.Config
 	intranet       *intranetPorts
 	reqlog         *RequestLog
+	persist        *persister
 }
 
 // requestLogSize is how many finished requests the admin panel keeps in memory.
@@ -151,6 +152,9 @@ func (m *Manager) Close() {
 		value.(*NetworkHub).stop()
 		return true
 	})
+	if m.persist != nil {
+		m.persist.Close()
+	}
 	m.trafficManager.Close()
 }
 

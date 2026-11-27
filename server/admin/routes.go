@@ -25,7 +25,8 @@ func configureRouter(admin *Admin) {
 
 	r.GET("/health", router.health)
 	r.GET("/stats", router.getStats)
-	r.GET("/ui", router.ui)
+	r.GET("/", router.ui)
+	r.GET("/ui", func(c *gin.Context) { c.Redirect(http.StatusFound, "/") })
 	r.GET("/requests", router.getRequests)
 
 	r.GET("/domains", router.getDomains)
@@ -67,6 +68,9 @@ func isAuthorized(c *gin.Context, adminKey string) bool {
 	return subtle.ConstantTimeCompare(provided, []byte(adminKey)) == 1
 }
 
+// authorized checks the admin key. It guards every endpoint that changes data
+// (create, update, delete). Read-only endpoints do not use it: the admin port
+// listens on 127.0.0.1 only and they expose no keys.
 func (r *router) authorized(c *gin.Context) bool {
 	if isAuthorized(c, r.admin.adminKey) {
 		return true
@@ -85,10 +89,8 @@ func writeLookupError(c *gin.Context, err error) {
 	c.JSON(http.StatusInternalServerError, gin.H{"error": "Unable to get domain"})
 }
 
+// getDomains is read-only and needs no key; see the note on authorized.
 func (r *router) getDomains(c *gin.Context) {
-	if !r.authorized(c) {
-		return
-	}
 
 	domains, err := r.admin.authManager.GetDomains()
 	if err != nil {
@@ -103,10 +105,8 @@ func (r *router) getDomains(c *gin.Context) {
 	c.JSON(http.StatusOK, views)
 }
 
+// getDomain is read-only and needs no key; see the note on authorized.
 func (r *router) getDomain(c *gin.Context) {
-	if !r.authorized(c) {
-		return
-	}
 
 	domainName := c.Param("domainName")
 	domain, err := r.admin.authManager.GetDomain(domainName)
@@ -212,11 +212,8 @@ func (r *router) health(c *gin.Context) {
 
 // getTraffic returns the daily usage of one domain between two dates, both in
 // YYYY-MM-DD format. It is in the admin API because it reveals per-domain usage.
+// getTraffic is read-only and needs no key; see the note on authorized.
 func (r *router) getTraffic(c *gin.Context) {
-	if !r.authorized(c) {
-		return
-	}
-
 	domainName := c.Param("domainName")
 	fromParam := c.Query("from")
 	toParam := c.Query("to")
@@ -264,10 +261,8 @@ func (r *router) getTraffic(c *gin.Context) {
 
 // getStats returns the live state of every domain: clients, sessions, pending
 // visitors, bytes since start, and intranet ports.
+// getStats is read-only and needs no key; see the note on authorized.
 func (r *router) getStats(c *gin.Context) {
-	if !r.authorized(c) {
-		return
-	}
 	if r.admin.stats == nil {
 		c.JSON(http.StatusOK, []manager.DomainStats{})
 		return
@@ -286,28 +281,74 @@ func (r *router) ui(c *gin.Context) {
 	c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(panelHTML))
 }
 
-// getRequests returns the most recent finished requests, newest first. The
-// optional domain parameter filters them. limit defaults to 100 and is capped
-// at 500.
+// getRequests returns finished requests, newest first. Filters: domain, port
+// (the proxy or an intranet port), and a
+// time range with from and to (RFC 3339 or YYYY-MM-DD; a date in "to" includes
+// that whole day). Without a time range the newest requests come from memory.
+// limit defaults to 100 and is capped at 500.
+// getRequests is read-only and needs no key; see the note on authorized.
 func (r *router) getRequests(c *gin.Context) {
-	if !r.authorized(c) {
-		return
+	q := manager.RequestQuery{Domain: c.Query("domain"), Limit: 100}
+	if raw := c.Query("port"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 1 || n > 65535 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "port must be between 1 and 65535"})
+			return
+		}
+		q.Port = n
 	}
-	limit := 100
 	if raw := c.Query("limit"); raw != "" {
 		n, err := strconv.Atoi(raw)
 		if err != nil || n < 1 {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "limit must be a positive number"})
 			return
 		}
-		if n > 500 {
-			n = 500
-		}
-		limit = n
+		q.Limit = min(n, 500)
 	}
+	from, err := parseTimeParam(c.Query("from"), false)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "from must be RFC 3339 or YYYY-MM-DD"})
+		return
+	}
+	to, err := parseTimeParam(c.Query("to"), true)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "to must be RFC 3339 or YYYY-MM-DD"})
+		return
+	}
+	q.From, q.To = from, to
+
 	if r.admin.requests == nil {
 		c.JSON(http.StatusOK, []manager.RequestRecord{})
 		return
 	}
-	c.JSON(http.StatusOK, r.admin.requests(c.Query("domain"), limit))
+	list, err := r.admin.requests(q)
+	if errors.Is(err, manager.ErrHistoryUnavailable) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "could not read the request log"})
+		return
+	}
+	c.JSON(http.StatusOK, list)
+}
+
+// parseTimeParam accepts RFC 3339 or a calendar date. A date in an end position
+// (asEnd) becomes the start of the following day, so the whole day is included.
+// An empty value is the zero time.
+func parseTimeParam(raw string, asEnd bool) (time.Time, error) {
+	if raw == "" {
+		return time.Time{}, nil
+	}
+	if t, err := time.Parse(time.RFC3339, raw); err == nil {
+		return t, nil
+	}
+	t, err := time.Parse("2006-01-02", raw)
+	if err != nil {
+		return time.Time{}, err
+	}
+	if asEnd {
+		t = t.AddDate(0, 0, 1)
+	}
+	return t, nil
 }

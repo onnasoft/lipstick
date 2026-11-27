@@ -1,9 +1,9 @@
 package admin
 
-// panelHTML is the admin panel. It keeps the admin key in sessionStorage for the
-// browser session only, and sends it in the Authorization header, the same way
-// the API expects it. All values from the server are written as text, never as
-// HTML, so a domain name cannot inject markup.
+// panelHTML is the admin panel. It reads the read-only admin endpoints, which
+// need no key: the admin port listens on 127.0.0.1 only. Changing domains still
+// requires the admin key, and the panel never asks for it. All values from the
+// server are written as text, never as HTML, so a domain name cannot inject markup.
 const panelHTML = `<!DOCTYPE html>
 <html lang="es">
 <head>
@@ -23,11 +23,14 @@ const panelHTML = `<!DOCTYPE html>
   .muted { color: #6e6e73; }
   #err { color: #ff3b30; margin: 12px 0; min-height: 1em; }
   button { font: inherit; padding: 4px 10px; }
+.filters { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 8px 0; }
+.filters input { font: inherit; padding: 4px 8px; }
+.filters input[type=number] { width: 9em; }
 </style>
 </head>
 <body>
 <h1>Lipstick</h1>
-<div class="sub">Dominios, conexiones y tráfico · actualiza cada 5 s · <button id="logout">Cambiar clave</button></div>
+<div class="sub">Dominios, conexiones y tráfico · actualiza cada 5 s</div>
 <div id="err"></div>
 <table>
   <thead><tr>
@@ -38,23 +41,24 @@ const panelHTML = `<!DOCTYPE html>
   <tbody id="rows"><tr><td colspan="8" class="muted">Cargando…</td></tr></tbody>
 </table>
 <h2 style="font-size:16px;margin:24px 0 8px">Peticiones recientes</h2>
+<div class="filters">
+  <input id="fdom" list="domains" placeholder="Dominio (todos)" aria-label="Filtrar por dominio">
+  <datalist id="domains"></datalist>
+  <input id="fport" type="number" min="1" max="65535" placeholder="Puerto (todos)" aria-label="Filtrar por puerto">
+  <span class="muted">5050 = proxy · otros puertos = intranet</span>
+</div>
 <table>
   <thead><tr>
-    <th>Hora</th><th>Dominio</th><th>Método</th><th>Ruta</th><th class="num">Estado</th>
+    <th>Hora</th><th>Dominio</th><th class="num">Puerto</th><th>Método</th><th>Ruta</th><th class="num">Estado</th>
     <th class="num">Duración</th><th class="num">Respuesta</th>
   </tr></thead>
-  <tbody id="reqs"><tr><td colspan="7" class="muted">Sin peticiones todavía.</td></tr></tbody>
+  <tbody id="reqs"><tr><td colspan="8" class="muted">Sin peticiones todavía.</td></tr></tbody>
 </table>
 <script>
 (function () {
-  var key = sessionStorage.getItem("lipstickAdminKey") || "";
   var rows = document.getElementById("rows");
   var err = document.getElementById("err");
 
-  function ask() {
-    key = prompt("Clave de administración") || "";
-    sessionStorage.setItem("lipstickAdminKey", key);
-  }
   function fmt(n) {
     if (n === undefined || n === null) return "";
     var units = ["B", "KiB", "MiB", "GiB", "TiB"], i = 0, v = Number(n);
@@ -69,8 +73,7 @@ const panelHTML = `<!DOCTYPE html>
   }
   function todayBytes(name) {
     var day = new Date().toISOString().slice(0, 10);
-    return fetch("/domains/" + encodeURIComponent(name) + "/traffic?from=" + day + "&to=" + day,
-      { headers: { Authorization: key } })
+    return fetch("/domains/" + encodeURIComponent(name) + "/traffic?from=" + day + "&to=" + day)
       .then(function (r) { return r.ok ? r.json() : { consumptions: [] }; })
       .then(function (j) {
         return (j.consumptions || []).reduce(function (s, c) { return s + (c.BytesUsed || 0); }, 0);
@@ -78,6 +81,7 @@ const panelHTML = `<!DOCTYPE html>
       .catch(function () { return null; });
   }
   function render(list) {
+    list = list || [];
     rows.textContent = "";
     if (!list.length) {
       var tr = document.createElement("tr");
@@ -107,16 +111,34 @@ const panelHTML = `<!DOCTYPE html>
       todayBytes(d.domain).then(function (b) { today.textContent = b === null ? "—" : fmt(b); });
     });
   }
+  // Offers the known domains as suggestions for the domain filter.
+  function fillDomains(list) {
+    var dl = document.getElementById("domains");
+    dl.textContent = "";
+    list.forEach(function (d) {
+      var o = document.createElement("option");
+      o.value = d.domain;
+      dl.appendChild(o);
+    });
+  }
+  document.getElementById("fdom").addEventListener("change", loadRequests);
+  document.getElementById("fport").addEventListener("change", loadRequests);
   function loadRequests() {
     var body = document.getElementById("reqs");
-    fetch("/requests?limit=50", { headers: { Authorization: key } })
+    var dom = document.getElementById("fdom").value.trim();
+    var port = document.getElementById("fport").value.trim();
+    var url = "/requests?limit=50";
+    if (dom) url += "&domain=" + encodeURIComponent(dom);
+    if (port) url += "&port=" + encodeURIComponent(port);
+    fetch(url)
       .then(function (r) { if (!r.ok) throw new Error(); return r.json(); })
       .then(function (list) {
         body.textContent = "";
+        list = list || [];
         if (!list.length) {
           var empty = document.createElement("tr");
           empty.appendChild(cell("Sin peticiones todavía.", "muted"));
-          empty.firstChild.colSpan = 7;
+          empty.firstChild.colSpan = 8;
           body.appendChild(empty);
           return;
         }
@@ -124,6 +146,7 @@ const panelHTML = `<!DOCTYPE html>
           var tr = document.createElement("tr");
           tr.appendChild(cell(new Date(q.time).toLocaleTimeString()));
           tr.appendChild(cell(q.domain));
+          tr.appendChild(cell(q.port ? String(q.port) : "—", "num"));
           tr.appendChild(cell(q.method));
           tr.appendChild(cell(q.path));
           tr.appendChild(cell(String(q.status), "num"));
@@ -135,19 +158,14 @@ const panelHTML = `<!DOCTYPE html>
       .catch(function () {});
   }
   function load() {
-    if (!key) { ask(); if (!key) { err.textContent = "Se necesita la clave para ver el panel."; return; } }
-    fetch("/stats", { headers: { Authorization: key } })
+    fetch("/stats")
       .then(function (r) {
-        if (r.status === 401) { sessionStorage.removeItem("lipstickAdminKey"); key = ""; throw new Error("La clave no es válida."); }
         if (!r.ok) throw new Error("Error " + r.status + " al leer el estado.");
         return r.json();
       })
-      .then(function (list) { err.textContent = ""; render(list); loadRequests(); })
+      .then(function (list) { err.textContent = ""; render(list); fillDomains(list); loadRequests(); })
       .catch(function (e) { err.textContent = e.message; });
   }
-  document.getElementById("logout").addEventListener("click", function () {
-    sessionStorage.removeItem("lipstickAdminKey"); key = ""; ask(); load();
-  });
   load();
   setInterval(load, 5000);
 })();

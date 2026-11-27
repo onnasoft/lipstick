@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"net"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -46,6 +47,15 @@ var clientIdleTimeout = 90 * time.Second
 type pendingVisitor struct {
 	conn  net.Conn
 	since time.Time
+	port  int // local port the visitor came in on: the proxy or an intranet port
+}
+
+// localPort returns the port a connection arrived on, or 0 when unknown.
+func localPort(c net.Conn) int {
+	if a, ok := c.LocalAddr().(*net.TCPAddr); ok {
+		return a.Port
+	}
+	return 0
 }
 
 // NetworkHub owns the state of one domain. Its maps are read and written only
@@ -365,14 +375,17 @@ func (hub *NetworkHub) handleIncomingClientConn(visitor *helper.RemoteConn) {
 
 	// The client only needs the ticket. The reverse connection goes to the
 	// server URL it already has, so no address is sent.
+	// The line is "ticket port". The client returns the port with each request it
+	// reports, so the request log can tell the proxy apart from intranet ports.
+	port := localPort(visitor)
 	ws := hub.getProxyNotificationConn()
-	if _, err := ws.Write([]byte(ticket + "\n")); err != nil {
+	if _, err := ws.Write([]byte(ticket + " " + strconv.Itoa(port) + "\n")); err != nil {
 		logger.Default.Error("Error writing ticket to ProxyNotificationConn:", err)
 		rejectVisitor(visitor)
 		return
 	}
 
-	hub.incomingClientConns[ticket] = &pendingVisitor{conn: visitor, since: time.Now()}
+	hub.incomingClientConns[ticket] = &pendingVisitor{conn: visitor, since: time.Now(), port: port}
 	logger.Default.Debug("Ticket sent to ProxyNotificationConn for hub:", hub.HubName)
 }
 
@@ -386,7 +399,11 @@ func (hub *NetworkHub) handleNatsMessage(ticket string) {
 		return
 	}
 
-	if _, err := ws.Write([]byte(ticket + "\n")); err != nil {
+	port := 0 // a ticket from NATS may belong to another server; its port is unknown here
+	if v, ok := hub.incomingClientConns[ticket]; ok {
+		port = v.port
+	}
+	if _, err := ws.Write([]byte(ticket + " " + strconv.Itoa(port) + "\n")); err != nil {
 		logger.Default.Error("Error writing NATS ticket to ProxyNotificationConn:", err)
 		hub.rejectPendingTicket(ticket)
 	}

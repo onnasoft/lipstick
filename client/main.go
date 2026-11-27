@@ -144,19 +144,26 @@ func checkConnection(ctrl *controlWriter) {
 
 // readMessage reads one ticket line from the server. The server sends only the
 // ticket: a hex string, so it cannot contain separators or URL characters.
-func readMessage(reader *bufio.Reader) (string, error) {
+// readMessage reads one line from the server: "ticket port". The port is the
+// server port the visitor came in on. A missing or invalid port is reported as 0.
+func readMessage(reader *bufio.Reader) (string, int, error) {
 	line, err := reader.ReadString('\n')
 	if err != nil {
-		return "", fmt.Errorf("error reading until newline: %w", err)
+		return "", 0, fmt.Errorf("error reading until newline: %w", err)
 	}
 	line = strings.TrimRight(line, "\r\n")
 	if line == "close" {
-		return "", errors.New("connection closed by server")
+		return "", 0, errors.New("connection closed by server")
 	}
-	if !isTicket(line) {
-		return "", fmt.Errorf("invalid ticket from server: %q", line)
+	ticket, rest, _ := strings.Cut(line, " ")
+	if !isTicket(ticket) {
+		return "", 0, fmt.Errorf("invalid ticket from server: %q", line)
 	}
-	return line, nil
+	port := 0
+	if n, err := strconv.Atoi(rest); err == nil && n >= 0 && n <= 65535 {
+		port = n
+	}
+	return ticket, port, nil
 }
 
 // isTicket accepts 1 to 64 lowercase hex characters.
@@ -182,18 +189,18 @@ func handleTickets(connection net.Conn, proxyTarget string, report func(handlers
 
 	reader := bufio.NewReader(connection)
 	for {
-		ticket, err := readMessage(reader)
+		ticket, port, err := readMessage(reader)
 		if err != nil {
 			fmt.Println(err)
 			return
 		}
 
 		protocol, targetAddress := helper.ParseTargetEndpoint(proxyTarget)
-		go establishConnection(protocol, targetAddress, ticket, report)
+		go establishConnection(protocol, targetAddress, ticket, port, report)
 	}
 }
 
-func establishConnection(protocol, proxyTarget, ticket string, report func(handlers.RequestReport)) {
+func establishConnection(protocol, proxyTarget, ticket string, port int, report func(handlers.RequestReport)) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("connection for ticket %s failed: %v", ticket, r)
@@ -219,7 +226,11 @@ func establishConnection(protocol, proxyTarget, ticket string, report func(handl
 	conn := helper.NewConnWithBuffer(connection, buff)
 
 	if helper.IsHTTPRequest(string(buff)) {
-		handlers.HandleHTTP(conn, proxyTarget, protocol, report)
+		// Every request on this connection came in on the same server port.
+		handlers.HandleHTTP(conn, proxyTarget, protocol, func(r handlers.RequestReport) {
+			r.Port = port
+			report(r)
+		})
 		return
 	}
 

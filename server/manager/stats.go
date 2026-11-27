@@ -23,7 +23,7 @@ type DomainStats struct {
 // Snapshot returns the live state of every hub, sorted by domain. It is safe to
 // call while traffic flows: each hub answers from its own loop.
 func (m *Manager) Snapshot() []DomainStats {
-	var out []DomainStats
+	out := []DomainStats{} // never nil: JSON must be [] when there are no domains
 	m.hubs.Range(func(key, value any) bool {
 		hub := value.(*NetworkHub)
 		st, ok := hub.Stats(statsTimeout)

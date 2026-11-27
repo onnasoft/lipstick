@@ -11,26 +11,26 @@ import (
 
 func requestsAdmin() *Admin {
 	a := newTestAdmin(testKey)
-	a.SetRequestSource(func(domain string, limit int) []manager.RequestRecord {
+	a.SetRequestSource(func(q manager.RequestQuery) ([]manager.RequestRecord, error) {
 		all := []manager.RequestRecord{
 			{Time: time.Now(), Domain: "a.example.com", Method: "GET", Path: "/x", Status: 200},
 			{Time: time.Now(), Domain: "b.example.com", Method: "POST", Path: "/y", Status: 201},
 		}
 		var out []manager.RequestRecord
 		for _, r := range all {
-			if domain == "" || r.Domain == domain {
+			if q.Domain == "" || r.Domain == q.Domain {
 				out = append(out, r)
 			}
 		}
-		return out
+		return out, nil
 	})
 	return a
 }
 
-func TestRequestsRequireAdminKey(t *testing.T) {
+func TestRequestsNeedNoKey(t *testing.T) {
 	a := requestsAdmin()
-	if rec := do(a, http.MethodGet, "/requests", ""); rec.Code != http.StatusUnauthorized {
-		t.Fatalf("requests without key: got %d, want 401", rec.Code)
+	if rec := do(a, http.MethodGet, "/requests", ""); rec.Code != http.StatusOK {
+		t.Fatalf("requests without key: got %d, want 200", rec.Code)
 	}
 }
 
@@ -49,5 +49,30 @@ func TestRequestsRejectBadLimit(t *testing.T) {
 		if rec := do(a, http.MethodGet, "/requests?"+q, testKey); rec.Code != http.StatusBadRequest {
 			t.Errorf("%s: got %d, want 400", q, rec.Code)
 		}
+	}
+}
+
+// A time range is passed to the source as a parsed time. A date in "to" covers the
+// whole day, so the end is the next midnight.
+func TestRequestsParseTimeRange(t *testing.T) {
+	var got manager.RequestQuery
+	a := newTestAdmin(testKey)
+	a.SetRequestSource(func(q manager.RequestQuery) ([]manager.RequestRecord, error) {
+		got = q
+		return nil, nil
+	})
+	rec := do(a, http.MethodGet, "/requests?from=2026-11-01&to=2026-11-02", testKey)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("got %d: %s", rec.Code, rec.Body.String())
+	}
+	if got.From.Format("2006-01-02") != "2026-11-01" || got.To.Format("2006-01-02") != "2026-11-03" {
+		t.Fatalf("range wrong: from=%v to=%v", got.From, got.To)
+	}
+}
+
+func TestRequestsRejectBadTime(t *testing.T) {
+	a := requestsAdmin()
+	if rec := do(a, http.MethodGet, "/requests?from=yesterday", testKey); rec.Code != http.StatusBadRequest {
+		t.Fatalf("bad from: got %d, want 400", rec.Code)
 	}
 }

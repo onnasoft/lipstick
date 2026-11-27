@@ -43,10 +43,12 @@ func do(a *Admin, method, path, authHeader string) *httptest.ResponseRecorder {
 	return rec
 }
 
+// Writes still need the key. Reads do not (see TestAdminReadsNeedNoKey). The
+// unauthorized path returns before touching the database, so no database is needed.
 func TestAdminRejectsMissingOrWrongKey(t *testing.T) {
 	a := newTestAdmin(testKey)
 	for _, h := range []string{"", "wrong", testKey + "x", "Bearer " + testKey} {
-		if rec := do(a, http.MethodGet, "/domains", h); rec.Code != http.StatusUnauthorized {
+		if rec := do(a, http.MethodDelete, "/domains/app.example.com", h); rec.Code != http.StatusUnauthorized {
 			t.Errorf("header %q: got %d, want 401", h, rec.Code)
 		}
 	}
@@ -54,7 +56,7 @@ func TestAdminRejectsMissingOrWrongKey(t *testing.T) {
 
 func TestAdminEmptyKeyNeverAuthorizes(t *testing.T) {
 	a := newTestAdmin("")
-	if rec := do(a, http.MethodGet, "/domains", ""); rec.Code != http.StatusUnauthorized {
+	if rec := do(a, http.MethodDelete, "/domains/app.example.com", ""); rec.Code != http.StatusUnauthorized {
 		t.Errorf("empty configured key authorized an empty header: got %d", rec.Code)
 	}
 }
@@ -89,13 +91,6 @@ func TestAdminHealthIsPublic(t *testing.T) {
 	a := newTestAdmin(testKey)
 	if rec := do(a, http.MethodGet, "/health", ""); rec.Code != http.StatusOK {
 		t.Fatalf("health got %d, want 200", rec.Code)
-	}
-}
-
-func TestTrafficRequiresAdminKey(t *testing.T) {
-	a := newTestAdmin(testKey)
-	if rec := do(a, http.MethodGet, "/domains/app.example.com/traffic?from=2026-01-01&to=2026-01-31", ""); rec.Code != http.StatusUnauthorized {
-		t.Fatalf("traffic without key: got %d, want 401", rec.Code)
 	}
 }
 
