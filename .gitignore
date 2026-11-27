@@ -4,5 +4,7 @@ bin/*
 
 config.yml
 server/certs/
+certs/
+*.key
 
 client_key.txt

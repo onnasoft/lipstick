@@ -81,6 +81,16 @@ Lipstick exposes local ports to the internet through a reverse tunnel. The main 
 - **Where:** `certs/lipstick.key`, `certs/lipstick.csr`, `certs/lipstick.crt`; `.gitignore`
 - **What:** The private key (`-----BEGIN PRIVATE KEY-----`) is tracked by git, and `.gitignore` does not exclude `certs/`.
 - **Fix:** Treat the key as compromised and rotate it. Remove it from history (for example with `git filter-repo`), add `certs/` to `.gitignore`, and load certificates from outside the repo.
+- **Status:** Partly fixed. The key is no longer tracked.
+  - `certs/lipstick.key`, `certs/lipstick.csr` and `certs/lipstick.crt` were removed from the index with `git rm --cached`. The files are still on disk, and this change is staged, not committed.
+  - `.gitignore` now excludes `certs/` and `*.key`, so the files cannot be added again by accident.
+  - Nothing references the root `certs/` folder. The server uses `server/certs/`, which is generated at startup and ignored.
+  - No other real secrets are tracked. The matches in `README.md` and `server/db/manager.go` are placeholders or code.
+- **Still open, needs your decision:**
+  - The key is still in history, in commit `eeedf10`. Anyone who cloned the repo has it. Removing it from history means rewriting commits and force-pushing to `origin` (`git@github.com:onnasoft/lipstick.git`). I have not done that.
+  - I could not check whether the repository is public (`gh` is not installed). If it is, treat the key as leaked.
+  - Once you confirm, delete `certs/lipstick.key` from disk. Nothing uses it.
+  - The running server uses `server/certs/`, not `certs/`, so no current service depends on this key. If it was used somewhere else, that deployment needs a new certificate.
 
 ### 7. TLS fails open to plain text
 - **Where:** `server/config/config.go` (`GetTLSConfig`), `helper/listener.go` (`NewListenerManagerTCP`), `server/main.go`
