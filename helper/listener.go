@@ -9,21 +9,18 @@ import (
 	"net/http"
 )
 
-func NewListenerManagerTCP(addr string, tlsConfig *tls.Config) *ListenerManager {
+func NewListenerManagerTCP(addr string, tlsConfig *tls.Config) (*ListenerManager, error) {
 	var l net.Listener
 	var err error
 	if tlsConfig != nil {
 		l, err = tls.Listen("tcp", addr, tlsConfig)
-		if err != nil {
-			return nil
-		}
-		return NewListenerManager(l)
+	} else {
+		l, err = net.Listen("tcp", addr)
 	}
-	l, err = net.Listen("tcp", addr)
 	if err != nil {
-		return nil
+		return nil, err
 	}
-	return NewListenerManager(l)
+	return NewListenerManager(l), nil
 }
 
 type ListenerConn struct {

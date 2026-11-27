@@ -72,7 +72,11 @@ func (m *HTTPManager) Connect(url string, headers http.Header) (*CustomConn, err
 	return &CustomConn{Conn: conn}, nil
 }
 
-func (m *HTTPManager) ConnectByAddress(addr, url string, headers http.Header) (*CustomConn, error) {
+// ConnectByAddress opens the reverse connection for a ticket. It always dials
+// the host from the server URL, the same way for plain and TLS connections:
+// the address the server advertises can be a private IP without a port, which
+// cannot be dialed.
+func (m *HTTPManager) ConnectByAddress(url string, headers http.Header) (*CustomConn, error) {
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("error creating request: %w", err)
@@ -95,7 +99,7 @@ func (m *HTTPManager) ConnectByAddress(addr, url string, headers http.Header) (*
 	if req.URL.Scheme == "http" || req.URL.Scheme == "ws" {
 		conn, err = net.Dial("tcp", host)
 	} else {
-		conn, err = tls.Dial("tcp", addr, &tls.Config{
+		conn, err = tls.Dial("tcp", host, &tls.Config{
 			InsecureSkipVerify: true,
 			ServerName:         strings.Split(host, ":")[0],
 		})

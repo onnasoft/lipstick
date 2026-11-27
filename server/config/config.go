@@ -1,13 +1,17 @@
 package config
 
 import (
-	"crypto/tls"
+	"bytes"
 	"errors"
 	"flag"
+	"fmt"
 	"io"
-	"log"
+	"net"
+	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
+	"sync"
 
 	"gopkg.in/yaml.v3"
 )
@@ -31,19 +35,6 @@ type NatsConfig struct {
 type TLSConfig struct {
 	CertificatePath string `yaml:"certificate_path"`
 	KeyPath         string `yaml:"key_path"`
-}
-
-func (t *TLSConfig) GetTLSConfig() *tls.Config {
-	cert, err := tls.LoadX509KeyPair(t.CertificatePath, t.KeyPath)
-	if err != nil {
-		log.Printf("Error loading TLS certificate: %v", err)
-		return nil
-	}
-
-	return &tls.Config{
-		MinVersion:   tls.VersionTLS12,
-		Certificates: []tls.Certificate{cert},
-	}
 }
 
 type DatabaseConfig struct {
@@ -76,9 +67,118 @@ type AppConfig struct {
 	Nats           NatsConfig     `yaml:"nats"`
 }
 
-var appConfig AppConfig
+const minAdminSecretKeyLength = 16
 
-func loadConfig() {
+var validSSLModes = map[string]bool{
+	"disable":     true,
+	"allow":       true,
+	"prefer":      true,
+	"require":     true,
+	"verify-ca":   true,
+	"verify-full": true,
+}
+
+// Validate checks the configuration and returns every problem found, so the
+// operator can fix them all in one pass.
+func (c AppConfig) Validate() error {
+	var errs []error
+
+	if len(c.AdminSecretKey) < minAdminSecretKeyLength {
+		errs = append(errs, fmt.Errorf("admin_secret_key is required and must be at least %d characters", minAdminSecretKeyLength))
+	}
+
+	listeners := []struct{ name, addr string }{
+		{"proxy.address", c.Proxy.Address},
+		{"manager.address", c.Manager.Address},
+		{"admin.address", c.Admin.Address},
+	}
+	seen := map[string]string{}
+	for _, l := range listeners {
+		if err := validateListenAddress(l.addr); err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", l.name, err))
+			continue
+		}
+		if other, ok := seen[l.addr]; ok {
+			errs = append(errs, fmt.Errorf("%s and %s both use %q", other, l.name, l.addr))
+		}
+		seen[l.addr] = l.name
+	}
+
+	if c.Database.Host == "" {
+		errs = append(errs, errors.New("database.host is required"))
+	}
+	if c.Database.User == "" {
+		errs = append(errs, errors.New("database.user is required"))
+	}
+	if c.Database.Database == "" {
+		errs = append(errs, errors.New("database.database is required"))
+	}
+	if c.Database.Port < 1 || c.Database.Port > 65535 {
+		errs = append(errs, fmt.Errorf("database.port %d is out of range (1-65535)", c.Database.Port))
+	}
+	if !validSSLModes[c.Database.SSLMode] {
+		errs = append(errs, fmt.Errorf("database.ssl_mode %q is not valid (use disable, allow, prefer, require, verify-ca or verify-full)", c.Database.SSLMode))
+	}
+
+	if err := validateNatsURL(c.Nats.URL); err != nil {
+		errs = append(errs, fmt.Errorf("nats.url: %w", err))
+	}
+
+	if (c.TLS.CertificatePath == "") != (c.TLS.KeyPath == "") {
+		errs = append(errs, errors.New("tls.certificate_path and tls.key_path must be set together"))
+	}
+
+	return errors.Join(errs...)
+}
+
+func validateListenAddress(addr string) error {
+	if addr == "" {
+		return errors.New("is empty")
+	}
+	_, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return fmt.Errorf("%q is not a host:port address (use \":5050\" to listen on all interfaces)", addr)
+	}
+	n, err := strconv.Atoi(port)
+	if err != nil || n < 1 || n > 65535 {
+		return fmt.Errorf("port %q is not in range 1-65535", port)
+	}
+	return nil
+}
+
+func validateNatsURL(raw string) error {
+	if raw == "" {
+		return errors.New("is required because clients are dispatched through NATS")
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("%q is not a valid URL: %w", raw, err)
+	}
+	if u.Scheme != "nats" && u.Scheme != "tls" {
+		return fmt.Errorf("%q must start with nats:// or tls://", raw)
+	}
+	if u.Host == "" {
+		return fmt.Errorf("%q has no host", raw)
+	}
+	return nil
+}
+
+var (
+	loadOnce  sync.Once
+	appConfig AppConfig
+	loadErr   error
+)
+
+// GetConfig loads and validates the configuration once. Later calls return the
+// same result, so callers can check the error instead of the process exiting.
+func GetConfig() (AppConfig, error) {
+	loadOnce.Do(func() {
+		appConfig, loadErr = loadConfig()
+	})
+	return appConfig, loadErr
+}
+
+func loadConfig() (AppConfig, error) {
 	var configPath string
 	var adminAddress, managerAddress, proxyAddress, adminSecretKey, tlsCert, tlsKey string
 	var redisHost, redisPassword, rabbitMQHost, rabbitMQUser, rabbitMQPassword, rabbitMQVHost string
@@ -147,40 +247,41 @@ func loadConfig() {
 
 	flag.Parse()
 
-	f, err := os.Open(configPath)
-	if err == nil {
-		defer f.Close()
-		buff, err := io.ReadAll(f)
-		if err == nil {
-			err = yaml.Unmarshal(buff, &defaultConfig)
-			if err != nil {
-				log.Printf("Error parsing configuration file: %v", err)
-			}
-		}
-	}
-
-	appConfig = defaultConfig
+	return loadConfigFrom(configPath, defaultConfig)
 }
 
-func parseEnvInt(key string, defaultValue int) int {
-	if value, ok := os.LookupEnv(key); ok {
-		if intValue, err := strconv.Atoi(value); err == nil {
-			return intValue
-		}
+// loadConfigFrom reads the YAML file over the given defaults, then validates
+// the result.
+func loadConfigFrom(configPath string, defaultConfig AppConfig) (AppConfig, error) {
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return AppConfig{}, fmt.Errorf("cannot read configuration file %q: %w (use -c to point to another file)", configPath, err)
 	}
-	return defaultValue
+
+	// KnownFields makes misspelled or unsupported keys an error instead of
+	// being silently ignored.
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&defaultConfig); err != nil && !errors.Is(err, io.EOF) {
+		return AppConfig{}, fmt.Errorf("invalid configuration file %q: %w", configPath, err)
+	}
+
+	// Relative TLS paths are resolved against the configuration file's
+	// directory, so the server behaves the same regardless of the working dir.
+	baseDir := filepath.Dir(configPath)
+	defaultConfig.TLS.CertificatePath = resolvePath(baseDir, defaultConfig.TLS.CertificatePath)
+	defaultConfig.TLS.KeyPath = resolvePath(baseDir, defaultConfig.TLS.KeyPath)
+
+	if err := defaultConfig.Validate(); err != nil {
+		return AppConfig{}, fmt.Errorf("invalid configuration file %q:\n%w", configPath, err)
+	}
+
+	return defaultConfig, nil
 }
 
-func GetConfig() (AppConfig, error) {
-	if appConfig.AdminSecretKey != "" {
-		return appConfig, nil
+func resolvePath(baseDir, p string) string {
+	if p == "" || filepath.IsAbs(p) {
+		return p
 	}
-
-	loadConfig()
-
-	if appConfig.AdminSecretKey == "" {
-		log.Fatal(errors.New("failed to load configuration"))
-	}
-
-	return appConfig, nil
+	return filepath.Join(baseDir, p)
 }

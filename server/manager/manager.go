@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"crypto/tls"
 	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"strings"
@@ -133,14 +134,13 @@ func (manager *Manager) Listen() {
 		listener, err = net.Listen("tcp", config.Manager.Address)
 	}
 	if err != nil {
-		logger.Default.Error("Error on listen:", err)
-		return
+		log.Fatalf("manager cannot listen on %s: %v (check manager.address in the configuration)", config.Manager.Address, err)
 	}
 
 	l := NewCustomListener(listener, manager)
 	engineErr := manager.engine.RunListener(l)
 	if engineErr != nil {
-		logger.Default.Error("Error running listener:", engineErr)
+		log.Fatalf("manager stopped serving: %v", engineErr)
 	}
 }
 

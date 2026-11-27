@@ -26,10 +26,23 @@ func main() {
 		}()
 	}
 
-	var conf, err = config.GetConfig()
+	conf, err := config.GetConfig()
 	if err != nil {
-		fmt.Println("Error al cargar la configuración", err)
-		return
+		fmt.Fprintln(os.Stderr, "Error de configuración:")
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+
+	tlsConfig, err := conf.TLS.Prepare()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "Error de TLS:", err)
+		os.Exit(1)
+	}
+
+	proxy, err := helper.NewListenerManagerTCP(conf.Proxy.Address, tlsConfig)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "No se puede escuchar el proxy en %s: %v (revisa proxy.address)\n", conf.Proxy.Address, err)
+		os.Exit(1)
 	}
 
 	interrupt := make(chan os.Signal, 1)
@@ -37,9 +50,6 @@ func main() {
 
 	db.Migrate(conf.Database)
 
-	tlsConfig := conf.TLS.GetTLSConfig()
-
-	proxy := helper.NewListenerManagerTCP(conf.Proxy.Address, tlsConfig)
 	manager := manager.SetupManager(tlsConfig)
 	admin := admin.SetupAdmin(conf.Admin.Address)
 

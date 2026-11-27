@@ -13,14 +13,9 @@ import (
 	"github.com/OnnaSoft/lipstick/logger"
 )
 
-type CustomerAccepter struct {
-	conn net.Conn
-	err  error
-}
-
 type CustomListener struct {
 	net.Listener
-	conn    chan CustomerAccepter
+	conn    chan net.Conn
 	closed  bool
 	manager *Manager
 }
@@ -28,20 +23,23 @@ type CustomListener struct {
 func NewCustomListener(l net.Listener, manager *Manager) *CustomListener {
 	cl := &CustomListener{
 		Listener: l,
-		conn:     make(chan CustomerAccepter),
+		conn:     make(chan net.Conn),
 		manager:  manager,
 	}
 	go cl.acceptConnections()
 	return cl
 }
 
+// Accept only ever returns connections that gin should serve. Errors from a
+// single bad client are handled inside handle and never reach this method:
+// http.Server.Serve stops for good on any Accept error, which would take the
+// whole manager down.
 func (cl *CustomListener) Accept() (net.Conn, error) {
-	ca, ok := <-cl.conn
+	conn, ok := <-cl.conn
 	if !ok {
-		logger.Default.Error("Listener closed while accepting connections")
 		return nil, errors.New("listener closed")
 	}
-	return ca.conn, ca.err
+	return conn, nil
 }
 
 func (cl *CustomListener) Close() error {
@@ -58,26 +56,31 @@ func (cl *CustomListener) Close() error {
 	return err
 }
 
+// reject drops a connection that cannot be served. It only affects that one
+// client; the listener keeps accepting.
+func (cl *CustomListener) reject(conn net.Conn, reason string, err error) {
+	logger.Default.Error(reason, err)
+	conn.Close()
+}
+
 func (cl *CustomListener) handle(conn net.Conn) {
 	buffer := make([]byte, 1024)
 	n, err := conn.Read(buffer)
 	if err != nil {
-		logger.Default.Error("Error reading from connection:", err)
-		cl.conn <- CustomerAccepter{nil, err}
+		cl.reject(conn, "Error reading from connection:", err)
 		return
 	}
 
 	requestLine, url, valid := parseRequest(buffer[:n])
 	if !valid {
-		logger.Default.Error("Invalid request received:", requestLine)
-		cl.conn <- CustomerAccepter{nil, errors.New("invalid request")}
+		cl.reject(conn, "Invalid request received:", errors.New(requestLine))
 		return
 	}
 
 	urlsToIgnore := []string{"/", "/health", "/traffic"}
 	if slices.Contains(urlsToIgnore, url) {
 		logger.Default.Debug("Request to ignored URL:", url)
-		cl.conn <- CustomerAccepter{helper.NewConnWithBuffer(conn, buffer[:n]), nil}
+		cl.conn <- helper.NewConnWithBuffer(conn, buffer[:n])
 		return
 	}
 
@@ -85,14 +88,12 @@ func (cl *CustomListener) handle(conn net.Conn) {
 		ticket := url[1:]
 		b, err := helper.ReadUntilHeadersEnd(helper.NewConnWithBuffer(conn, buffer[:n]))
 		if err != nil {
-			logger.Default.Error("Error reading headers from connection:", err)
-			cl.conn <- CustomerAccepter{nil, err}
+			cl.reject(conn, "Error reading headers from connection:", err)
 			return
 		}
 		req, err := http.ReadRequest(bufio.NewReader(bytes.NewReader(b)))
 		if err != nil {
-			logger.Default.Error("Error reading HTTP request:", err)
-			cl.conn <- CustomerAccepter{nil, err}
+			cl.reject(conn, "Error reading HTTP request:", err)
 			return
 		}
 		logger.Default.Debug("Handling tunnel with ticket:", ticket)
@@ -100,9 +101,7 @@ func (cl *CustomListener) handle(conn net.Conn) {
 		return
 	}
 
-	logger.Default.Error("Invalid request with line:", requestLine)
-	conn.Close()
-	cl.conn <- CustomerAccepter{nil, errors.New("invalid request: " + requestLine)}
+	cl.reject(conn, "Invalid request with line:", errors.New(requestLine))
 }
 
 func (cl *CustomListener) acceptConnections() {
@@ -114,7 +113,6 @@ func (cl *CustomListener) acceptConnections() {
 				return
 			}
 			logger.Default.Error("Error accepting connection:", err)
-			cl.conn <- CustomerAccepter{nil, err}
 			continue
 		}
 		logger.Default.Debug("New connection accepted")

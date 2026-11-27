@@ -1,6 +1,8 @@
 package admin
 
 import (
+	"log"
+
 	"github.com/OnnaSoft/lipstick/logger"
 	"github.com/OnnaSoft/lipstick/server/auth"
 	"github.com/gin-gonic/gin"
@@ -27,5 +29,7 @@ func SetupAdmin(addr string) *Admin {
 
 func (a *Admin) Listen() {
 	logger.Default.Info("Listening admin on ", a.addr)
-	a.engine.Run(a.addr)
+	if err := a.engine.Run(a.addr); err != nil {
+		log.Fatalf("admin API cannot listen on %s: %v (check admin.address in the configuration)", a.addr, err)
+	}
 }

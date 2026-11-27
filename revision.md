@@ -24,12 +24,16 @@ Lipstick exposes local ports to the internet through a reverse tunnel. The main 
 - **What:** `upgrade` looks up the domain from the `Host` header and never reads the `Authorization` header or compares it with `ApiKey`. The client sends `APISecret` in that header, and the server ignores it.
 - **Impact:** Anyone who knows a domain name can register as its tunnel client and receive traffic meant for that domain.
 - **Fix:** Read `Authorization` in `upgrade` before hijacking, compare it to `domain.ApiKey` with `crypto/subtle.ConstantTimeCompare`, and reject mismatches.
+- **Status:** Fixed. `upgrade` checks the key before hijacking and returns 401 on a missing or wrong key, and 404 for an unknown domain. A domain with an empty `ApiKey` is always rejected. Covered by `server/manager/routes_test.go`.
+- **Verified:** End to end over TLS, a client with the correct key connected and served traffic. A client with a wrong key was rejected (`Unauthorized tunnel client for domain:localhost`).
 
 ### 2. Predictable ticket values
 - **Where:** `server/manager/ticket.go`, `server/manager/hub.go`
 - **What:** Tickets are a counter starting at 1 for each hub. The manager port accepts `GET /<ticket>` from any client.
 - **Impact:** An attacker can guess a pending visitor's ticket, attach to that connection, and read its traffic, including cookies and tokens.
 - **Fix:** Generate tickets with `crypto/rand` (at least 128 bits). Also bind each ticket to the client connection that was issued it.
+- **Status:** Fixed. Tickets are 128 random bits from `crypto/rand`, encoded as 32 hex characters (`server/manager/ticket.go`). A generation error closes the visitor connection instead of issuing a predictable value. Binding a ticket to one client connection is not done: the ticket is only sent over the authenticated client connection, so an unguessable ticket is the main protection.
+- **Verified:** `server/manager/ticket_test.go` checks 10,000 unique tickets and that the guessed values `1`, `2` and `3` do not claim a pending visitor connection. End to end, after restarting the server on this build, 8 of 8 visitor requests over TLS returned the backend response.
 
 ### 3. Client accepts any TLS certificate
 - **Where:** `client/manager/http.go` (`Connect`, `ConnectByAddress`), `client/handlers/http.go`, `client/handlers/tcp.go`
@@ -73,6 +77,7 @@ Lipstick exposes local ports to the internet through a reverse tunnel. The main 
 - **Where:** `server/manager/listener.go` (`CustomListener.handle`, `Accept`)
 - **What:** Errors from parsing are sent through `cl.conn` and returned from `Accept`. `http.Server.Serve` returns on a non-temporary `Accept` error, so the server stops accepting connections until restarted.
 - **Impact:** Sending garbage to the manager port takes the service down.
+- **Observed:** Reproduced locally. Opening and closing empty TCP connections to port 5051 logged `Error running listener: invalid request`, and the port stopped answering until the server was restarted.
 - **Fix:** Close the bad connection inside `handle` and never pass parse errors to `Accept`.
 
 ### 9. Visitor connections have no timeout or limit
@@ -109,6 +114,8 @@ Lipstick exposes local ports to the internet through a reverse tunnel. The main 
   - With `https`/`wss`, the client calls `tls.Dial("tcp", addr)` with no port and fails with "missing port".
   - With `http`/`ws`, the client ignores `addr` and connects to the host in the URL.
 - **Fix:** Have the server send an explicit public address and port, or have the client always use the configured URL. Remove the dependence on `GetPublicIP`.
+- **Status:** Fixed for the client side. `ConnectByAddress` now dials the host from the server URL for both plain and TLS connections (`client/manager/http.go`). The `addr` argument was removed. `GetPublicIP` is still used by the server and should be removed as part of a proper fix.
+- **Verified:** Visitor requests over `https://localhost:5050` return the backend response through the tunnel (6 of 6 requests with one live client). Before the fix, the same setup timed out.
 
 ### 14. Client panics on bad input
 - **Where:** `client/main.go` (`readMessage`, `establishConnection`)
@@ -127,6 +134,7 @@ Lipstick exposes local ports to the internet through a reverse tunnel. The main 
 - **Where:** `server/manager/hub.go` (`checkConnection`), `client/main.go` (`checkConnection`)
 - **What:** The server has no keepalive or read deadline. A client that disappears without closing its TCP connection stays registered until a write to it fails. Visitors are assigned to that dead socket in the meantime.
 - **Fix:** Add read deadlines, and make the client send pings within that interval.
+- **Observed:** Clients killed with `kill -9` are removed from the hub immediately (the server's read returns EOF). But during testing, one registration stayed in the hub after its client was gone. Visitors whose ticket was sent to that registration timed out, so requests intermittently failed (1 of 3 in one run). The cause is not confirmed yet; the hub does not log which registration is stale.
 
 ### 17. Traffic counters are lost on database errors
 - **Where:** `server/traffic/manager.go` (`saveAllToDatabase`), `server/traffic/database.go` (`updateDatabase`)
@@ -211,6 +219,12 @@ Lipstick exposes local ports to the internet through a reverse tunnel. The main 
 - **Where:** `server/manager/hub.go` (`handleIncomingClientConn2`), `helper/net.go` (`MonitorIdle`, `RemoteConn.used`), `helper/listener.go` (`ListenerConn`, `NewListenerConn`), `server/manager/ticket.go` (overflow check)
 - **What:** Unused functions. `MonitorIdle` also writes `used` without synchronization. The overflow check in `TickerManager.generate` can never be true.
 - **Fix:** Delete the unused code.
+
+### 31. Client treats a rejected upgrade as connected
+- **Where:** `client/main.go` (`startClient`), `client/manager/http.go` (`Connect`)
+- **What:** `Connect` writes the upgrade request and returns without reading the response status. `startClient` then reads the headers, ignores the status, and logs `Connected to server`. With a wrong `APISecret`, the server answers 401 and the client still reports a successful connection, then waits for tickets that never arrive.
+- **Observed:** Reproduced locally with a wrong key: the server logged `Unauthorized tunnel client for domain:localhost`, and the client printed `Connected to server at http://localhost:5051`.
+- **Fix:** Parse the response status line and headers, and treat anything other than `101` or `200` as a failed connection. Retry with backoff and log the status code.
 
 ---
 

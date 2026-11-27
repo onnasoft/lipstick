@@ -122,7 +122,7 @@ func establishConnection(protocol, addr, proxyTarget, uuid string) {
 	}()
 	url := serverURL + "/" + uuid
 
-	connection, err := httpmanager.ConnectByAddress(addr, url, nil)
+	connection, err := httpmanager.ConnectByAddress(url, nil)
 	if err != nil {
 		fmt.Fprintf(connection, helper.BadGatewayResponse)
 		return

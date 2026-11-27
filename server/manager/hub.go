@@ -215,7 +215,13 @@ func (hub *NetworkHub) handleServerRequest(request *request) {
 }
 
 func (hub *NetworkHub) handleIncomingClientConn(remoteConn *helper.RemoteConn) {
-	ticket := hub.tickerManager.generate()
+	ticket, err := hub.tickerManager.generate()
+	if err != nil {
+		logger.Default.Error("Error generating ticket for hub:", hub.HubName, err)
+		_, _ = remoteConn.Write([]byte(helper.BadGatewayResponse))
+		remoteConn.Close()
+		return
+	}
 	publicIP := helper.GetPublicIP()
 	msg := publicIP + ":" + ticket
 	hub.incomingClientConns[ticket] = remoteConn
@@ -241,7 +247,7 @@ func (hub *NetworkHub) handleIncomingClientConn(remoteConn *helper.RemoteConn) {
 		return
 	}
 
-	_, err := ws.Write([]byte(msg + "\n"))
+	_, err = ws.Write([]byte(msg + "\n"))
 	if err != nil {
 		logger.Default.Error("Error writing ticket to ProxyNotificationConn:", err)
 		_, _ = remoteConn.Write([]byte(helper.BadGatewayResponse))
@@ -285,9 +291,14 @@ func (hub *NetworkHub) handleIncomingClientConn2(remoteConn *helper.RemoteConn) 
 	} else {
 		ws = conns[int(rng.Next()%uint32(len(conns)))]
 	}
-	ticket := hub.tickerManager.generate()
+	ticket, err := hub.tickerManager.generate()
+	if err != nil {
+		logger.Default.Error("Error generating ticket for hub:", hub.HubName, err)
+		remoteConn.Close()
+		return
+	}
 	hub.incomingClientConns[ticket] = remoteConn
-	_, err := ws.Write([]byte(ticket + "\n"))
+	_, err = ws.Write([]byte(ticket + "\n"))
 	if err != nil {
 		logger.Default.Error("Error writing ticket to ProxyNotificationConn:", err)
 		_, _ = remoteConn.Write([]byte(helper.BadGatewayResponse))

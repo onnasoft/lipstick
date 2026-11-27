@@ -3,4 +3,6 @@ http
 bin/*
 
 config.yml
+server/certs/
 
+client_key.txt

@@ -1,3 +1,3 @@
-serverUrl: ws://localhost:8081/ws
+serverUrl: wss://localhost:5051/ws
 proxyPass:
   - 127.0.0.1:8082

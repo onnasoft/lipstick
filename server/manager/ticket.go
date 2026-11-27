@@ -1,20 +1,25 @@
 package manager
 
 import (
-	"math"
-	"strconv"
+	"crypto/rand"
+	"encoding/hex"
+	"fmt"
 )
 
-type TickerManager struct {
-	value uint64
-}
+// ticketBytes is the number of random bytes in a ticket: 128 bits, which
+// cannot be guessed by trying values.
+const ticketBytes = 16
 
-func (tm *TickerManager) generate() string {
-	tm.value++
+// TickerManager issues tickets. A ticket is the only link between a visitor's
+// connection and the reverse connection a tunnel client opens, so it must be
+// unpredictable. Sequential values would let anyone who can reach the manager
+// port attach to another visitor's connection.
+type TickerManager struct{}
 
-	if tm.value > math.MaxUint64 {
-		tm.value = 0
+func (tm *TickerManager) generate() (string, error) {
+	b := make([]byte, ticketBytes)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("cannot generate ticket: %w", err)
 	}
-
-	return strconv.FormatUint(tm.value, 10)
+	return hex.EncodeToString(b), nil
 }

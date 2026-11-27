@@ -1,6 +1,7 @@
 package manager
 
 import (
+	"crypto/subtle"
 	"net/http"
 	"strings"
 	"time"
