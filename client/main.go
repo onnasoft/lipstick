@@ -45,6 +45,11 @@ func main() {
 		os.Exit(1)
 	}
 
+	if config.CheckOnly() {
+		fmt.Println("configuración válida")
+		os.Exit(0)
+	}
+
 	interruptChannel := make(chan os.Signal, 1)
 	signal.Notify(interruptChannel, os.Interrupt)
 

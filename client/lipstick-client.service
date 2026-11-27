@@ -1,0 +1,33 @@
+[Unit]
+Description=Lipstick tunnel client
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# A dedicated user created by install.sh. The client never runs as root.
+User=lipstick-client
+Group=lipstick-client
+ExecStart=/usr/bin/lipstick-client -c /etc/lipstick-client/config.yml
+Restart=on-failure
+RestartSec=5
+UMask=0027
+
+# The configuration and the CA file are read-only for the client.
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadOnlyPaths=/etc/lipstick-client
+
+NoNewPrivileges=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+MemoryDenyWriteExecute=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

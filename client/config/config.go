@@ -34,6 +34,12 @@ const (
 	defaultProxyPass = "127.0.0.1:8082"
 )
 
+// checkOnly is set by -check: validate the configuration, then exit.
+var checkOnly bool
+
+// CheckOnly reports whether -check was given.
+func CheckOnly() bool { return checkOnly }
+
 var (
 	loadOnce sync.Once
 	config   *Config
@@ -62,15 +68,18 @@ func loadConfig(args []string) (*Config, error) {
 
 	var configPath, serverURL, proxyPass, apiSecret, caFile string
 	var intranetPort int
+	var check bool
 	fs.StringVar(&configPath, "c", defaultConfigPath, "Path to the configuration file")
 	fs.StringVar(&serverURL, "s", "", "Server manager URL, https://host:port (default "+defaultServerURL+")")
 	fs.StringVar(&proxyPass, "p", "", "Local services to expose, host:port, separated by spaces (default "+defaultProxyPass+")")
 	fs.StringVar(&apiSecret, "k", "", "Domain API key")
 	fs.StringVar(&caFile, "ca", "", "PEM file with the server certificate or its CA")
+	fs.BoolVar(&check, "check", false, "Validate the configuration and exit, without connecting")
 	fs.IntVar(&intranetPort, "intranet-port", 0, "Ask the server to reserve this plain-TCP port for the domain (intranet services only)")
 	if err := fs.Parse(args); err != nil {
 		return nil, err
 	}
+	checkOnly = check
 
 	explicitConfig := false
 	set := map[string]bool{}

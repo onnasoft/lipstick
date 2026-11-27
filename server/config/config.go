@@ -230,6 +230,12 @@ func GetConfig() (AppConfig, error) {
 	return appConfig, loadErr
 }
 
+// CheckOnly is set by -check: validate the configuration, then exit.
+var checkOnly bool
+
+// CheckOnly reports whether -check was given.
+func CheckOnly() bool { return checkOnly }
+
 func loadConfig() (AppConfig, error) {
 	var configPath string
 	var adminAddress, managerAddress, proxyAddress, adminSecretKey, tlsCert, tlsKey string
@@ -278,6 +284,7 @@ func loadConfig() (AppConfig, error) {
 	}
 
 	flag.StringVar(&configPath, "c", "/etc/lipstick/config.yml", "Path to the configuration file")
+	flag.BoolVar(&checkOnly, "check", false, "Validate the configuration and exit, without starting anything")
 	flag.StringVar(&adminAddress, "admin-addr", "", "Address for the admin API (overrides admin.address)")
 	flag.StringVar(&managerAddress, "manager-addr", "", "Address for tunnel client connections (overrides manager.address)")
 	flag.StringVar(&proxyAddress, "proxy-addr", "", "Address for visitors (overrides proxy.address)")

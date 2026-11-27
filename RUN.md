@@ -86,7 +86,7 @@ Para no escribir `-ca` cada vez, puedes poner en un YAML del cliente:
 ca_file: /ruta/absoluta/a/lipstick/server/certs/server.crt
 ```
 
-Úsalo con `-c ruta/al/config.yml`. Copia `client/config.example.yml` como punto de partida. Los flags de la línea de comandos tienen prioridad sobre el archivo.
+Úsalo con `-c ruta/al/config.yml`. Copia `client/config.yml.example` como punto de partida. Los flags de la línea de comandos tienen prioridad sobre el archivo.
 
 Salida esperada:
 

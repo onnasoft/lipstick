@@ -281,7 +281,7 @@ Lipstick exposes local ports to the internet through a reverse tunnel. The main 
 - **Verified:** `sh -n` passes. I did not run the script, because it installs a system service.
 
 ### 24. systemd unit has an invalid directive and runs as root
-- **Where:** `server/lipstick.service`
+- **Where:** `server/lipstick-server.service`
 - **What:** `ReadOnlyDirectories=` is not a valid directive (the correct one is `ReadOnlyPaths=`). The service runs as `User=root`. `PIDFile` points to a file that is never written.
 - **Fix:** Create a dedicated service user, use `ReadOnlyPaths=`, and remove `PIDFile` or write the PID file.
 - **Status (completed):** the unit runs as `User=lipstick`. `ReadOnlyDirectories=` is replaced by `ProtectSystem=strict` and `ReadOnlyPaths=`. `PIDFile` is removed, since nothing wrote it. The configuration is read-only, and only `/etc/lipstick/certs` is writable.

@@ -33,6 +33,11 @@ func main() {
 		os.Exit(1)
 	}
 
+	if config.CheckOnly() {
+		fmt.Println("configuración válida")
+		os.Exit(0)
+	}
+
 	tlsConfig, err := conf.TLS.Prepare()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "Error de TLS:", err)

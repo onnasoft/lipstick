@@ -442,7 +442,7 @@ Al arrancar, el servidor avisa cada vez que reserva un puerto sin TLS.
 
 ### Archivo de configuración
 
-Parte de [`client/config.example.yml`](client/config.example.yml).
+Parte de [`client/config.yml.example`](client/config.yml.example).
 
 | Clave | Descripción |
 |-------|-------------|
@@ -473,13 +473,27 @@ Los flags reemplazan al archivo. Una clave desconocida es un error.
 
 ### Servicio de sistema (systemd)
 
-Desde `server/`, con un `config.yml` listo:
+Cada parte tiene su instalador y su desinstalador. Ambos validan la configuración antes de tocar el sistema: si no es válida, no instalan nada.
+
+**Servidor** (desde `server/`, con un `config.yml` listo):
 
 ```bash
-sudo sh install.sh
+sudo sh install.sh                      # compila, valida, crea el usuario lipstick y habilita lipstick-server.service
+sudo sh uninstall.sh                    # quita el servicio y el binario; conserva config y certificados
+sudo sh uninstall.sh --purge            # además borra /etc/lipstick y el usuario
 ```
 
-El script compila el servidor, crea el usuario `lipstick`, instala la configuración con permisos restrictivos y habilita la unidad `lipstick.service`.
+**Cliente** (desde `client/`, con un `config.yml` que tenga `api_secret`):
+
+```bash
+sudo sh install.sh --ca /ruta/server.crt   # copia la CA a /etc/lipstick-client/ca.pem y la usa
+sudo sh uninstall.sh                       # quita el servicio; conserva la clave del dominio
+sudo sh uninstall.sh --purge               # además borra /etc/lipstick-client y el usuario
+```
+
+Ambos instaladores aceptan `--root DIR` para instalar en un directorio de prueba, sin usuario ni servicio. Úsalo para revisar qué se va a copiar antes de instalar.
+
+Los servicios corren con un usuario propio (`lipstick` y `lipstick-client`), con el sistema de archivos en sólo lectura salvo `/etc/lipstick/certs`.
 
 ### Imagen de contenedor
 
