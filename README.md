@@ -160,9 +160,13 @@ Probados a través del túnel, con un servidor y un cliente en la misma máquina
 | **Redis** | TCP por puerto de intranet | `PING`, valor de 2 MiB con el mismo contenido al volver, y 500 `INCR` en pipeline | |
 | **SSH** | TCP por puerto de intranet | Comando remoto con clave, y `scp` de 5 MiB en ambos sentidos con el mismo SHA-256 | Probado con OpenSSH en Alpine. El puerto de intranet va sin TLS, así que usa esta vía solo dentro de la red de confianza. |
 
+| **Impresora de red** (emulada) | TCP por puerto de intranet | Trabajo de impresión de 300 KB enviado con el cierre de envío habitual, y guardado idéntico byte a byte | Emulada con `examples/devices/printer_emu.py`. Prueba con una impresora real antes de usarla. |
+| **Cámara IP** (emulada) | HTTP por puerto de intranet | Foto fija JPEG, y stream MJPEG con 21 frames en 4 segundos | Emulada con `examples/devices/camera_emu.py`. RTSP no se probó: su video va por UDP, que Lipstick no lleva. |
+| **Controlador Modbus TCP** (emulado) | TCP por puerto de intranet | Lectura de 10 registros, escritura y lectura de vuelta, y respuesta de excepción para una dirección inválida | Emulado con `examples/devices/modbus_emu.py`. Para control en tiempo real no es adecuado (ver [Robótica](#robótica)). |
+
 Probados en el cliente (HTTP y TCP genéricos): descargas de hasta 5 MiB, subidas de hasta 1 MiB con el mismo SHA-256 al llegar, keep-alive con 10 peticiones en una conexión, y 20 clientes en paralelo.
 
-Pendiente de probar: bases de datos SQL por puerto de intranet (PostgreSQL, MySQL) y servicios con gRPC o MQTT. Si los usas, pruébalos antes de confiar en ellos.
+Pendiente de probar: bases de datos SQL por puerto de intranet (PostgreSQL, MySQL), servicios con gRPC o MQTT, IPP/CUPS (HTTP, puerto 631), y dispositivos reales en lugar de emulados. Si los usas, pruébalos antes de confiar en ellos.
 
 #### Spark: qué sí y qué no
 
