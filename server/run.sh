@@ -50,7 +50,7 @@ fi
 
 cat <<EOF
 
-Servidor: https://localhost:5050 (visitantes), https://localhost:5051 (clientes), http://localhost:5052 (admin)
+Servidor: https://localhost:5050 (visitantes), https://localhost:5051 (clientes), https://127.0.0.1:5052 (admin, solo local)
 
 Para conectar un cliente, en otra terminal:
   cd $ROOT

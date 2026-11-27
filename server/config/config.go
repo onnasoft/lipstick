@@ -189,7 +189,8 @@ func loadConfig() (AppConfig, error) {
 
 	defaultConfig := AppConfig{
 		Admin: AdminConfig{
-			Address: ":5052",
+			// Loopback only: the admin API should not be reachable from the network.
+			Address: "127.0.0.1:5052",
 		},
 		Manager: ManagerConfig{
 			Address: ":5051",

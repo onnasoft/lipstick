@@ -51,7 +51,7 @@ func main() {
 	db.Migrate(conf.Database)
 
 	manager := manager.SetupManager(tlsConfig)
-	admin := admin.SetupAdmin(conf.Admin.Address)
+	admin := admin.SetupAdmin(conf.Admin.Address, conf.AdminSecretKey, tlsConfig)
 
 	proxy.OnListen(func() { logger.Default.Info("Listening proxy on ", conf.Proxy.Address) })
 	proxy.OnClose(func() { logger.Default.Info("Proxy closed") })

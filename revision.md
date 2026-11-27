@@ -52,6 +52,13 @@ Lipstick exposes local ports to the internet through a reverse tunnel. The main 
   - `GET /domains` and `GET /domains/:name` return every domain's `apiKey`.
   - There is no rate limiting.
 - **Fix:** Bind to localhost or a private interface, serve over TLS, compare keys in constant time, and stop returning `apiKey` in responses.
+- **Status:** Fixed, except for rate limiting.
+  - The admin API listens on `127.0.0.1:5052` by default, in both the code and `server/config.yml`.
+  - It is served over TLS whenever TLS is configured (`SetupAdmin` takes the TLS config).
+  - The key is compared with `crypto/subtle.ConstantTimeCompare`. An empty key never authorizes.
+  - `GET /domains` and `GET /domains/:name` return a view without `apiKey`. The key can be written but not read back.
+  - Not done: rate limiting on failed admin requests (still open).
+- **Verified:** `server/admin/admin_test.go` covers wrong, empty and prefixed keys, and checks that no list or get response contains the tunnel key. End to end, `https://localhost:5052/domains` returned the domains without the key, a wrong key got 401, and plain HTTP was rejected.
 
 ### 5. Unauthenticated endpoints on the manager port
 - **Where:** `server/manager/routes.go` (`/traffic`, `/health`)

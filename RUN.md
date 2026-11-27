@@ -26,7 +26,7 @@ La primera vez se genera un certificado TLS autofirmado en `server/certs/`. El s
 |--------|-----|
 | 5050 | Proxy: aquí entran los visitantes (`https://`) |
 | 5051 | Manager: aquí se conecta el cliente (`https://`) |
-| 5052 | Admin API (HTTP, solo para crear dominios) |
+| 5052 | Admin API (`https://`, solo en `127.0.0.1`, para crear dominios) |
 
 Si el servidor no arranca, el mensaje indica qué falta: la configuración, un puerto ocupado o una base de datos o NATS sin responder.
 
@@ -39,13 +39,15 @@ ADMIN=$(sed -n 's/^admin_secret_key: "\(.*\)"/\1/p' server/config.yml)
 CLIENT_KEY=$(openssl rand -hex 24)
 echo "$CLIENT_KEY" > client_key.txt   # guarda la clave del cliente
 
-curl -s -X POST localhost:5052/domains \
+curl -sk -X POST https://localhost:5052/domains \
   -H "Authorization: $ADMIN" \
   -H 'Content-Type: application/json' \
   --data "{\"name\":\"localhost\",\"apiKey\":\"$CLIENT_KEY\",\"allowMultipleConnections\":true}"
 ```
 
-Para ver los dominios registrados: `curl -s localhost:5052/domains -H "Authorization: $ADMIN"`.
+Para ver los dominios registrados: `curl -sk https://localhost:5052/domains -H "Authorization: $ADMIN"`. La respuesta no incluye la clave del cliente; la clave solo se puede escribir, no leer.
+
+La admin API solo escucha en `127.0.0.1`, así que no es accesible desde otras máquinas. Usa `-k` porque el certificado es autofirmado.
 
 `client_key.txt` contiene la clave del cliente. Ya está en `.gitignore`, así que no se sube al repo.
 

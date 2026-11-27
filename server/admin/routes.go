@@ -1,11 +1,10 @@
 package admin
 
 import (
-	"log"
+	"crypto/subtle"
 	"net/http"
 
 	"github.com/OnnaSoft/lipstick/server/auth"
-	"github.com/OnnaSoft/lipstick/server/config"
 	"github.com/gin-gonic/gin"
 )
 
@@ -30,19 +29,43 @@ func configureRouter(admin *Admin) {
 	admin.engine = r
 }
 
-func isAuthorized(c *gin.Context) bool {
-	conf, err := config.GetConfig()
-	if err != nil {
-		log.Println("Unable to get config", err)
+// domainView is what the admin API returns for a domain. It leaves out the
+// tunnel API key, which is write-only: it can be set, but never read back.
+type domainView struct {
+	ID                       uint   `json:"id"`
+	Name                     string `json:"name"`
+	AllowMultipleConnections bool   `json:"allowMultipleConnections"`
+}
+
+func toDomainView(d *auth.Domain) domainView {
+	return domainView{
+		ID:                       d.ID,
+		Name:                     d.Name,
+		AllowMultipleConnections: d.AllowMultipleConnections,
+	}
+}
+
+// isAuthorized compares the Authorization header with the admin key in constant
+// time, so the response time does not reveal how many characters matched. An
+// empty key never authorizes anyone.
+func isAuthorized(c *gin.Context, adminKey string) bool {
+	if adminKey == "" {
 		return false
 	}
-	authorization := c.Request.Header.Get("Authorization")
-	return authorization == conf.AdminSecretKey
+	provided := []byte(c.Request.Header.Get("Authorization"))
+	return subtle.ConstantTimeCompare(provided, []byte(adminKey)) == 1
+}
+
+func (r *router) authorized(c *gin.Context) bool {
+	if isAuthorized(c, r.admin.adminKey) {
+		return true
+	}
+	c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+	return false
 }
 
 func (r *router) getDomains(c *gin.Context) {
-	if !isAuthorized(c) {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+	if !r.authorized(c) {
 		return
 	}
 
@@ -52,12 +75,15 @@ func (r *router) getDomains(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, domains)
+	views := make([]domainView, 0, len(domains))
+	for _, d := range domains {
+		views = append(views, toDomainView(d))
+	}
+	c.JSON(http.StatusOK, views)
 }
 
 func (r *router) getDomain(c *gin.Context) {
-	if !isAuthorized(c) {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+	if !r.authorized(c) {
 		return
 	}
 
@@ -68,12 +94,11 @@ func (r *router) getDomain(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, domain)
+	c.JSON(http.StatusOK, toDomainView(domain))
 }
 
 func (r *router) addDomain(c *gin.Context) {
-	if !isAuthorized(c) {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+	if !r.authorized(c) {
 		return
 	}
 
@@ -92,8 +117,7 @@ func (r *router) addDomain(c *gin.Context) {
 }
 
 func (r *router) updateDomain(c *gin.Context) {
-	if !isAuthorized(c) {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+	if !r.authorized(c) {
 		return
 	}
 
@@ -126,8 +150,7 @@ func (r *router) updateDomain(c *gin.Context) {
 }
 
 func (r *router) deleteDomain(c *gin.Context) {
-	if !isAuthorized(c) {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+	if !r.authorized(c) {
 		return
 	}
 
