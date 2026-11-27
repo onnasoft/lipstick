@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/OnnaSoft/lipstick/helper"
 	"github.com/OnnaSoft/lipstick/logger"
@@ -30,7 +31,12 @@ type ProxyNotificationConn struct {
 	conn net.Conn
 }
 
+// notificationWriteTimeout bounds a write to a tunnel client. A client that
+// stopped reading must not block the hub loop, which is the only writer.
+const notificationWriteTimeout = 5 * time.Second
+
 func (p *ProxyNotificationConn) Write(b []byte) (int, error) {
+	p.conn.SetWriteDeadline(time.Now().Add(notificationWriteTimeout))
 	n, err := p.ReadWriter.Write(b)
 	if err != nil {
 		logger.Default.Error("Error writing to ReadWriter:", err)
@@ -45,6 +51,7 @@ func (p *ProxyNotificationConn) Write(b []byte) (int, error) {
 }
 
 func (p *ProxyNotificationConn) Close() error {
+	p.conn.SetWriteDeadline(time.Now().Add(notificationWriteTimeout))
 	_, err := p.conn.Write([]byte("close"))
 	if err != nil {
 		logger.Default.Debug("Error writing 'close' to connection:", err)

@@ -86,10 +86,14 @@ Lipstick exposes local ports to the internet through a reverse tunnel. The main 
   - `.gitignore` now excludes `certs/` and `*.key`, so the files cannot be added again by accident.
   - Nothing references the root `certs/` folder. The server uses `server/certs/`, which is generated at startup and ignored.
   - No other real secrets are tracked. The matches in `README.md` and `server/db/manager.go` are placeholders or code.
-- **Still open, needs your decision:**
-  - The key is still in history, in commit `eeedf10`. Anyone who cloned the repo has it. Removing it from history means rewriting commits and force-pushing to `origin` (`git@github.com:onnasoft/lipstick.git`). I have not done that.
-  - I could not check whether the repository is public (`gh` is not installed). If it is, treat the key as leaked.
-  - Once you confirm, delete `certs/lipstick.key` from disk. Nothing uses it.
+- **Done on GitHub (force push, confirmed by you):**
+  - `main`, `develop`, the Dependabot branch and the tags `v0.0.3-alpha` to `v0.0.5-alpha` were rewritten. A fresh clone shows no commit that touches `certs/` and no copy of the key in any branch or tag.
+  - Commits in these branches were rewritten, so their hashes changed. Local clones still hold the old history and must be updated with `git fetch` and a reset to `origin/main`.
+- **Still open:**
+  - Three pull request refs still hold the old history, with the key: `refs/pull/1/head`, `refs/pull/2/head` and `refs/pull/3/merge`. GitHub manages these refs, and a normal push cannot change them. To remove them, contact GitHub Support and ask them to purge the sensitive data from the repository, or close and recreate the pull requests and ask support to purge the old refs.
+  - Anyone who cloned or forked the repository before the rewrite still has the key. Treat it as leaked.
+  - The rewritten mirror is in the scratch directory, `rewrite.git`. It can be deleted.
+  - Delete `certs/lipstick.key` from disk. Nothing uses it.
   - The running server uses `server/certs/`, not `certs/`, so no current service depends on this key. If it was used somewhere else, that deployment needs a new certificate.
 
 ### 7. TLS fails open to plain text
@@ -98,6 +102,11 @@ Lipstick exposes local ports to the internet through a reverse tunnel. The main 
   - `GetTLSConfig` returns `nil` when the certificate cannot be loaded. It only logs the error, and the server starts without TLS.
   - `NewListenerManagerTCP` returns `nil` on error, and `main.go` then calls methods on that `nil` value.
 - **Fix:** Fail startup when TLS is configured but cannot be loaded. Return and check errors from the listener constructor.
+- **Status:** Fixed.
+  - `TLSConfig.Prepare` returns an error and no configuration when the certificate or key cannot be loaded. It never returns `nil` without an error.
+  - TLS is mandatory, so there is no plain-text branch left. The proxy, manager and admin API call `tls.Listen` only. `NewListenerManagerTCP` refuses a nil configuration.
+  - `server/main.go` exits with code 1 on a TLS error, before opening any port.
+- **Verified:** `server/config/tls_failure_test.go` checks that a broken certificate gives an error and no config. End to end, starting the server with a broken certificate printed `Error de TLS: ... failed to find any PEM data` and exited with code 1. Ports 5150, 5151 and 5152 stayed closed.
 
 ---
 
@@ -109,12 +118,21 @@ Lipstick exposes local ports to the internet through a reverse tunnel. The main 
 - **Impact:** Sending garbage to the manager port takes the service down.
 - **Observed:** Reproduced locally. Opening and closing empty TCP connections to port 5051 logged `Error running listener: invalid request`, and the port stopped answering until the server was restarted.
 - **Fix:** Close the bad connection inside `handle` and never pass parse errors to `Accept`.
+- **Status:** Fixed.
+  - `handle` closes a bad connection and nothing reaches `Accept` except good connections.
+  - Found while testing: the accept loop kept retrying forever once the listener was closed from outside. It now stops on `net.ErrClosed`, and it pauses 100 ms after transient errors.
+- **Verified:** `server/manager/listener_test.go` sends five malformed connections and one empty one, then gets `/health` with 200. Earlier, the same probe from a shell took the manager down.
 
 ### 9. Visitor connections have no timeout or limit
 - **Where:** `server/manager/hub.go` (`incomingClientConns`, `handleIncomingClientConn`)
 - **What:** Pending visitor connections are stored until a client responds. There is no deadline, no cap, and no cleanup.
 - **Impact:** Opening many connections to the proxy port exhausts memory and file descriptors.
 - **Fix:** Add a read or response deadline, a per-hub maximum of pending connections, and cleanup on timeout.
+- **Status:** Fixed.
+  - Each pending visitor expires after `pendingVisitorTimeout` (30 s). The hub checks every 5 s, answers 502 and removes the entry.
+  - Each hub holds at most `maxPendingVisitors` (1024) pending visitors. Above that, new visitors get 502.
+  - Writing the 502 happens in its own goroutine, with a 5 s deadline, so a slow or dead visitor cannot block the hub loop.
+- **Verified:** `server/manager/hub_test.go` covers expiry, a fresh visitor being kept, and the cap.
 
 ### 10. Visitors can hang without a response
 - **Where:** `server/manager/hub.go` (`handleIncomingClientConn`, NATS callback)
@@ -123,11 +141,19 @@ Lipstick exposes local ports to the internet through a reverse tunnel. The main 
   - If the hub has no subscription, the message is dropped and the visitor is never answered.
   - If `getProxyNotificationConn` returns `nil` in the NATS callback, the visitor is also left waiting.
 - **Fix:** Answer with 502 in each of these paths, and remove the pending entry.
+- **Status:** Fixed, with one design change.
+  - A visitor that arrives with no tunnel client connected now gets 502 immediately. The ticket is no longer published to NATS. A reverse connection must reach the instance that holds the visitor, so publishing to another instance could never be answered.
+  - A NATS ticket that no client can take answers its visitor with 502.
+  - Visitors that are still waiting when the last client disconnects get 502.
+  - The NATS subscription still exists, but it now only delivers tickets published by other instances. Nothing in this codebase publishes them anymore. If you want to remove NATS from the visitor path entirely, that is a separate decision.
+- **Verified:** End to end, a visitor with no client got 502 in 2.5 ms. `hub_test.go` covers the no-client, NATS and expiry paths.
 
 ### 11. NATS subscription manager returns `(nil, nil)` on failure
 - **Where:** `server/subscriptions/subscriptions.go` (`GetSubscriptionManager`)
 - **What:** Inside the `sync.Once` closure, `err` is shadowed (`conf, err := ...`), so the outer `err` is always nil. If NATS is down, the function returns `(nil, nil)`. Callers then dereference the nil manager and panic. `sync.Once` also prevents any retry.
 - **Fix:** Remove the shadowing, return the connection error, and retry on later calls instead of using `Once`.
+- **Status:** Fixed. `GetSubscriptionManager` returns the NATS error, and it does not cache a failed connection, so the next call tries again. The shared connection is protected by a mutex.
+- **Verified:** `server/subscriptions/subscriptions_test.go` checks that an unreachable NATS gives an error with no manager, on two calls in a row.
 
 ### 12. Data races that can crash the process
 - **Where:** `server/manager/hub.go`
@@ -135,6 +161,11 @@ Lipstick exposes local ports to the internet through a reverse tunnel. The main 
   - `hub.ProxyNotificationConns` is read by `getProxyNotificationConn` in the NATS callback goroutine while the hub loop modifies it. This can cause `fatal error: concurrent map iteration and map write`, which cannot be recovered.
   - The hub loop and the NATS callback both write to the same `ProxyNotificationConn` (`bufio.Writer`) without a lock, so ticket lines can be interleaved.
 - **Fix:** Route all map access and writes through the hub loop, or protect them with a mutex. Serialize writes per connection.
+- **Status:** Fixed.
+  - The hub loop is the only goroutine that reads or writes `ProxyNotificationConns`, `incomingClientConns`, and the writes to tunnel clients. The NATS callback only queues the message on `natsMessages`.
+  - The unregister path no longer writes "close" from a separate goroutine. It closes from the loop.
+  - Every write to a tunnel client has a 5 s deadline, so a client that stopped reading cannot block the loop.
+- **Verified:** `go test -race ./server/...` passes. The tests do not exercise concurrent NATS traffic, so the race fix is checked by design, not by a reproduction.
 
 ### 13. Reverse connection over TLS does not work as written
 - **Where:** `server/manager/hub.go` (`handleIncomingClientConn`), `helper/net.go` (`GetPublicIP`), `client/manager/http.go` (`ConnectByAddress`)

@@ -5,8 +5,7 @@ import (
 	"net"
 	"strings"
 	"testing"
-
-	"github.com/OnnaSoft/lipstick/helper"
+	"time"
 )
 
 func TestTicketsAreRandomHex(t *testing.T) {
@@ -40,7 +39,7 @@ func TestGuessedSequentialTicketIsRejected(t *testing.T) {
 	}
 	visitorSide, visitorPeer := net.Pipe()
 	defer visitorPeer.Close()
-	hub.incomingClientConns[realTicket] = &helper.RemoteConn{Conn: visitorSide, Domain: "localhost"}
+	hub.incomingClientConns[realTicket] = &pendingVisitor{conn: visitorSide, since: time.Now()}
 
 	// An attacker tries the old sequential values. net.Pipe is unbuffered, so
 	// drain the attacker side in the background or the rejection write blocks.

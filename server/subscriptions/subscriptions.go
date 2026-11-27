@@ -9,26 +9,39 @@ import (
 	"github.com/nats-io/nats.go"
 )
 
-var managerOnce sync.Once
+var (
+	managerMu sync.Mutex
+	manager   *SubscriptionManager
+)
 
 type SubscriptionManager struct {
 	conn *nats.Conn
 }
 
-var DefaultSubscriptionManager *SubscriptionManager
-
+// GetSubscriptionManager returns the shared NATS connection. A failed connection
+// is returned as an error and retried on the next call. It is never cached as
+// nil, which would make callers dereference a missing manager.
 func GetSubscriptionManager() (*SubscriptionManager, error) {
-	var err error
-	managerOnce.Do(func() {
-		conf, err := config.GetConfig()
-		if err != nil {
-			logger.Default.Error("Error getting config:", err)
-			return
-		}
-		DefaultSubscriptionManager, err = NewSubscriptionManager(conf.Nats.URL)
-	})
+	conf, err := config.GetConfig()
+	if err != nil {
+		return nil, fmt.Errorf("cannot read configuration: %w", err)
+	}
+	return sharedManager(conf.Nats.URL)
+}
 
-	return DefaultSubscriptionManager, err
+func sharedManager(url string) (*SubscriptionManager, error) {
+	managerMu.Lock()
+	defer managerMu.Unlock()
+
+	if manager != nil {
+		return manager, nil
+	}
+	m, err := NewSubscriptionManager(url)
+	if err != nil {
+		return nil, err
+	}
+	manager = m
+	return m, nil
 }
 
 func NewSubscriptionManager(url string) (*SubscriptionManager, error) {

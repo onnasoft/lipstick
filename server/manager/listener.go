@@ -8,10 +8,15 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/OnnaSoft/lipstick/helper"
 	"github.com/OnnaSoft/lipstick/logger"
 )
+
+// acceptRetryDelay pauses after a transient Accept error, such as running out
+// of file descriptors, so the loop does not spin.
+const acceptRetryDelay = 100 * time.Millisecond
 
 type CustomListener struct {
 	net.Listener
@@ -108,11 +113,14 @@ func (cl *CustomListener) acceptConnections() {
 	for {
 		conn, err := cl.Listener.Accept()
 		if err != nil {
-			if cl.closed {
+			// The underlying listener can be closed without going through
+			// CustomListener.Close. Stop then, instead of retrying forever.
+			if cl.closed || errors.Is(err, net.ErrClosed) {
 				logger.Default.Debug("Stopped accepting connections, listener is closed")
 				return
 			}
 			logger.Default.Error("Error accepting connection:", err)
+			time.Sleep(acceptRetryDelay)
 			continue
 		}
 		logger.Default.Debug("New connection accepted")

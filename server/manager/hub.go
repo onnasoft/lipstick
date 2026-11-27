@@ -1,8 +1,8 @@
 package manager
 
 import (
-	"fmt"
 	"net"
+	"strings"
 	"sync"
 	"time"
 
@@ -13,16 +13,45 @@ import (
 	"github.com/nats-io/nats.go"
 )
 
+const (
+	// pendingVisitorTimeout is how long a visitor waits for its tunnel client to
+	// open the reverse connection. After that the visitor gets 502.
+	pendingVisitorTimeout = 30 * time.Second
+
+	// maxPendingVisitors caps the visitors waiting on one hub, so a flood of
+	// requests cannot exhaust memory or file descriptors.
+	maxPendingVisitors = 1024
+
+	// expireInterval is how often the hub checks for timed-out visitors.
+	expireInterval = 5 * time.Second
+
+	// natsQueueSize bounds the messages waiting for the hub loop.
+	natsQueueSize = 64
+
+	// rejectWriteTimeout bounds how long a 502 may block on a dead socket.
+	rejectWriteTimeout = 5 * time.Second
+)
+
 var rng = helper.NewXORShift(uint32(time.Now().UnixNano()))
 
+// pendingVisitor is a visitor connection waiting for its tunnel client.
+type pendingVisitor struct {
+	conn  net.Conn
+	since time.Time
+}
+
+// NetworkHub owns the state of one domain. Its maps are read and written only
+// by the goroutine running listen(). Other goroutines send it messages over
+// channels, so no locks are needed around the maps.
 type NetworkHub struct {
 	HubName                         string
-	incomingClientConns             map[string]net.Conn
+	incomingClientConns             map[string]*pendingVisitor
 	ProxyNotificationConns          map[*ProxyNotificationConn]bool
 	registerProxyNotificationConn   chan *ProxyNotificationConn
 	unregisterProxyNotificationConn chan *ProxyNotificationConn
 	incomingClientConn              chan *helper.RemoteConn
 	serverRequests                  chan *request
+	natsMessages                    chan string
 	trafficManager                  *traffic.TrafficManager
 	dataUsageAccumulator            int64
 	threshold                       int64
@@ -36,12 +65,13 @@ type NetworkHub struct {
 func NewNetworkHub(name string, trafficManager *traffic.TrafficManager, threshold int64) *NetworkHub {
 	return &NetworkHub{
 		HubName:                         name,
-		incomingClientConns:             make(map[string]net.Conn),
+		incomingClientConns:             make(map[string]*pendingVisitor),
 		ProxyNotificationConns:          make(map[*ProxyNotificationConn]bool),
 		registerProxyNotificationConn:   make(chan *ProxyNotificationConn),
 		unregisterProxyNotificationConn: make(chan *ProxyNotificationConn),
 		incomingClientConn:              make(chan *helper.RemoteConn),
 		serverRequests:                  make(chan *request),
+		natsMessages:                    make(chan string, natsQueueSize),
 		trafficManager:                  trafficManager,
 		dataUsageAccumulator:            0,
 		threshold:                       threshold,
@@ -112,6 +142,9 @@ func (hub *NetworkHub) addDataUsage(bytes int64) {
 
 func (hub *NetworkHub) listen() {
 	shutdownComplete := make(chan struct{})
+	expire := time.NewTicker(expireInterval)
+	defer expire.Stop()
+
 	for {
 		select {
 		case conn := <-hub.registerProxyNotificationConn:
@@ -122,6 +155,10 @@ func (hub *NetworkHub) listen() {
 			hub.handleServerRequest(request)
 		case remoteConn := <-hub.incomingClientConn:
 			hub.handleIncomingClientConn(remoteConn)
+		case msg := <-hub.natsMessages:
+			hub.handleNatsMessage(msg)
+		case now := <-expire.C:
+			hub.expirePendingVisitors(now)
 		case <-hub.shutdownSignal:
 			hub.handleShutdown(shutdownComplete)
 			return
@@ -139,33 +176,25 @@ func (hub *NetworkHub) handleRegisterProxyNotificationConn(conn *ProxyNotificati
 	if hub.subscription == nil {
 		mgr, err := subscriptions.GetSubscriptionManager()
 		if err != nil {
-			logger.Default.Error("Error getting SubscriptionManager: " + err.Error())
+			logger.Default.Error("Error getting SubscriptionManager:", err)
 			conn.Close()
 			return
 		}
 
+		// The callback runs on the NATS goroutine. It must not touch the hub's
+		// maps, so it only queues the message for the hub loop.
 		sub, err := mgr.Subscribe(hub.HubName, func(message *nats.Msg) {
-			msg := string(message.Data)
-
-			ws := hub.getProxyNotificationConn()
-			if ws == nil {
-				logger.Default.Error("No ProxyNotificationConns available for hub: ", hub.HubName)
-				return
+			select {
+			case hub.natsMessages <- string(message.Data):
+			default:
+				logger.Default.Error("NATS message dropped, hub queue is full:", hub.HubName)
 			}
-
-			_, err := ws.Write([]byte(msg + "\n"))
-			if err != nil {
-				logger.Default.Error("Error writing ticket to ProxyNotificationConn: ", err)
-			}
-			logger.Default.Debug("Ticket sent to ProxyNotificationConn for hub: ", hub.HubName, "Ticket: ", msg)
 		})
-
 		if err != nil {
 			logger.Default.Error("Error subscribing to NATS:", err)
 			conn.Close()
 			return
 		}
-
 		hub.subscription = sub
 	}
 
@@ -175,88 +204,114 @@ func (hub *NetworkHub) handleRegisterProxyNotificationConn(conn *ProxyNotificati
 }
 
 func (hub *NetworkHub) handleUnregisterProxyNotificationConn(ws *ProxyNotificationConn) {
-	go func() {
-		ws.Write([]byte("close"))
-		ws.Close()
-	}()
 	if _, exists := hub.ProxyNotificationConns[ws]; exists {
 		delete(hub.ProxyNotificationConns, ws)
 		logger.Default.Debug("ProxyNotificationConn unregistered for hub:", hub.HubName)
 	}
-	for ticket, conn := range hub.incomingClientConns {
-		delete(hub.incomingClientConns, ticket)
-		fmt.Fprintf(conn, helper.BadGatewayResponse)
-		conn.Close()
-		logger.Default.Debug("Incoming client connection unregistered for hub:", hub.HubName)
-	}
+	ws.Close()
 
-	if len(hub.ProxyNotificationConns) == 0 && hub.subscription != nil {
-		hub.subscription.Unsubscribe()
-		hub.subscription = nil
-		logger.Default.Debug("Unsubscribed from NATS for hub:", hub.HubName)
+	// Visitors waiting for a ticket can only be served by a client of this hub.
+	// When the last client is gone, nothing will serve them, so they get 502 now.
+	// While other clients remain, they keep waiting until they expire.
+	if len(hub.ProxyNotificationConns) == 0 {
+		for ticket, visitor := range hub.incomingClientConns {
+			delete(hub.incomingClientConns, ticket)
+			rejectVisitor(visitor.conn)
+		}
+		if hub.subscription != nil {
+			hub.subscription.Unsubscribe()
+			hub.subscription = nil
+			logger.Default.Debug("Unsubscribed from NATS for hub:", hub.HubName)
+		}
 	}
 }
 
 func (hub *NetworkHub) handleServerRequest(request *request) {
-	destination := request.conn
-	pipe, exists := hub.incomingClientConns[request.ticket]
+	pending, exists := hub.incomingClientConns[request.ticket]
 	if !exists {
-		for key := range hub.incomingClientConns {
-			fmt.Println(key)
-		}
-		logger.Default.Error("Invalid ticket for hub:", hub.HubName, "Ticket:", request.ticket)
-		destination.Write([]byte(helper.BadGatewayResponse))
-		destination.Close()
+		logger.Default.Error("Invalid ticket for hub:", hub.HubName)
+		rejectVisitor(request.conn)
 		return
 	}
 	delete(hub.incomingClientConns, request.ticket)
-	logger.Default.Debug("Server request handled for ticket:", request.ticket, "Hub:", hub.HubName)
-	go hub.syncConnections(pipe, destination)
+	logger.Default.Debug("Server request handled for hub:", hub.HubName)
+	go hub.syncConnections(pending.conn, request.conn)
 }
 
-func (hub *NetworkHub) handleIncomingClientConn(remoteConn *helper.RemoteConn) {
+func (hub *NetworkHub) handleIncomingClientConn(visitor *helper.RemoteConn) {
+	if len(hub.ProxyNotificationConns) == 0 {
+		logger.Default.Error("No tunnel client connected for hub:", hub.HubName)
+		rejectVisitor(visitor)
+		return
+	}
+
+	if len(hub.incomingClientConns) >= maxPendingVisitors {
+		logger.Default.Error("Too many pending visitors for hub:", hub.HubName)
+		rejectVisitor(visitor)
+		return
+	}
+
 	ticket, err := hub.tickerManager.generate()
 	if err != nil {
 		logger.Default.Error("Error generating ticket for hub:", hub.HubName, err)
-		_, _ = remoteConn.Write([]byte(helper.BadGatewayResponse))
-		remoteConn.Close()
-		return
-	}
-	publicIP := helper.GetPublicIP()
-	msg := publicIP + ":" + ticket
-	hub.incomingClientConns[ticket] = remoteConn
-
-	if len(hub.ProxyNotificationConns) == 0 {
-		mng, err := subscriptions.GetSubscriptionManager()
-		if err != nil {
-			logger.Default.Error("Error getting SubscriptionManager:", err)
-			_, _ = remoteConn.Write([]byte(helper.BadGatewayResponse))
-			remoteConn.Close()
-			return
-		}
-
-		mng.Publish(hub.HubName, []byte(msg))
+		rejectVisitor(visitor)
 		return
 	}
 
 	ws := hub.getProxyNotificationConn()
-	if ws == nil {
-		logger.Default.Error("No ProxyNotificationConns available for hub:", hub.HubName)
-		_, _ = remoteConn.Write([]byte(helper.BadGatewayResponse))
-		remoteConn.Close()
+	msg := helper.GetPublicIP() + ":" + ticket
+	if _, err := ws.Write([]byte(msg + "\n")); err != nil {
+		logger.Default.Error("Error writing ticket to ProxyNotificationConn:", err)
+		rejectVisitor(visitor)
 		return
 	}
 
-	_, err = ws.Write([]byte(msg + "\n"))
-	if err != nil {
-		logger.Default.Error("Error writing ticket to ProxyNotificationConn:", err)
-		_, _ = remoteConn.Write([]byte(helper.BadGatewayResponse))
-		remoteConn.Close()
-		delete(hub.incomingClientConns, ticket)
-	}
-	logger.Default.Debug("Ticket sent to ProxyNotificationConn for hub:", hub.HubName, "Ticket:", ticket)
+	hub.incomingClientConns[ticket] = &pendingVisitor{conn: visitor, since: time.Now()}
+	logger.Default.Debug("Ticket sent to ProxyNotificationConn for hub:", hub.HubName)
 }
 
+// handleNatsMessage forwards a ticket that arrived over NATS to a tunnel client.
+// If no client can take it, the visitor it belongs to gets 502.
+func (hub *NetworkHub) handleNatsMessage(msg string) {
+	ws := hub.getProxyNotificationConn()
+	if ws == nil {
+		logger.Default.Error("No ProxyNotificationConns available for hub:", hub.HubName)
+		hub.rejectPendingTicket(msg[strings.LastIndex(msg, ":")+1:])
+		return
+	}
+
+	if _, err := ws.Write([]byte(msg + "\n")); err != nil {
+		logger.Default.Error("Error writing NATS ticket to ProxyNotificationConn:", err)
+		hub.rejectPendingTicket(msg[strings.LastIndex(msg, ":")+1:])
+	}
+}
+
+// rejectPendingTicket answers the visitor waiting on ticket with 502, if there
+// is one.
+func (hub *NetworkHub) rejectPendingTicket(ticket string) {
+	visitor, ok := hub.incomingClientConns[ticket]
+	if !ok {
+		return
+	}
+	delete(hub.incomingClientConns, ticket)
+	rejectVisitor(visitor.conn)
+}
+
+// expirePendingVisitors answers with 502 every visitor that has waited longer
+// than pendingVisitorTimeout.
+func (hub *NetworkHub) expirePendingVisitors(now time.Time) {
+	for ticket, visitor := range hub.incomingClientConns {
+		if now.Sub(visitor.since) < pendingVisitorTimeout {
+			continue
+		}
+		delete(hub.incomingClientConns, ticket)
+		logger.Default.Error("Visitor timed out waiting for a tunnel client, hub:", hub.HubName)
+		rejectVisitor(visitor.conn)
+	}
+}
+
+// getProxyNotificationConn picks a client at random. It is called only from the
+// hub loop.
 func (hub *NetworkHub) getProxyNotificationConn() *ProxyNotificationConn {
 	conns := make([]*ProxyNotificationConn, 0, len(hub.ProxyNotificationConns))
 	for key := range hub.ProxyNotificationConns {
@@ -274,38 +329,15 @@ func (hub *NetworkHub) getProxyNotificationConn() *ProxyNotificationConn {
 	return conns[int(rng.Next()%uint32(len(conns)))]
 }
 
-func (hub *NetworkHub) handleIncomingClientConn2(remoteConn *helper.RemoteConn) {
-	if len(hub.ProxyNotificationConns) == 0 {
-		logger.Default.Error("No ProxyNotificationConns available for hub:", hub.HubName)
-		_, _ = remoteConn.Write([]byte(helper.BadGatewayResponse))
-		remoteConn.Close()
-		return
-	}
-	conns := make([]*ProxyNotificationConn, 0, len(hub.ProxyNotificationConns))
-	for key := range hub.ProxyNotificationConns {
-		conns = append(conns, key)
-	}
-	var ws *ProxyNotificationConn
-	if len(conns) == 1 {
-		ws = conns[0]
-	} else {
-		ws = conns[int(rng.Next()%uint32(len(conns)))]
-	}
-	ticket, err := hub.tickerManager.generate()
-	if err != nil {
-		logger.Default.Error("Error generating ticket for hub:", hub.HubName, err)
-		remoteConn.Close()
-		return
-	}
-	hub.incomingClientConns[ticket] = remoteConn
-	_, err = ws.Write([]byte(ticket + "\n"))
-	if err != nil {
-		logger.Default.Error("Error writing ticket to ProxyNotificationConn:", err)
-		_, _ = remoteConn.Write([]byte(helper.BadGatewayResponse))
-		remoteConn.Close()
-		delete(hub.incomingClientConns, ticket)
-	}
-	logger.Default.Debug("Ticket sent to ProxyNotificationConn for hub:", hub.HubName, "Ticket:", ticket)
+// rejectVisitor answers a visitor with 502 and closes its connection. It runs in
+// its own goroutine, so a slow or dead visitor cannot block the hub loop. The
+// connection is already removed from the hub's maps when this is called.
+func rejectVisitor(conn net.Conn) {
+	go func() {
+		conn.SetWriteDeadline(time.Now().Add(rejectWriteTimeout))
+		_, _ = conn.Write([]byte(helper.BadGatewayResponse))
+		conn.Close()
+	}()
 }
 
 func (hub *NetworkHub) handleShutdown(shutdownComplete chan struct{}) {
