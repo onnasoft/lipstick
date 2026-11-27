@@ -71,6 +71,21 @@ type AppConfig struct {
 	// Clients ask for a port; the server decides whether it may open it, and
 	// from which networks. Absent means disabled.
 	IntranetPorts *IntranetPortsConfig `yaml:"intranet_ports"`
+
+	// Cluster lets several servers share domains. Absent means a single server.
+	// Every server of the cluster uses the same database and NATS, and the same
+	// certificate (or certificates from the CA in ca_file).
+	Cluster *ClusterConfig `yaml:"cluster"`
+}
+
+// ClusterConfig describes this server to the others.
+type ClusterConfig struct {
+	// AdvertiseAddress is the host:port other servers use to reach this server's
+	// manager port, for example "server-a.internal:5051".
+	AdvertiseAddress string `yaml:"advertise_address"`
+	// CAFile is the CA that signs the other servers' certificates. Empty means
+	// this server's own certificate is the trusted one.
+	CAFile string `yaml:"ca_file"`
 }
 
 // IntranetPortsConfig is the policy for intranet ports. The server owns it: a
@@ -165,6 +180,17 @@ func (c AppConfig) Validate() error {
 
 	if err := validateNatsURL(c.Nats.URL); err != nil {
 		errs = append(errs, fmt.Errorf("nats.url: %w", err))
+	}
+
+	if c.Cluster != nil {
+		if c.Cluster.AdvertiseAddress == "" {
+			errs = append(errs, errors.New("cluster.advertise_address is required when cluster is set"))
+		} else if _, port, err := net.SplitHostPort(c.Cluster.AdvertiseAddress); err != nil || port == "" {
+			errs = append(errs, fmt.Errorf("cluster.advertise_address %q must be host:port", c.Cluster.AdvertiseAddress))
+		}
+		if err := validateNatsURL(c.Nats.URL); err != nil {
+			errs = append(errs, errors.New("cluster needs nats.url: servers find each other through NATS"))
+		}
 	}
 
 	if c.IntranetPorts != nil {

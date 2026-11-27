@@ -1,0 +1,185 @@
+package manager
+
+import (
+	"io"
+	"net"
+	"net/http"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/OnnaSoft/lipstick/helper"
+	"github.com/OnnaSoft/lipstick/logger"
+	"github.com/hashicorp/yamux"
+)
+
+// Mux connections. The client opens a few TLS connections and runs a yamux session
+// on each. Every visitor becomes one stream inside a session, so no new TLS
+// connection is needed per visitor. A session is authenticated once, when it is
+// opened, with a proof over a one-time nonce. The server opens streams and the
+// client accepts them, so only the client that opened a session can be served on it.
+const (
+	muxMaxSessionsPerHub = 64
+	muxWriteTimeout      = 5 * time.Second
+	maxNonceEntries      = 100000
+)
+
+// muxSession is one yamux session and the connection that carries it.
+type muxSession struct {
+	session *yamux.Session
+	carrier net.Conn
+}
+
+func muxConfig() *yamux.Config {
+	cfg := yamux.DefaultConfig()
+	cfg.EnableKeepAlive = true
+	cfg.KeepAliveInterval = 15 * time.Second
+	cfg.ConnectionWriteTimeout = 10 * time.Second
+	cfg.LogOutput = io.Discard
+	return cfg
+}
+
+// nonceCache remembers the mux nonces seen inside the time window, so a captured
+// request cannot be replayed. Its zero value is ready to use.
+type nonceCache struct {
+	mu   sync.Mutex
+	seen map[string]time.Time
+}
+
+// take records nonce and reports whether it was new. A nonce seen before is refused.
+func (c *nonceCache) take(nonce string, now time.Time) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.seen == nil {
+		c.seen = make(map[string]time.Time)
+	}
+	if len(c.seen) >= maxNonceEntries {
+		for n, t := range c.seen {
+			if now.Sub(t) > helper.MuxNonceWindow {
+				delete(c.seen, n)
+			}
+		}
+	}
+	if _, used := c.seen[nonce]; used {
+		return false
+	}
+	c.seen[nonce] = now
+	return true
+}
+
+// handleMux authenticates a mux connection and keeps it as a session of the domain's hub.
+// On any failure the connection is closed without sending bytes.
+func (manager *Manager) handleMux(conn net.Conn, req *http.Request) {
+	domainName := strings.Split(req.Host, ":")[0]
+	nonce := req.Header.Get(helper.MuxNonceHeader)
+	now := time.Now()
+
+	if _, ok := helper.MuxNonceTime(nonce, now); !ok {
+		logger.Default.Error("Mux connection with an expired or malformed nonce for domain:", domainName)
+		conn.Close()
+		return
+	}
+	record, err := manager.authManager.GetDomain(domainName)
+	if err != nil || !helper.VerifyMuxProof(record.ApiKey, nonce, req.Header.Get(helper.ProofHeader)) {
+		logger.Default.Error("Mux connection without a valid proof for domain:", domainName)
+		conn.Close()
+		return
+	}
+	if !manager.nonces.take(nonce, now) {
+		logger.Default.Error("Mux connection with a replayed nonce for domain:", domainName)
+		conn.Close()
+		return
+	}
+
+	hub, ok := manager.GetHub(domainName)
+	if !ok {
+		conn.Close()
+		return
+	}
+	session, err := yamux.Server(conn, muxConfig())
+	if err != nil {
+		conn.Close()
+		return
+	}
+	ms := &muxSession{session: session, carrier: conn}
+	if !hub.addMux(ms) {
+		session.Close()
+		return
+	}
+	// Forget the session as soon as it closes, so no visitor is sent to it.
+	go func() {
+		<-session.CloseChan()
+		hub.removeMux(ms)
+	}()
+}
+
+// addMux adds a session to the hub. It refuses when the hub has stopped or is full.
+func (hub *NetworkHub) addMux(ms *muxSession) bool {
+	select {
+	case <-hub.done:
+		return false
+	default:
+	}
+	hub.muxMu.Lock()
+	defer hub.muxMu.Unlock()
+	if len(hub.muxes) >= muxMaxSessionsPerHub {
+		return false
+	}
+	hub.muxes = append(hub.muxes, ms)
+	return true
+}
+
+func (hub *NetworkHub) removeMux(ms *muxSession) {
+	hub.muxMu.Lock()
+	defer hub.muxMu.Unlock()
+	for i, m := range hub.muxes {
+		if m == ms {
+			hub.muxes = append(hub.muxes[:i], hub.muxes[i+1:]...)
+			return
+		}
+	}
+}
+
+// takeMux opens a stream for the visitor on a live session, and relays the visitor
+// over it. The first line gives the client the server port the visitor came in
+// on. It returns false when no session can take the visitor.
+func (hub *NetworkHub) takeMux(visitor *helper.RemoteConn, port int) bool {
+	hub.muxMu.Lock()
+	sessions := append([]*muxSession(nil), hub.muxes...)
+	hub.muxNext++
+	start := hub.muxNext
+	hub.muxMu.Unlock()
+
+	for i := range sessions {
+		ms := sessions[(start+i)%len(sessions)]
+		if ms.session.IsClosed() {
+			continue
+		}
+		stream, err := ms.session.OpenStream()
+		if err != nil {
+			continue
+		}
+		stream.SetWriteDeadline(time.Now().Add(muxWriteTimeout))
+		_, err = stream.Write([]byte("LIPSTICK-PORT " + strconv.Itoa(port) + "\n"))
+		stream.SetWriteDeadline(time.Time{})
+		if err != nil {
+			stream.Close()
+			continue
+		}
+		go hub.syncConnections(visitor, helper.NewStreamConn(stream, ms.carrier))
+		return true
+	}
+	return false
+}
+
+// closeMuxes closes every session. Their visitors see the connection end.
+func (hub *NetworkHub) closeMuxes() {
+	hub.muxMu.Lock()
+	sessions := hub.muxes
+	hub.muxes = nil
+	hub.muxMu.Unlock()
+	for _, ms := range sessions {
+		ms.session.Close()
+	}
+}

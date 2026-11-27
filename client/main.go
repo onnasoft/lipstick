@@ -75,6 +75,7 @@ const (
 // was established resets the wait.
 func startClient(proxyTarget string) {
 	fmt.Println("Connecting to", serverURL)
+	startMux(proxyTarget)
 	headers := http.Header{}
 	headers.Set("authorization", configuration.APISecret)
 	if configuration.IntranetPort > 0 {
@@ -94,6 +95,7 @@ func startClient(proxyTarget string) {
 
 		fmt.Println("Connected to server at", serverURL)
 		ctrl := &controlWriter{conn: conn}
+		setReport(ctrl.reportRequest)
 		go checkConnection(ctrl)
 		handleTickets(conn, proxyTarget, ctrl.reportRequest)
 		fmt.Println("Disconnected from server at", serverURL)
@@ -208,7 +210,10 @@ func establishConnection(protocol, proxyTarget, ticket string, port int, report 
 	}()
 	url := serverURL + "/" + ticket
 
-	connection, err := httpmanager.ConnectByAddress(url, nil)
+	// The proof shows the server this client knows the key, without sending it.
+	headers := http.Header{}
+	headers.Set(helper.ProofHeader, helper.TunnelProof(configuration.APISecret, ticket))
+	connection, err := httpmanager.ConnectByAddress(url, headers)
 	if err != nil {
 		// No connection exists yet, so there is nothing to answer on.
 		log.Printf("reverse connection failed: %v", err)
@@ -216,6 +221,13 @@ func establishConnection(protocol, proxyTarget, ticket string, port int, report 
 	}
 	defer connection.Close()
 
+	serveVisitor(connection, protocol, proxyTarget, port, report)
+}
+
+// serveVisitor serves one visitor on an open reverse connection. It picks HTTP
+// or TCP from the first bytes the visitor sends. Every request on an HTTP
+// connection came in on the same server port, so port is set on each report.
+func serveVisitor(connection net.Conn, protocol, proxyTarget string, port int, report func(handlers.RequestReport)) {
 	b := make([]byte, 1024)
 	n, err := connection.Read(b)
 	if err != nil {
@@ -226,10 +238,11 @@ func establishConnection(protocol, proxyTarget, ticket string, port int, report 
 	conn := helper.NewConnWithBuffer(connection, buff)
 
 	if helper.IsHTTPRequest(string(buff)) {
-		// Every request on this connection came in on the same server port.
 		handlers.HandleHTTP(conn, proxyTarget, protocol, func(r handlers.RequestReport) {
 			r.Port = port
-			report(r)
+			if report != nil {
+				report(r)
+			}
 		})
 		return
 	}

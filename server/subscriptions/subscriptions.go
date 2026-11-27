@@ -64,6 +64,19 @@ func (s *SubscriptionManager) Subscribe(topic string, callback func(msg *nats.Ms
 	return sub, nil
 }
 
+// SubscribeBroadcast subscribes to a topic without a queue group. Every
+// subscriber receives every message, which is what presence needs. Subscribe
+// uses a queue group, so each message reaches only one of its members.
+func (s *SubscriptionManager) SubscribeBroadcast(topic string, callback func(msg *nats.Msg)) (*nats.Subscription, error) {
+	sub, err := s.conn.Subscribe(topic, callback)
+	if err != nil {
+		return nil, fmt.Errorf("error subscribing to topic %s: %v", topic, err)
+	}
+
+	logger.Default.Info("Subscribed to topic (broadcast): ", topic)
+	return sub, nil
+}
+
 func (s *SubscriptionManager) Unsubscribe() {
 	s.conn.Drain()
 	logger.Default.Info("All subscriptions drained and connection closed")

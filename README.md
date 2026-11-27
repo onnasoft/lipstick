@@ -41,7 +41,7 @@ Tu servicio está detrás de NAT, de un router doméstico, de un 4G o de un fire
 | **Admin API** (`server/admin/`) | Servidor, solo en `127.0.0.1:5052` | Crea y configura dominios, y consulta el tráfico. |
 | **Cliente** (`client/`) | Tu máquina, junto al servicio | Mantiene la conexión de control y abre conexiones inversas para cada visitante. |
 | **PostgreSQL** | Junto al servidor | Guarda dominios y el tráfico diario. |
-| **NATS** | Junto al servidor | Cada hub se suscribe a su dominio. Hoy no transporta tickets ni tráfico de visitantes; queda como canal para mensajes de otras instancias. |
+| **NATS** | Junto al servidor | Solo para el cluster: cada servidor publica qué dominios tiene con sesiones activas. No transporta tráfico de visitantes. |
 
 ### Ciclo de una petición
 
@@ -59,6 +59,8 @@ Si ningún cliente atiende en 30 segundos, el visitante recibe `502`. Cada hub a
 - **Hacia afuera (visitantes y clientes):** siempre TLS. No hay modo sin cifrado.
 - **Hacia tu servicio local:** `host:puerto` (TCP plano, pensado para `127.0.0.1`) o `https://host:puerto` (TLS verificado). El túnel en sí siempre va cifrado.
 - **Solo TCP.** No hay tráfico UDP.
+
+- **Multiplexación.** El cliente abre 8 conexiones TLS autenticadas, y cada una lleva una sesión yamux. Cada visitante es un stream dentro de una sesión, así que no hace falta una conexión TLS nueva por visitante. Un visitante sin sesión disponible usa el camino del ticket, y nada deja de funcionar. Las sesiones se reconectan solas si el servidor se reinicia.
 
 ### Un dominio, uno o varios clientes
 
@@ -211,7 +213,7 @@ Lipstick no es el mejor punto de partida si necesitas **producción con SLA**, *
 - **Sin límites de tasa.** Los visitantes no tienen límite por IP ni por dominio, más allá de los 1024 en espera por hub.
 - **Sin alertas ni métricas exportadas.** Hay logs y consulta de tráfico diario, nada más.
 - **Un solo punto de fallo.** Si el servidor cae, todos los dominios caen.
-- **Se requiere PostgreSQL y NATS** aunque el tráfico no pase por ellos.
+- **Se requiere PostgreSQL y NATS** aunque el tráfico no pase por ellos. En un servidor único, NATS solo se usa si configuras un cluster.
 
 ### De seguridad (abiertas)
 
@@ -361,7 +363,9 @@ El servidor lee un YAML (`-c`, por defecto `/etc/lipstick/config.yml`). Parte de
 | `database.password` | vacío | Contraseña. |
 | `database.database` | `app_db` | Base de datos. |
 | `database.ssl_mode` | `disable` | `disable`, `allow`, `prefer`, `require`, `verify-ca` o `verify-full`. |
-| `nats.url` | `nats://localhost:4222` | Servidor NATS. |
+| `nats.url` | `nats://localhost:4222` | Servidor NATS. Obligatorio para el cluster. |
+| `cluster.advertise_address` | desactivado | Dirección `host:puerto` del puerto de manager de este servidor, tal como la alcanzan los otros servidores. Activa el cluster. |
+| `cluster.ca_file` | vacío | CA que firma los certificados de los otros servidores. Vacío: se confía en el certificado propio de este servidor. |
 | `intranet_ports` | desactivado | Puertos TCP sin TLS, reservados por los clientes dentro de una política. Ver [Puertos sin TLS](#puertos-sin-tls-para-la-intranet). |
 
 ### Flags
@@ -406,6 +410,19 @@ curl -sk -X POST https://127.0.0.1:5052/domains \
   -H "Authorization: $ADMIN" -H 'Content-Type: application/json' \
   --data '{"name":"robot-42.example.com","apiKey":"<clave-larga-aleatoria>","allowMultipleConnections":false}'
 ```
+
+## Cluster (varios servidores)
+
+Varios servidores pueden servir los mismos dominios. Todos usan la misma base de datos, el mismo NATS y el mismo certificado (o certificados firmados por la misma CA, indicada en `cluster.ca_file`).
+
+- Cada servidor publica por NATS, cada 5 segundos, los dominios para los que tiene sesiones de cliente. Un servidor que deja de publicar se olvida a los 15 segundos.
+- Un visitante que llega a un servidor sin sesión para su dominio se **reenvía** a un servidor que sí la tiene. El reenvío va por una conexión TLS verificada con el certificado del cluster, y se autentica con una prueba hecha con la clave del dominio.
+- El servidor que recibe el reenvío entrega la visita a una de sus sesiones. El puerto de entrada original se conserva en el registro de peticiones.
+- Si ningún servidor tiene sesión para el dominio, el visitante recibe `502` de inmediato.
+
+Coste: cada visita reenviada pasa por dos servidores. Medido en una misma máquina, con conexiones persistentes el reenvío casi no cuesta (unas 10 200 frente a 10 900 peticiones por segundo). Con una conexión nueva por petición baja a unas 1 700 frente a 2 700, porque el servidor de entrada abre una conexión TLS nueva por visita hacia el otro servidor. Una sesión persistente entre servidores lo reduciría; no está hecha.
+
+Pendiente: no se ha probado con servidores en máquinas distintas, ni con caídas de un servidor en mitad de una carga.
 
 ## Puertos sin TLS para la intranet
 
@@ -496,6 +513,7 @@ Los flags reemplazan al archivo. Una clave desconocida es un error.
 - **TLS obligatorio** hacia visitantes, clientes y admin API. La única excepción son los puertos de `intranet_ports`: opcionales, en una interfaz de la intranet, un dominio por puerto y redes permitidas por la política (ver [Puertos sin TLS](#puertos-sin-tls-para-la-intranet)).
 - **Claves de dominio** comparadas en tiempo constante. Una clave vacía nunca autoriza.
 - **Tickets** de 128 bits aleatorios, de un solo uso.
+- **Sesiones autenticadas.** Cada conexión que el cliente abre hacia el servidor (`GET /<ticket>` o `GET /mux`) lleva una prueba `X-Lipstick-Proof`: HMAC-SHA256 de la clave del dominio. Para un ticket, la prueba cubre el ticket. Para una sesión de multiplexación, cubre un nonce de un solo uso que contiene la hora, y el servidor rechaza un nonce repetido o con más de dos minutos de diferencia con su reloj. La clave nunca viaja en esas conexiones, y una conexión sin prueba válida se cierra sin responder. Dentro de una sesión autenticada, el servidor abre streams y el cliente los acepta: solo el cliente que abrió la sesión recibe tráfico por ella. Un cliente anterior a estos cambios no sirve tráfico: hay que actualizar servidor y clientes juntos.
 - **Admin API** solo en loopback por defecto. Las lecturas (`GET`) no piden clave; crear, cambiar o borrar dominios sí, con la clave de admin. Si expones el puerto 5052 fuera de la máquina, cualquiera podrá ver dominios y tráfico.
 - **Secretos fuera del repositorio.** `config.yml`, `client_key.txt`, `certs/` y las claves privadas están en `.gitignore`, y `.dockerignore` los excluye de la imagen.
 - **Pendiente:** ver [`revision.md`](revision.md). Incluye la clave de un certificado que estuvo en el historial del repositorio y el estado de las referencias de pull request, que GitHub no permite reescribir con un push normal.

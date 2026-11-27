@@ -400,6 +400,44 @@ Lipstick exposes local ports to the internet through a reverse tunnel. The main 
 - **Fix:** the service receives the visitor's `Host`, including its port, as a reverse proxy normally passes it on. This is a behavior change: services that depended on seeing the target address in `Host` will now see the public one.
 - **Verified:** `client/handlers/host_test.go`. Live: Grafana Live accepts the WebSocket with `GF_SERVER_ROOT_URL` set to the tunnel address; Jupyter and S3 pass again after the change. Ollama and Prometheus were not re-run after this change.
 
+### 39. Reverse tunnel connections were not authenticated (security)
+- **Where:** `server/manager/manager.go` (`handleTunnel`), `client/main.go` (`establishConnection`), `helper/tunnelauth.go`
+- **What:** the control connection checks the domain key, but the reverse connection `GET /<ticket>` checked only the ticket. The ticket travels only over TLS and is single-use, so the risk was small today. It becomes the main path for traffic once a connection pool exists, so it had to be closed first.
+- **Fix:** each reverse connection carries `X-Lipstick-Proof`, an HMAC-SHA256 of the domain key over the ticket. The server recomputes it and compares in constant time. The key is not sent on that connection. A missing, wrong, or empty proof gets `401` and the connection is closed. A domain with an empty key never verifies.
+- **Compatibility:** clients older than this change cannot serve traffic. Update the server and every client together.
+- **Later change (see 40):** a rejected reverse connection is now closed without a reply, not answered with `401`. A `401` written onto the connection reached the client as visitor data.
+- **Verified:** `helper/tunnelauth_test.go` covers the proof's binding to key and ticket, empty and garbage proofs, and that the raw key is not accepted as a proof. Live: a correct client serves traffic (200); a connection without a proof gets 401; a wrong proof gets 401; the raw key in the header gets 401; a correct proof for an unknown ticket passes the check and then gets 502.
+
+### 40. Multiplexed sessions replace the pool of waiting connections (performance)
+- **Where:** `server/manager/mux.go`, `helper/stream.go`, `helper/tunnelauth.go`, `server/manager/listener.go` (route `/mux`), `client/mux.go`, `client/main.go`
+- **What:** the client opens 8 authenticated TLS connections and runs a yamux session on each. Every visitor becomes one stream: the server opens it, writes `LIPSTICK-PORT <port>` and relays the visitor. A session is authenticated once, when it is opened, with a proof over a one-time nonce (the nonce carries the client time, and is refused if older than 2 minutes or seen before). Visitors fall back to the ticket path when no session can take them. The earlier pool of waiting connections was replaced.
+- **Design choice:** authentication happens per session, not per visitor. The server opens streams and the client accepts them, so only the client that opened a session receives traffic on it. Per-visitor authentication would add one HMAC round per visitor and would not change what the client can be asked to do. Tell me if you want a proof on every stream as well.
+- **Half-close:** yamux's `Close` stops writes and keeps reads open, so the relay's half-close still works. Checked on the intranet port: 1 MiB sent, half-closed, and the echo returned whole.
+- **Measured here** (one machine, 16 cores, everything local, Go load generator, backend answers 1 KiB):
+  - new connection per request, ticket path (before any change here): about 1 900 req/s, p50 5.1 ms
+  - new connection per request, previous pool: about 2 050 req/s, p50 4.5 ms
+  - new connection per request, multiplexed (8 sessions): about 2 650 req/s, p50 3.7 ms
+  - keep-alive, previous pool: about 13 000 req/s, p50 0.7 ms
+  - keep-alive, multiplexed with 2 sessions: about 7 900 req/s, p50 1.2 ms (streams shared two connections)
+  - keep-alive, multiplexed with 8 sessions: about 11 000 req/s, p50 0.8 ms
+  - direct to the backend, new TCP connection per request: about 23 700 req/s, p50 0.38 ms
+- **What the numbers show:** multiplexing removes the per-visitor connection from the client, and that helps when each visitor opens a new connection. With keep-alive it is slightly slower than the earlier pool, because streams share the session connections. The sessions count matters: with 2, keep-alive dropped by about 40%. The remaining cost for a new connection per visitor is the visitor's own TLS handshake, which the tunnel does not control.
+- **Verified:** unit tests for proofs, nonces, stream assignment, closed sessions, a stopped hub, nonce replay, and an end-to-end stream served by the client. Live: 9 connections to the manager (1 control + 8 sessions); visitors served through the proxy and through the intranet port; nonce replay refused; old nonce refused; after a server restart the client reconnects its sessions and traffic resumes.
+
+### 41. TLS session resumption for client reconnections (performance)
+- **Where:** `client/tlsconf/tlsconf.go`
+- **What:** the client keeps a shared TLS session cache, so reconnecting to the same server resumes the session and skips the full key exchange. Each connection still needs its own proof, so resumption does not weaken authentication.
+- **Measured here:** about 2 050 to 2 130 req/s with new connections per request, p50 about 4.5 ms. The gain is small, because most of the handshake cost is the visitor's own connection, which the client cannot resume.
+
+### 42. Visitors could not reach the server that held their tunnel (distributed routing)
+- **Where:** `server/manager/cluster.go`, `server/manager/hub.go`, `server/manager/manager.go` (`HandleHTTPConn`, `HandleTCPConn`), `server/manager/listener.go` (route `/relay`), `server/subscriptions/subscriptions.go` (`SubscribeBroadcast`), `server/config/config.go` (`cluster`)
+- **What:** a visitor could arrive at a server with no tunnel for its domain, while the client was connected to another server. The ticket was published on NATS, but the reverse connection landed on a server without the waiting visitor, so the visit never paired. Nothing in the repository published the tickets either. The NATS ticket path was removed.
+- **Fix:** the server that receives a visitor without a local session relays it to a peer that has one. Presence is published on NATS every 5 seconds and expires after 15. The relay is a TLS connection to the peer's manager port, verified with the cluster certificate (or `cluster.ca_file`), and authenticated with a proof made with the domain key over a one-time nonce. The peer hands the visitor to one of its sessions and keeps the original port.
+- **Bug found while testing:** the presence subscription used a queue group, so each message reached only one of the two servers. It now uses a broadcast subscription (`SubscribeBroadcast`).
+- **Trust:** NATS only chooses where to relay. A peer with a different certificate fails TLS verification, so a fake presence message cannot receive visitors.
+- **Verified:** unit tests for presence (freshness, own messages, stale peers, the freshest peer), config validation, and the no-cluster 502. Live, with two servers sharing the database and NATS: a visitor entering B reached a client on A (200); a visitor entering A reached a client on B (200); with no session anywhere, both entries returned 502 in about 3 ms; the request log on the serving server recorded the original port (5050 for a visitor that entered A).
+- **Not verified:** servers on different machines; a server failing in the middle of a load; cluster certificates signed by a CA (the `ca_file` path is written but not exercised).
+
 ## Recommended order
 
 1. Items 1, 2, 3, and 4: authentication, unpredictable tickets, TLS verification, and admin API hardening.

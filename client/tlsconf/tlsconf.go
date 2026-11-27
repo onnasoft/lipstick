@@ -49,8 +49,14 @@ func Config(serverName string) *tls.Config {
 		ServerName: serverName,
 		RootCAs:    roots,
 		MinVersion: tls.VersionTLS12,
+		// Reconnecting to the same server resumes the session, which skips the full
+		// key exchange. Each connection is still authenticated by its own proof.
+		ClientSessionCache: sessionCache,
 	}
 }
+
+// sessionCache is shared by all connections of the process.
+var sessionCache = tls.NewLRUClientSessionCache(64)
 
 // ErrVerificationFailed explains how to fix a certificate that cannot be
 // verified.

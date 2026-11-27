@@ -101,16 +101,3 @@ func TestPendingVisitorsAreCapped(t *testing.T) {
 		t.Fatalf("visitor beyond the cap got %q, want 502", got)
 	}
 }
-
-// A NATS ticket that no client can take must answer its visitor, not leave it
-// waiting. This runs on the hub loop, which owns the maps.
-func TestNatsTicketWithoutClientRejectsVisitor(t *testing.T) {
-	hub := NewNetworkHub("localhost", nil, 0)
-	visitor, peer := visitorPair(t)
-	hub.incomingClientConns["t42"] = &pendingVisitor{conn: visitor, since: time.Now()}
-
-	go hub.handleNatsMessage("t42")
-	if got := readAll(t, peer); !strings.Contains(got, "502") {
-		t.Fatalf("visitor got %q, want 502", got)
-	}
-}

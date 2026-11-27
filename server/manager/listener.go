@@ -91,7 +91,9 @@ func (cl *CustomListener) handle(conn net.Conn) {
 
 	if strings.HasPrefix(url, "/") && len(url) > 1 && strings.Count(url, "/") == 1 {
 		ticket := url[1:]
-		b, err := helper.ReadUntilHeadersEnd(helper.NewConnWithBuffer(conn, buffer[:n]))
+		// The buffered bytes stay with wconn: a mux session reads what follows the headers.
+		wconn := helper.NewConnWithBuffer(conn, buffer[:n])
+		b, err := helper.ReadUntilHeadersEnd(wconn)
 		if err != nil {
 			cl.reject(conn, "Error reading headers from connection:", err)
 			return
@@ -101,8 +103,18 @@ func (cl *CustomListener) handle(conn net.Conn) {
 			cl.reject(conn, "Error reading HTTP request:", err)
 			return
 		}
+		if ticket == "relay" {
+			logger.Default.Debug("Handling relayed visitor")
+			cl.manager.handleRelay(wconn, req)
+			return
+		}
+		if ticket == "mux" {
+			logger.Default.Debug("Handling mux connection")
+			cl.manager.handleMux(wconn, req)
+			return
+		}
 		logger.Default.Debug("Handling tunnel with ticket:", ticket)
-		cl.manager.handleTunnel(conn, req, ticket)
+		cl.manager.handleTunnel(wconn, req, ticket)
 		return
 	}
 

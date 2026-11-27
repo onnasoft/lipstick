@@ -75,6 +75,8 @@ type Manager struct {
 	intranet       *intranetPorts
 	reqlog         *RequestLog
 	persist        *persister
+	nonces         nonceCache
+	cluster        *cluster // nil on a single server
 }
 
 // requestLogSize is how many finished requests the admin panel keeps in memory.
@@ -106,6 +108,7 @@ func (m *Manager) getOrCreateHub(domain string) *NetworkHub {
 	}
 
 	hub := NewNetworkHub(domain, m.trafficManager, 64*1024)
+	hub.route = m.routeVisitor
 	hub.requests = m.reqlog
 	// When the hub stops for lack of clients, forget it. CompareAndDelete leaves
 	// a newer hub for the same domain alone.
@@ -162,6 +165,17 @@ func (manager *Manager) handleTunnel(conn net.Conn, req *http.Request, ticket st
 	host := req.Host
 	domainName := strings.Split(host, ":")[0]
 
+	// The ticket alone does not open a tunnel. The client must also prove it
+	// knows the domain's key, for every reverse connection it opens.
+	domainRecord, err := manager.authManager.GetDomain(domainName)
+	if err != nil || !helper.VerifyTunnelProof(domainRecord.ApiKey, ticket, req.Header.Get(helper.ProofHeader)) {
+		// Close without a reply: any bytes sent here would reach the client as
+		// visitor data, and it would forward them to the local service.
+		logger.Default.Error("Reverse connection without a valid proof for domain:", domainName)
+		conn.Close()
+		return
+	}
+
 	domain, ok := manager.GetHub(domainName)
 	if !ok {
 		logger.Default.Error("hub not found for domain:", domainName)
@@ -206,6 +220,11 @@ func (manager *Manager) HandleHTTPConn(conn net.Conn, req *http.Request) {
 	domain := strings.Split(host, ":")[0]
 
 	hub, ok := manager.GetHub(domain)
+	if !ok && manager.cluster != nil {
+		// This server has no tunnel for the domain. Another server of the cluster may.
+		manager.routeVisitor(domain, &helper.RemoteConn{Conn: conn, Domain: domain}, localPort(conn))
+		return
+	}
 	if !ok {
 		logger.Default.Error("Hub not found for domain:", domain)
 		_, err := fmt.Fprint(conn, helper.BadGatewayResponse)
@@ -243,6 +262,11 @@ func (manager *Manager) HandleTCPConn(conn net.Conn) {
 	}
 
 	hub, ok := manager.GetHub(domain)
+	if !ok && manager.cluster != nil {
+		// This server has no tunnel for the domain. Another server of the cluster may.
+		manager.routeVisitor(domain, &helper.RemoteConn{Conn: conn, Domain: domain}, localPort(conn))
+		return
+	}
 	if !ok {
 		logger.Default.Error("Hub not found for domain:", domain)
 		_, err := fmt.Fprint(conn, helper.BadGatewayResponse)

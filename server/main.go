@@ -62,6 +62,11 @@ func main() {
 	requestStore := manager.NewGormRequestStore(conn)
 	manager := manager.SetupManager(tlsConfig)
 	manager.StartRequestPersistence(requestStore)
+	if conf.Cluster != nil {
+		if err := manager.StartCluster(*conf.Cluster, tlsConfig); err != nil {
+			log.Fatalf("cluster: %v", err)
+		}
+	}
 	admin := admin.SetupAdmin(conf.Admin.Address, conf.AdminSecretKey, tlsConfig)
 	admin.SetDomainChangedHook(manager.DropHub)
 	admin.SetStatsSource(manager.Snapshot)

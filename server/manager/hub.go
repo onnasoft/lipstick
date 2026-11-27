@@ -12,9 +12,7 @@ import (
 
 	"github.com/OnnaSoft/lipstick/helper"
 	"github.com/OnnaSoft/lipstick/logger"
-	"github.com/OnnaSoft/lipstick/server/subscriptions"
 	"github.com/OnnaSoft/lipstick/server/traffic"
-	"github.com/nats-io/nats.go"
 )
 
 const (
@@ -28,9 +26,6 @@ const (
 
 	// expireInterval is how often the hub checks for timed-out visitors.
 	expireInterval = 5 * time.Second
-
-	// natsQueueSize bounds the messages waiting for the hub loop.
-	natsQueueSize = 64
 
 	// rejectWriteTimeout bounds how long a 502 may block on a dead socket.
 	rejectWriteTimeout = 5 * time.Second
@@ -69,14 +64,12 @@ type NetworkHub struct {
 	unregisterProxyNotificationConn chan *ProxyNotificationConn
 	incomingClientConn              chan *helper.RemoteConn
 	serverRequests                  chan *request
-	natsMessages                    chan string
 	trafficManager                  *traffic.TrafficManager
 	dataUsageAccumulator            int64
 	threshold                       int64
 	mu                              sync.Mutex
 	totalDataTransferred            int64
 	tickerManager                   *TickerManager
-	subscription                    *nats.Subscription
 
 	// done is closed to stop the hub. Every channel send from outside selects
 	// on done, so no sender can block on a hub that has stopped.
@@ -89,6 +82,15 @@ type NetworkHub struct {
 
 	// activeSessions counts relays in progress (visitor and tunnel joined).
 	activeSessions atomic.Int64
+
+	// route hands a visitor to another server of the cluster when this server has
+	// no tunnel client for the domain. It is nil on a single server. See cluster.go.
+	route func(domain string, visitor *helper.RemoteConn, port int)
+
+	// muxes are the authenticated sessions of tunnel clients. See mux.go.
+	muxMu   sync.Mutex
+	muxes   []*muxSession
+	muxNext int
 
 	// requests receives the requests that clients report.
 	requests *RequestLog
@@ -107,7 +109,6 @@ func NewNetworkHub(name string, trafficManager *traffic.TrafficManager, threshol
 		unregisterProxyNotificationConn: make(chan *ProxyNotificationConn),
 		incomingClientConn:              make(chan *helper.RemoteConn),
 		serverRequests:                  make(chan *request),
-		natsMessages:                    make(chan string, natsQueueSize),
 		statsReq:                        make(chan chan HubStats),
 		trafficManager:                  trafficManager,
 		dataUsageAccumulator:            0,
@@ -259,8 +260,6 @@ func (hub *NetworkHub) listen() {
 			hub.handleServerRequest(request)
 		case remoteConn := <-hub.incomingClientConn:
 			hub.handleIncomingClientConn(remoteConn)
-		case msg := <-hub.natsMessages:
-			hub.handleNatsMessage(msg)
 		case reply := <-hub.statsReq:
 			reply <- hub.snapshot()
 		case now := <-expire.C:
@@ -277,31 +276,6 @@ func (hub *NetworkHub) handleRegisterProxyNotificationConn(conn *ProxyNotificati
 		logger.Default.Error("Connection rejected: multiple connections not allowed for hub:", hub.HubName)
 		conn.Close()
 		return
-	}
-
-	if hub.subscription == nil {
-		mgr, err := subscriptions.GetSubscriptionManager()
-		if err != nil {
-			logger.Default.Error("Error getting SubscriptionManager:", err)
-			conn.Close()
-			return
-		}
-
-		// The callback runs on the NATS goroutine. It must not touch the hub's
-		// maps, so it only queues the message for the hub loop.
-		sub, err := mgr.Subscribe(hub.HubName, func(message *nats.Msg) {
-			select {
-			case hub.natsMessages <- string(message.Data):
-			default:
-				logger.Default.Error("NATS message dropped, hub queue is full:", hub.HubName)
-			}
-		})
-		if err != nil {
-			logger.Default.Error("Error subscribing to NATS:", err)
-			conn.Close()
-			return
-		}
-		hub.subscription = sub
 	}
 
 	hub.ProxyNotificationConns[conn] = true
@@ -326,11 +300,6 @@ func (hub *NetworkHub) handleUnregisterProxyNotificationConn(ws *ProxyNotificati
 		delete(hub.incomingClientConns, ticket)
 		rejectVisitor(visitor.conn)
 	}
-	if hub.subscription != nil {
-		hub.subscription.Unsubscribe()
-		hub.subscription = nil
-		logger.Default.Debug("Unsubscribed from NATS for hub:", hub.HubName)
-	}
 
 	// No clients left: the hub has nothing to do, so it stops and the manager
 	// forgets it. A later client creates a new hub.
@@ -354,7 +323,18 @@ func (hub *NetworkHub) handleServerRequest(request *request) {
 }
 
 func (hub *NetworkHub) handleIncomingClientConn(visitor *helper.RemoteConn) {
+	port := localPort(visitor)
+	// A mux session is the fast path: a stream, no ticket and no new connection.
+	if hub.takeMux(visitor, port) {
+		return
+	}
+
 	if len(hub.ProxyNotificationConns) == 0 {
+		// No tunnel client here. In a cluster, another server may hold one.
+		if hub.route != nil {
+			hub.route(hub.HubName, visitor, port)
+			return
+		}
 		logger.Default.Error("No tunnel client connected for hub:", hub.HubName)
 		rejectVisitor(visitor)
 		return
@@ -373,11 +353,8 @@ func (hub *NetworkHub) handleIncomingClientConn(visitor *helper.RemoteConn) {
 		return
 	}
 
-	// The client only needs the ticket. The reverse connection goes to the
-	// server URL it already has, so no address is sent.
 	// The line is "ticket port". The client returns the port with each request it
 	// reports, so the request log can tell the proxy apart from intranet ports.
-	port := localPort(visitor)
 	ws := hub.getProxyNotificationConn()
 	if _, err := ws.Write([]byte(ticket + " " + strconv.Itoa(port) + "\n")); err != nil {
 		logger.Default.Error("Error writing ticket to ProxyNotificationConn:", err)
@@ -387,26 +364,6 @@ func (hub *NetworkHub) handleIncomingClientConn(visitor *helper.RemoteConn) {
 
 	hub.incomingClientConns[ticket] = &pendingVisitor{conn: visitor, since: time.Now(), port: port}
 	logger.Default.Debug("Ticket sent to ProxyNotificationConn for hub:", hub.HubName)
-}
-
-// handleNatsMessage forwards a ticket that arrived over NATS to a tunnel client.
-// If no client can take it, the visitor it belongs to gets 502.
-func (hub *NetworkHub) handleNatsMessage(ticket string) {
-	ws := hub.getProxyNotificationConn()
-	if ws == nil {
-		logger.Default.Error("No ProxyNotificationConns available for hub:", hub.HubName)
-		hub.rejectPendingTicket(ticket)
-		return
-	}
-
-	port := 0 // a ticket from NATS may belong to another server; its port is unknown here
-	if v, ok := hub.incomingClientConns[ticket]; ok {
-		port = v.port
-	}
-	if _, err := ws.Write([]byte(ticket + " " + strconv.Itoa(port) + "\n")); err != nil {
-		logger.Default.Error("Error writing NATS ticket to ProxyNotificationConn:", err)
-		hub.rejectPendingTicket(ticket)
-	}
 }
 
 // rejectPendingTicket answers the visitor waiting on ticket with 502, if there
@@ -466,6 +423,7 @@ func rejectVisitor(conn net.Conn) {
 // handleShutdown runs in the hub loop when the hub is stopped. It disconnects
 // every client and answers every waiting visitor.
 func (hub *NetworkHub) handleShutdown() {
+	hub.closeMuxes()
 	for ws := range hub.ProxyNotificationConns {
 		delete(hub.ProxyNotificationConns, ws)
 		ws.Close()
@@ -473,10 +431,6 @@ func (hub *NetworkHub) handleShutdown() {
 	for ticket, visitor := range hub.incomingClientConns {
 		delete(hub.incomingClientConns, ticket)
 		rejectVisitor(visitor.conn)
-	}
-	if hub.subscription != nil {
-		hub.subscription.Unsubscribe()
-		hub.subscription = nil
 	}
 	logger.Default.Info("Hub stopped:", hub.HubName)
 }
