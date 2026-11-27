@@ -20,17 +20,13 @@ import (
 
 const selfSignedValidity = 365 * 24 * time.Hour
 
-// Enabled reports whether TLS is configured for the listeners.
-func (t *TLSConfig) Enabled() bool {
-	return t.CertificatePath != "" || t.KeyPath != ""
-}
-
-// Prepare returns the TLS configuration for the listeners, or nil when TLS is
-// not configured. If the certificate and key files do not exist yet, a
-// self-signed certificate is generated at those paths.
+// Prepare returns the TLS configuration for every listener. TLS is always
+// required. If the certificate and key files do not exist yet, a self-signed
+// certificate is generated at those paths. The configuration must already be
+// validated, so both paths are set.
 func (t *TLSConfig) Prepare() (*tls.Config, error) {
-	if !t.Enabled() {
-		return nil, nil
+	if t.CertificatePath == "" || t.KeyPath == "" {
+		return nil, errors.New("tls.certificate_path and tls.key_path are required")
 	}
 
 	if err := ensureCertificate(t.CertificatePath, t.KeyPath); err != nil {

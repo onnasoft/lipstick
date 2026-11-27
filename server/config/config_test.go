@@ -15,6 +15,7 @@ func validConfig() AppConfig {
 		Admin:          AdminConfig{Address: ":5052"},
 		Database:       DatabaseConfig{Host: "localhost", Port: 5432, User: "u", Database: "d", SSLMode: "disable"},
 		Nats:           NatsConfig{URL: "nats://localhost:4222"},
+		TLS:            TLSConfig{CertificatePath: "certs/server.crt", KeyPath: "certs/server.key"},
 	}
 }
 
@@ -30,7 +31,7 @@ func TestValidateReportsAllProblems(t *testing.T) {
 	c.Proxy.Address = "5050"
 	c.Database.SSLMode = "bogus"
 	c.Nats.URL = "http://localhost:4222"
-	c.TLS.CertificatePath = "x.crt"
+	c.TLS.KeyPath = ""
 
 	msg := c.Validate().Error()
 	for _, want := range []string{
@@ -38,7 +39,7 @@ func TestValidateReportsAllProblems(t *testing.T) {
 		"proxy.address",
 		"database.ssl_mode",
 		"nats.url",
-		"must be set together",
+		"tls.key_path is required",
 	} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("error missing %q; got:\n%s", want, msg)
@@ -96,11 +97,40 @@ func TestEnsureCertificateRejectsHalfPair(t *testing.T) {
 	}
 }
 
-func TestTLSDisabledReturnsNil(t *testing.T) {
-	cfg := TLSConfig{}
-	tc, err := cfg.Prepare()
-	if tc != nil || err != nil {
-		t.Fatalf("expected nil,nil when TLS disabled, got %v %v", tc, err)
+func TestPrepareRequiresBothPaths(t *testing.T) {
+	if _, err := (&TLSConfig{}).Prepare(); err == nil {
+		t.Fatal("Prepare must fail when TLS paths are empty")
+	}
+}
+
+func TestValidateRequiresTLS(t *testing.T) {
+	c := validConfig()
+	c.TLS = TLSConfig{}
+	msg := c.Validate().Error()
+	if !strings.Contains(msg, "tls.certificate_path is required") || !strings.Contains(msg, "tls.key_path is required") {
+		t.Fatalf("TLS must be required, got:\n%s", msg)
+	}
+}
+
+func TestValidateRejectsExampleAdminKey(t *testing.T) {
+	c := validConfig()
+	c.AdminSecretKey = "change-me-to-a-long-random-secret"
+	if msg := c.Validate().Error(); !strings.Contains(msg, "example value") {
+		t.Fatalf("expected example-key error, got:\n%s", msg)
+	}
+}
+
+func TestDefaultsIncludeTLSPaths(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yml")
+	os.WriteFile(path, []byte("admin_secret_key: 0123456789abcdef\nproxy:\n  address: \":5050\"\nmanager:\n  address: \":5051\"\nadmin:\n  address: \"127.0.0.1:5052\"\ndatabase:\n  host: localhost\n  port: 5432\n  user: u\n  database: d\n  ssl_mode: disable\nnats:\n  url: nats://localhost:4222\n"), 0o600)
+	defaults := AppConfig{TLS: TLSConfig{CertificatePath: "certs/server.crt", KeyPath: "certs/server.key"}}
+	cfg, err := loadConfigFrom(path, defaults)
+	if err != nil {
+		t.Fatalf("config without tls section should use defaults: %v", err)
+	}
+	if want := filepath.Join(dir, "certs", "server.crt"); cfg.TLS.CertificatePath != want {
+		t.Fatalf("certificate path = %q, want %q", cfg.TLS.CertificatePath, want)
 	}
 }
 

@@ -3,7 +3,6 @@ package admin
 import (
 	"crypto/tls"
 	"log"
-	"net"
 
 	"github.com/OnnaSoft/lipstick/logger"
 	"github.com/OnnaSoft/lipstick/server/auth"
@@ -37,15 +36,11 @@ func SetupAdmin(addr, adminKey string, tlsConfig *tls.Config) *Admin {
 }
 
 func (a *Admin) Listen() {
-	var listener net.Listener
-	var err error
-	if a.tlsConfig != nil {
-		listener, err = tls.Listen("tcp", a.addr, a.tlsConfig)
-		logger.Default.Info("Listening admin (TLS) on ", a.addr)
-	} else {
-		listener, err = net.Listen("tcp", a.addr)
-		logger.Default.Info("Listening admin on ", a.addr)
+	if a.tlsConfig == nil {
+		log.Fatal("admin API has no TLS configuration; TLS is required")
 	}
+	logger.Default.Info("Listening admin (TLS) on ", a.addr)
+	listener, err := tls.Listen("tcp", a.addr, a.tlsConfig)
 	if err != nil {
 		log.Fatalf("admin API cannot listen on %s: %v (check admin.address in the configuration)", a.addr, err)
 	}

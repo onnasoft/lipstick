@@ -20,16 +20,27 @@ import (
 )
 
 var httpmanager = manager.NewHTTPManager()
-var configuration, _ = config.GetConfig()
-var serverURL = configuration.ServerURL
+
+// configuration and serverURL are set in main, after validation, so a bad
+// configuration is reported at startup instead of failing later.
+var (
+	configuration *config.Config
+	serverURL     string
+)
 
 func main() {
-	if err := tlsconf.Configure(configuration.CAFile, configuration.InsecureSkipVerify); err != nil {
-		fmt.Fprintln(os.Stderr, "Error de TLS:", err)
+	cfg, err := config.GetConfig()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "Error de configuración:")
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	if tlsconf.Insecure() {
-		fmt.Println("ADVERTENCIA: no se verifica el certificado del servidor. Tu clave puede ser robada. Usa -insecure solo en desarrollo.")
+	configuration = cfg
+	serverURL = cfg.ServerURL
+
+	if err := tlsconf.Configure(cfg.CAFile); err != nil {
+		fmt.Fprintln(os.Stderr, "Error de TLS:", err)
+		os.Exit(1)
 	}
 
 	interruptChannel := make(chan os.Signal, 1)

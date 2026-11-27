@@ -1,3 +1,23 @@
-serverUrl: wss://localhost:5051/ws
-proxyPass:
-  - 127.0.0.1:8082
+# Ejemplo de configuración del cliente lipstick.
+#
+# Copia este archivo a config.client.yml, o pasa su ruta con -c, y cambia los
+# valores marcados con CAMBIAR. Los flags de la línea de comandos tienen
+# prioridad sobre este archivo.
+#
+# TLS es obligatorio: server_url debe empezar por https://.
+# Las claves desconocidas hacen que el cliente no arranque.
+
+# CAMBIAR. Clave del dominio, la que creaste con la admin API del servidor.
+api_secret: "change-me-domain-key"
+
+# Servidor. Por defecto: https://localhost:5051
+server_url: "https://localhost:5051"
+
+# Servicios locales que se exponen, host:puerto. Puedes poner varios.
+# Por defecto: 127.0.0.1:8082
+proxy_pass:
+  - "127.0.0.1:8082"
+
+# Solo si el servidor usa un certificado autofirmado (por ejemplo el que genera
+# el servidor en server/certs/server.crt). Usa una ruta absoluta.
+# ca_file: "/ruta/absoluta/a/lipstick/server/certs/server.crt"

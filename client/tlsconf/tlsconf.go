@@ -1,8 +1,7 @@
-// Package tlsconf holds the trust policy the client uses when it connects to
-// the lipstick server. By default the server certificate is verified against
-// the system roots, or against a CA file given with -ca. Skipping verification
-// is only possible with -insecure, and it exposes the API key to anyone who
-// can intercept the connection.
+// Package tlsconf holds the trust policy for every TLS connection the client
+// makes: to the lipstick server, and to a local service that is exposed over
+// TLS. Certificates are always verified against the system roots, or against
+// the CA file given with -ca. There is no option to skip verification.
 package tlsconf
 
 import (
@@ -15,15 +14,14 @@ import (
 )
 
 var (
-	mu       sync.RWMutex
-	roots    *x509.CertPool // nil means the system roots
-	insecure bool
+	mu    sync.RWMutex
+	roots *x509.CertPool // nil means the system roots
 )
 
 // Configure sets the trust policy. caFile is a PEM file with the CA or server
-// certificate to trust; empty means the system roots. skipVerify disables
-// certificate verification.
-func Configure(caFile string, skipVerify bool) error {
+// certificate to trust; empty means the system roots. Call it once, before any
+// connection is made.
+func Configure(caFile string) error {
 	var pool *x509.CertPool
 	if caFile != "" {
 		pem, err := os.ReadFile(caFile)
@@ -39,34 +37,24 @@ func Configure(caFile string, skipVerify bool) error {
 	mu.Lock()
 	defer mu.Unlock()
 	roots = pool
-	insecure = skipVerify
 	return nil
 }
 
-// Insecure reports whether certificate verification is disabled.
-func Insecure() bool {
-	mu.RLock()
-	defer mu.RUnlock()
-	return insecure
-}
-
-// Config returns the TLS configuration for one connection to the server. When
-// serverName is empty, tls.Dial uses the host it dialed, which is the usual
-// case.
+// Config returns the TLS configuration for one connection. When serverName is
+// empty, tls.Dial uses the host it dialed, which is the usual case.
 func Config(serverName string) *tls.Config {
 	mu.RLock()
 	defer mu.RUnlock()
 	return &tls.Config{
-		ServerName:         serverName,
-		RootCAs:            roots,
-		InsecureSkipVerify: insecure,
-		MinVersion:         tls.VersionTLS12,
+		ServerName: serverName,
+		RootCAs:    roots,
+		MinVersion: tls.VersionTLS12,
 	}
 }
 
 // ErrVerificationFailed explains how to fix a certificate that cannot be
 // verified.
-var ErrVerificationFailed = errors.New("server certificate could not be verified: pass -ca with the server certificate (server/certs/server.crt), or -insecure for development only")
+var ErrVerificationFailed = errors.New("certificate could not be verified: pass -ca with the server certificate (server/certs/server.crt)")
 
 // Explain adds the fix to certificate verification errors and leaves other
 // errors unchanged.

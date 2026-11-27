@@ -84,7 +84,7 @@ Para no escribir `-ca` cada vez, puedes poner en un YAML del cliente:
 ca_file: /ruta/absoluta/a/lipstick/server/certs/server.crt
 ```
 
-Úsalo con `-c ruta/al/config.yml`. No uses `-insecure` salvo en desarrollo: desactiva la verificación y tu clave puede ser robada.
+Úsalo con `-c ruta/al/config.yml`. Copia `client/config.example.yml` como punto de partida. Los flags de la línea de comandos tienen prioridad sobre el archivo.
 
 Salida esperada:
 
@@ -105,7 +105,6 @@ Los flags:
 | `-p` | Servicio local que quieres exponer, `host:puerto`. Puedes pasar varios separados por espacio | `127.0.0.1:8082` |
 | `-k` | Clave del dominio, la que creaste con la admin API | contenido de `client_key.txt` |
 | `-ca` | Archivo PEM del certificado del servidor, para confiar en un certificado autofirmado | `server/certs/server.crt` |
-| `-insecure` | Desactiva la verificación del certificado del servidor. Solo para desarrollo | (omitir) |
 
 El nombre del dominio sale de la URL de `-s`. Con `localhost:5051` el dominio es `localhost`.
 
@@ -131,4 +130,5 @@ curl -sk -H "Host: localhost" https://localhost:5050/archivo.txt
 ## Problemas conocidos
 
 - **Peticiones que fallan de forma intermitente:** si reiniciaste un cliente, el servidor puede conservar su registro anterior y enviarle peticiones (punto 16). Reinicia el servidor para limpiar los registros.
-- **Sin verificación de certificado:** el cliente acepta cualquier certificado del servidor (punto 3). No uses esta configuración en producción.
+- **TLS obligatorio:** no hay modo sin TLS. El servidor exige `tls.certificate_path` y `tls.key_path`, y el cliente exige `https://` en `server_url`. El cliente siempre verifica el certificado del servidor; no existe opción para omitirlo.
+- **Servicios locales sin TLS:** `-p` acepta un servicio local en texto plano, por ejemplo `127.0.0.1:8082`. El túnel hacia el servidor siempre va cifrado, pero el tráfico entre el cliente y tu servicio local no. Si necesitas TLS también ahí, indica un destino con `https://`.

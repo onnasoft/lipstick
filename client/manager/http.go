@@ -2,6 +2,7 @@ package manager
 
 import (
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -35,31 +36,23 @@ func (c *CustomConn) Read(b []byte) (n int, err error) {
 	return n, nil
 }
 
-func (m *HTTPManager) Connect(url string, headers http.Header) (*CustomConn, error) {
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return nil, fmt.Errorf("error creating request: %w", err)
+// dialServer opens a verified TLS connection to the host in req's URL and
+// writes the request. The tunnel carries API keys and traffic, so there is no
+// plain-text path.
+func dialServer(req *http.Request) (*CustomConn, error) {
+	if req.URL.Scheme != "https" {
+		return nil, errors.New("server URL must start with https://")
 	}
-	req.Header = headers
 
 	host := req.URL.Host
 	if host == "" {
 		host = req.URL.Hostname()
 	}
 	if !strings.Contains(host, ":") {
-		if req.URL.Port() == "" {
-			host += ":443"
-		} else {
-			host += ":" + req.URL.Port()
-		}
+		host += ":443"
 	}
 
-	var conn net.Conn
-	if req.URL.Scheme == "http" || req.URL.Scheme == "ws" {
-		conn, err = net.Dial("tcp", host)
-	} else {
-		conn, err = tls.Dial("tcp", host, tlsconf.Config(""))
-	}
+	conn, err := tls.Dial("tcp", host, tlsconf.Config(""))
 	if err != nil {
 		return nil, fmt.Errorf("error connecting to host: %w", tlsconf.Explain(err))
 	}
@@ -72,43 +65,24 @@ func (m *HTTPManager) Connect(url string, headers http.Header) (*CustomConn, err
 	return &CustomConn{Conn: conn}, nil
 }
 
+// Connect opens the control connection to the server manager.
+func (m *HTTPManager) Connect(url string, headers http.Header) (*CustomConn, error) {
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %w", err)
+	}
+	req.Header = headers
+	return dialServer(req)
+}
+
 // ConnectByAddress opens the reverse connection for a ticket. It always dials
-// the host from the server URL, the same way for plain and TLS connections:
-// the address the server advertises can be a private IP without a port, which
-// cannot be dialed.
+// the host from the server URL, never the address the server advertises: that
+// address can be a private IP without a port, which cannot be dialed.
 func (m *HTTPManager) ConnectByAddress(url string, headers http.Header) (*CustomConn, error) {
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("error creating request: %w", err)
 	}
 	req.Header = headers
-
-	host := req.URL.Host
-	if host == "" {
-		host = req.URL.Hostname()
-	}
-	if !strings.Contains(host, ":") {
-		if req.URL.Port() == "" {
-			host += ":443"
-		} else {
-			host += ":" + req.URL.Port()
-		}
-	}
-
-	var conn net.Conn
-	if req.URL.Scheme == "http" || req.URL.Scheme == "ws" {
-		conn, err = net.Dial("tcp", host)
-	} else {
-		conn, err = tls.Dial("tcp", host, tlsconf.Config(""))
-	}
-	if err != nil {
-		return nil, fmt.Errorf("error connecting to host: %w", tlsconf.Explain(err))
-	}
-
-	if err := req.Write(conn); err != nil {
-		conn.Close()
-		return nil, fmt.Errorf("error writing request to connection: %w", err)
-	}
-
-	return &CustomConn{Conn: conn}, nil
+	return dialServer(req)
 }

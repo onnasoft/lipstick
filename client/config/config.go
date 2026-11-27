@@ -1,92 +1,177 @@
 package config
 
 import (
+	"bytes"
 	"errors"
 	"flag"
+	"fmt"
 	"io"
-	"log"
+	"net"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync"
 
-	"github.com/OnnaSoft/lipstick/helper"
 	"gopkg.in/yaml.v3"
 )
 
+// Config is the client configuration. Values come from the YAML file, and
+// command-line flags override them when given.
 type Config struct {
-	APISecret          string   `yaml:"api_secret"`           // API secret for authentication
-	ServerURL          string   `yaml:"server_url"`           // URL of the server manager
-	ProxyPass          []string `yaml:"proxy_pass"`           // List of proxy targets
-	Workers            int      `yaml:"workers"`              // Number of worker routines
-	CAFile             string   `yaml:"ca_file"`              // PEM file with the server CA or certificate to trust
-	InsecureSkipVerify bool     `yaml:"insecure_skip_verify"` // Development only: do not verify the server certificate
+	APISecret string   `yaml:"api_secret"` // Key of the domain, created with the server admin API
+	ServerURL string   `yaml:"server_url"` // Server manager URL. Always https://
+	ProxyPass []string `yaml:"proxy_pass"` // Local services to expose, host:port
+	CAFile    string   `yaml:"ca_file"`    // PEM file with the server certificate or its CA (needed for self-signed servers)
 }
 
-var config *Config
+const (
+	defaultServerURL = "https://localhost:5051"
+	defaultProxyPass = "127.0.0.1:8082"
+)
 
-// loadConfig reads the configuration file and merges it with CLI arguments
-func loadConfig() {
-	var (
-		configPath string
-		serverURL  string
-		proxyPass  string
-		apiSecret  string
-		workers    int
-		caFile     string
-		insecure   bool
-	)
+var (
+	loadOnce sync.Once
+	config   *Config
+	loadErr  error
+)
 
-	// Default configuration
-	result := Config{}
+// GetConfig loads and validates the configuration once. Later calls return the
+// same result.
+func GetConfig() (*Config, error) {
+	loadOnce.Do(func() {
+		config, loadErr = loadConfig(os.Args[1:])
+	})
+	return config, loadErr
+}
 
-	// Set default configuration path relative to the executable's location
+// loadConfig merges defaults, the YAML file and flags, then validates the
+// result. It is a function of its arguments so it can be tested.
+func loadConfig(args []string) (*Config, error) {
+	fs := flag.NewFlagSet("lipstick-client", flag.ContinueOnError)
+
 	execDir, err := filepath.Abs(filepath.Dir(os.Args[0]))
 	if err != nil {
-		log.Printf("Error getting executable directory: %v", err)
+		execDir = "."
 	}
 	defaultConfigPath := filepath.Join(execDir, "config.client.yml")
 
-	// CLI Flags
-	flag.StringVar(&configPath, "c", defaultConfigPath, "Path to the configuration file")
-	flag.StringVar(&serverURL, "s", "http://localhost:5051", "URL for the server manager WebSocket")
-	flag.StringVar(&proxyPass, "p", "tcp://127.0.0.1:12000", "Proxy targets separated by spaces")
-	flag.StringVar(&apiSecret, "k", "", "API secret for authenticating nodes")
-	flag.StringVar(&caFile, "ca", "", "PEM file with the server CA or certificate to trust (for self-signed servers)")
-	flag.BoolVar(&insecure, "insecure", false, "Skip verification of the server certificate. Development only: the API key can be stolen")
-	flag.Parse()
+	var configPath, serverURL, proxyPass, apiSecret, caFile string
+	fs.StringVar(&configPath, "c", defaultConfigPath, "Path to the configuration file")
+	fs.StringVar(&serverURL, "s", "", "Server manager URL, https://host:port (default "+defaultServerURL+")")
+	fs.StringVar(&proxyPass, "p", "", "Local services to expose, host:port, separated by spaces (default "+defaultProxyPass+")")
+	fs.StringVar(&apiSecret, "k", "", "Domain API key")
+	fs.StringVar(&caFile, "ca", "", "PEM file with the server certificate or its CA")
+	if err := fs.Parse(args); err != nil {
+		return nil, err
+	}
 
-	// Load YAML config file
-	if file, err := os.Open(configPath); err == nil {
-		defer file.Close()
-		content, err := io.ReadAll(file)
-		if err != nil {
-			log.Printf("Error reading config file: %v", err)
-		} else if err := yaml.Unmarshal(content, &result); err != nil {
-			log.Printf("Error parsing config file: %v", err)
+	explicitConfig := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "c" {
+			explicitConfig = true
 		}
+	})
+
+	cfg := &Config{
+		ServerURL: defaultServerURL,
+		ProxyPass: []string{defaultProxyPass},
 	}
 
-	// Merge CLI arguments
-	result.ServerURL = helper.SetValue(serverURL, result.ServerURL).(string)
+	content, err := os.ReadFile(configPath)
+	switch {
+	case err == nil:
+		// KnownFields turns misspelled keys into errors.
+		decoder := yaml.NewDecoder(bytes.NewReader(content))
+		decoder.KnownFields(true)
+		if err := decoder.Decode(cfg); err != nil && !errors.Is(err, io.EOF) {
+			return nil, fmt.Errorf("invalid configuration file %q: %w", configPath, err)
+		}
+	case explicitConfig || !errors.Is(err, os.ErrNotExist):
+		return nil, fmt.Errorf("cannot read configuration file %q: %w", configPath, err)
+	}
+
+	// Flags override the file when they are set.
+	if serverURL != "" {
+		cfg.ServerURL = serverURL
+	}
 	if proxyPass != "" {
-		result.ProxyPass = strings.Fields(proxyPass)
+		cfg.ProxyPass = strings.Fields(proxyPass)
 	}
-	result.APISecret = helper.SetValue(apiSecret, result.APISecret).(string)
-	result.Workers = helper.SetValue(workers, result.Workers).(int)
-	result.CAFile = helper.SetValue(caFile, result.CAFile).(string)
-	result.InsecureSkipVerify = insecure || result.InsecureSkipVerify
+	if apiSecret != "" {
+		cfg.APISecret = apiSecret
+	}
+	if caFile != "" {
+		cfg.CAFile = caFile
+	}
 
-	// Store in global config
-	config = &result
+	if err := cfg.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid client configuration:\n%w", err)
+	}
+	return cfg, nil
 }
 
-// GetConfig provides the application configuration
-func GetConfig() (*Config, error) {
-	if config == nil {
-		loadConfig()
-		if config == nil {
-			return nil, errors.New("failed to load configuration")
+// Validate reports every problem in the configuration at once.
+func (c *Config) Validate() error {
+	var errs []error
+
+	if c.APISecret == "" {
+		errs = append(errs, errors.New("api_secret is required (-k or api_secret in the YAML file)"))
+	}
+
+	if err := validateServerURL(c.ServerURL); err != nil {
+		errs = append(errs, fmt.Errorf("server_url: %w", err))
+	}
+
+	if len(c.ProxyPass) == 0 {
+		errs = append(errs, errors.New("proxy_pass needs at least one local service (-p host:port)"))
+	}
+	for _, target := range c.ProxyPass {
+		if err := validateHostPort(target); err != nil {
+			errs = append(errs, fmt.Errorf("proxy_pass %q: %w", target, err))
 		}
 	}
-	return config, nil
+
+	return errors.Join(errs...)
+}
+
+func validateServerURL(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("%q is not a valid URL: %w", raw, err)
+	}
+	if u.Scheme != "https" {
+		return fmt.Errorf("%q must start with https:// (TLS is required)", raw)
+	}
+	if u.Hostname() == "" {
+		return fmt.Errorf("%q has no host", raw)
+	}
+	if u.Port() != "" {
+		if err := validatePort(u.Port()); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateHostPort accepts host:port, with an optional tcp:// or tls:// prefix
+// kept from older configurations.
+func validateHostPort(target string) error {
+	for _, prefix := range []string{"tcp://", "tls://", "http://", "https://"} {
+		target = strings.TrimPrefix(target, prefix)
+	}
+	_, port, err := net.SplitHostPort(target)
+	if err != nil {
+		return fmt.Errorf("must be host:port, for example 127.0.0.1:8082")
+	}
+	return validatePort(port)
+}
+
+func validatePort(port string) error {
+	n, err := strconv.Atoi(port)
+	if err != nil || n < 1 || n > 65535 {
+		return fmt.Errorf("port %q is not in range 1-65535", port)
+	}
+	return nil
 }

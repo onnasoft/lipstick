@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"net"
+
+	"github.com/OnnaSoft/lipstick/client/tlsconf"
 )
 
 func HandleTCP(connection net.Conn, proxyTarget, protocol string) {
@@ -13,9 +15,7 @@ func HandleTCP(connection net.Conn, proxyTarget, protocol string) {
 	if protocol == "tcp" || protocol == "http" {
 		serverConnection, err = net.Dial("tcp", proxyTarget)
 	} else {
-		serverConnection, err = tls.Dial("tcp", proxyTarget, &tls.Config{
-			InsecureSkipVerify: true,
-		})
+		serverConnection, err = tls.Dial("tcp", proxyTarget, tlsconf.Config(""))
 	}
 	if err != nil {
 		fmt.Println("Error al conectar al servidor TCP:", err)

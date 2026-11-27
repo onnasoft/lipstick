@@ -127,12 +127,10 @@ func (manager *Manager) Listen() {
 
 	logger.Default.Info("Listening manager on ", config.Manager.Address)
 
-	var listener net.Listener
-	if manager.tlsConfig != nil {
-		listener, err = tls.Listen("tcp", config.Manager.Address, manager.tlsConfig)
-	} else {
-		listener, err = net.Listen("tcp", config.Manager.Address)
+	if manager.tlsConfig == nil {
+		log.Fatal("manager has no TLS configuration; TLS is required")
 	}
+	listener, err := tls.Listen("tcp", config.Manager.Address, manager.tlsConfig)
 	if err != nil {
 		log.Fatalf("manager cannot listen on %s: %v (check manager.address in the configuration)", config.Manager.Address, err)
 	}

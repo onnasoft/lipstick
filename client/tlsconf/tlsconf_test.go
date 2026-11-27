@@ -35,7 +35,7 @@ func TestDefaultRejectsSelfSignedServer(t *testing.T) {
 	defer srv.Close()
 	addr := strings.TrimPrefix(srv.URL, "https://")
 
-	if err := Configure("", false); err != nil {
+	if err := Configure(""); err != nil {
 		t.Fatal(err)
 	}
 	err := dial(t, addr)
@@ -56,38 +56,32 @@ func TestCAFileTrustsServerCertificate(t *testing.T) {
 	defer srv.Close()
 	addr := strings.TrimPrefix(srv.URL, "https://")
 
-	if err := Configure(serverCertPEM(t, srv), false); err != nil {
+	if err := Configure(serverCertPEM(t, srv)); err != nil {
 		t.Fatal(err)
 	}
+	defer Configure("")
 	if err := dial(t, addr); err != nil {
 		t.Fatalf("trusted certificate rejected: %v", err)
 	}
 }
 
-func TestInsecureSkipsVerification(t *testing.T) {
-	srv := httptest.NewTLSServer(nil)
-	defer srv.Close()
-	addr := strings.TrimPrefix(srv.URL, "https://")
-
-	if err := Configure("", true); err != nil {
-		t.Fatal(err)
+func TestConfigAlwaysRequiresTLS12AndVerification(t *testing.T) {
+	c := Config("example.com")
+	if c.InsecureSkipVerify {
+		t.Fatal("client TLS config must never skip verification")
 	}
-	if !Insecure() {
-		t.Fatal("Insecure() should report true")
+	if c.MinVersion != tls.VersionTLS12 {
+		t.Fatalf("MinVersion = %x, want TLS 1.2", c.MinVersion)
 	}
-	if err := dial(t, addr); err != nil {
-		t.Fatalf("insecure mode rejected the server: %v", err)
-	}
-	Configure("", false)
 }
 
 func TestConfigureRejectsBadCAFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "bad.pem")
 	os.WriteFile(path, []byte("not a certificate"), 0o644)
-	if err := Configure(path, false); err == nil {
+	if err := Configure(path); err == nil {
 		t.Fatal("expected error for a CA file without certificates")
 	}
-	if err := Configure(filepath.Join(t.TempDir(), "missing.pem"), false); err == nil {
+	if err := Configure(filepath.Join(t.TempDir(), "missing.pem")); err == nil {
 		t.Fatal("expected error for a missing CA file")
 	}
 }

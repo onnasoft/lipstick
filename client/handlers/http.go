@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"crypto/tls"
 	"fmt"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/OnnaSoft/lipstick/client/tlsconf"
 	"github.com/OnnaSoft/lipstick/helper"
 )
 
@@ -20,7 +22,15 @@ var client = &http.Client{
 		IdleConnTimeout:     90 * time.Second,
 		DisableKeepAlives:   false,
 		MaxIdleConnsPerHost: 100,
-		TLSClientConfig:     &tls.Config{InsecureSkipVerify: true},
+		// DialTLSContext runs for each new connection, so the trust policy set
+		// at startup (-ca) is always used.
+		DialTLSContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			dialer := &tls.Dialer{
+				NetDialer: &net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second},
+				Config:    tlsconf.Config(""),
+			}
+			return dialer.DialContext(ctx, network, addr)
+		},
 		Dial: (&net.Dialer{
 			Timeout:   30 * time.Second,
 			KeepAlive: 30 * time.Second,
@@ -94,9 +104,7 @@ func handleWebSocket(connection net.Conn, proxyTarget, protocol string, requestT
 	if protocol == "http" {
 		serverConnection, err = net.Dial("tcp", proxyTarget)
 	} else {
-		serverConnection, err = tls.Dial("tcp", proxyTarget, &tls.Config{
-			InsecureSkipVerify: true,
-		})
+		serverConnection, err = tls.Dial("tcp", proxyTarget, tlsconf.Config(""))
 	}
 	if err != nil {
 		fmt.Println("Error connecting to server:", err)

@@ -9,14 +9,13 @@ import (
 	"net/http"
 )
 
+// NewListenerManagerTCP listens for TLS connections only. A nil tlsConfig is a
+// programming error and is refused.
 func NewListenerManagerTCP(addr string, tlsConfig *tls.Config) (*ListenerManager, error) {
-	var l net.Listener
-	var err error
-	if tlsConfig != nil {
-		l, err = tls.Listen("tcp", addr, tlsConfig)
-	} else {
-		l, err = net.Listen("tcp", addr)
+	if tlsConfig == nil {
+		return nil, errors.New("TLS configuration is required")
 	}
+	l, err := tls.Listen("tcp", addr, tlsConfig)
 	if err != nil {
 		return nil, err
 	}

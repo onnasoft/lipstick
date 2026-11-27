@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 
 	"gopkg.in/yaml.v3"
@@ -69,6 +70,10 @@ type AppConfig struct {
 
 const minAdminSecretKeyLength = 16
 
+// placeholderPrefix marks the value used in config.yml.example. Refusing it
+// stops a copied example file from starting with a public key.
+const placeholderPrefix = "change-me"
+
 var validSSLModes = map[string]bool{
 	"disable":     true,
 	"allow":       true,
@@ -85,6 +90,8 @@ func (c AppConfig) Validate() error {
 
 	if len(c.AdminSecretKey) < minAdminSecretKeyLength {
 		errs = append(errs, fmt.Errorf("admin_secret_key is required and must be at least %d characters", minAdminSecretKeyLength))
+	} else if strings.HasPrefix(c.AdminSecretKey, placeholderPrefix) {
+		errs = append(errs, errors.New("admin_secret_key still has the example value; generate one with: openssl rand -hex 24"))
 	}
 
 	listeners := []struct{ name, addr string }{
@@ -124,8 +131,13 @@ func (c AppConfig) Validate() error {
 		errs = append(errs, fmt.Errorf("nats.url: %w", err))
 	}
 
-	if (c.TLS.CertificatePath == "") != (c.TLS.KeyPath == "") {
-		errs = append(errs, errors.New("tls.certificate_path and tls.key_path must be set together"))
+	// TLS is mandatory: the tunnel never carries plain-text traffic. If the
+	// files do not exist yet, they are generated on startup (see Prepare).
+	if c.TLS.CertificatePath == "" {
+		errs = append(errs, errors.New("tls.certificate_path is required"))
+	}
+	if c.TLS.KeyPath == "" {
+		errs = append(errs, errors.New("tls.key_path is required"))
 	}
 
 	return errors.Join(errs...)
@@ -216,6 +228,12 @@ func loadConfig() (AppConfig, error) {
 		},
 		Nats: NatsConfig{
 			URL: "nats://localhost:4222",
+		},
+		TLS: TLSConfig{
+			// Relative paths are resolved against the directory of the
+			// configuration file.
+			CertificatePath: "certs/server.crt",
+			KeyPath:         "certs/server.key",
 		},
 	}
 

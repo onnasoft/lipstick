@@ -1,16 +1,41 @@
-keyword: 
+# Ejemplo de configuración del servidor lipstick.
+#
+# Copia este archivo a config.yml y cambia los valores marcados con CAMBIAR.
+# Los valores que no escribas usan los valores por defecto que se muestran.
+# Las rutas relativas se resuelven desde la carpeta de este archivo.
+# TLS es obligatorio: el servidor no acepta conexiones en texto plano.
+# Las claves desconocidas hacen que el servidor no arranque.
+
+# CAMBIAR. Clave de la admin API. Genera una con: openssl rand -hex 24
+admin_secret_key: "change-me-run-openssl-rand-hex-24"
+
+# Visitantes: aquí entran las peticiones públicas (https://).
 proxy:
-  addr: :8080
-manager: 
-  addr: :8081
-certs:
-  cert: 
-  key: 
+  address: ":5050"
+
+# Clientes: aquí se conecta el cliente del túnel (https://).
+manager:
+  address: ":5051"
+
+# Admin API: solo para crear y editar dominios. Escucha solo en local.
+admin:
+  address: "127.0.0.1:5052"
+
+# Obligatorio. Si los archivos no existen, se genera un certificado autofirmado
+# en esas rutas al arrancar. Para usar tu propio certificado, pon sus rutas.
+tls:
+  certificate_path: "certs/server.crt"
+  key_path: "certs/server.key"
+
+# Base de datos PostgreSQL. CAMBIAR la contraseña y, si aplica, el usuario y la base.
 database:
-  host: localhost
+  host: "localhost"
   port: 5432
-  user: 
-  password: 
-  dbname: 
-  sslmode: 
-  
+  user: "postgres"
+  password: "change-me"   # CAMBIAR
+  database: "app_db"
+  ssl_mode: "disable"     # disable, allow, prefer, require, verify-ca o verify-full
+
+# Servidor NATS, usado para entregar los tickets a los clientes.
+nats:
+  url: "nats://localhost:4222"
