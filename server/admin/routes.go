@@ -3,8 +3,12 @@ package admin
 import (
 	"crypto/subtle"
 	"net/http"
+	"time"
 
+	"github.com/OnnaSoft/lipstick/logger"
 	"github.com/OnnaSoft/lipstick/server/auth"
+	"github.com/OnnaSoft/lipstick/server/config"
+	"github.com/OnnaSoft/lipstick/server/db"
 	"github.com/gin-gonic/gin"
 )
 
@@ -22,6 +26,7 @@ func configureRouter(admin *Admin) {
 	const domainNamePath = "/domains/:domainName"
 
 	r.GET(domainNamePath, router.getDomain)
+	r.GET(domainNamePath+"/traffic", router.getTraffic)
 	r.POST("/domains", router.addDomain)
 	r.PATCH(domainNamePath, router.updateDomain)
 	r.DELETE(domainNamePath, router.deleteDomain)
@@ -171,4 +176,56 @@ func (r *router) deleteDomain(c *gin.Context) {
 
 func (r *router) health(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+}
+
+// getTraffic returns the daily usage of one domain between two dates, both in
+// YYYY-MM-DD format. It is in the admin API because it reveals per-domain usage.
+func (r *router) getTraffic(c *gin.Context) {
+	if !r.authorized(c) {
+		return
+	}
+
+	domainName := c.Param("domainName")
+	fromParam := c.Query("from")
+	toParam := c.Query("to")
+
+	from, err := time.Parse("2006-01-02", fromParam)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid 'from' parameter, use YYYY-MM-DD"})
+		return
+	}
+	to, err := time.Parse("2006-01-02", toParam)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid 'to' parameter, use YYYY-MM-DD"})
+		return
+	}
+	to = to.Add(23*time.Hour + 59*time.Minute + 59*time.Second)
+
+	conf, err := config.GetConfig()
+	if err != nil {
+		logger.Default.Error("Error getting configuration:", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Unable to get config"})
+		return
+	}
+
+	connection, err := db.GetConnection(conf.Database)
+	if err != nil {
+		logger.Default.Error("Error connecting to database:", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Unable to connect to database"})
+		return
+	}
+
+	var consumptions []db.DailyConsumption
+	if err := connection.Where("domain = ? AND date >= ? AND date <= ?", domainName, from, to).Find(&consumptions).Error; err != nil {
+		logger.Default.Error("Error reading traffic for domain:", domainName, "Error:", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Unable to read traffic"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"domain":       domainName,
+		"from":         fromParam,
+		"to":           toParam,
+		"consumptions": consumptions,
+	})
 }

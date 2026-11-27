@@ -77,7 +77,7 @@ func (cl *CustomListener) handle(conn net.Conn) {
 		return
 	}
 
-	urlsToIgnore := []string{"/", "/health", "/traffic"}
+	urlsToIgnore := []string{"/", "/health"}
 	if slices.Contains(urlsToIgnore, url) {
 		logger.Default.Debug("Request to ignored URL:", url)
 		cl.conn <- helper.NewConnWithBuffer(conn, buffer[:n])

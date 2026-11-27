@@ -47,6 +47,8 @@ curl -sk -X POST https://localhost:5052/domains \
 
 Para ver los dominios registrados: `curl -sk https://localhost:5052/domains -H "Authorization: $ADMIN"`. La respuesta no incluye la clave del cliente; la clave solo se puede escribir, no leer.
 
+Para ver el consumo diario de un dominio entre dos fechas (formato `YYYY-MM-DD`): `curl -sk "https://localhost:5052/domains/localhost/traffic?from=2026-01-01&to=2026-12-31" -H "Authorization: $ADMIN"`. Ya no está en el puerto de clientes.
+
 La admin API solo escucha en `127.0.0.1`, así que no es accesible desde otras máquinas. Usa `-k` porque el certificado es autofirmado.
 
 `client_key.txt` contiene la clave del cliente. Ya está en `.gitignore`, así que no se sube al repo.

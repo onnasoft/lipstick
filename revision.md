@@ -71,6 +71,11 @@ Lipstick exposes local ports to the internet through a reverse tunnel. The main 
   - `/traffic` returns usage data for any domain, selected by `Host`, with no authentication.
   - `/health` returns 200 for an existing domain and 404 otherwise, so domain names can be enumerated.
 - **Fix:** Require the admin key for `/traffic`. Return the same response for unknown domains on `/health`, or drop the domain-specific detail.
+- **Status:** Fixed.
+  - Traffic statistics moved to the admin API: `GET /domains/:domainName/traffic?from=&to=`. It requires the admin key and validates the dates before querying the database. The manager port no longer serves it.
+  - `/health` on the manager port returns `{"status":"ok"}` for every host, with no domain details.
+- **Verified:** `server/manager/health_test.go` checks that health is identical for known and unknown domains, and that `/traffic` is not served on the manager. `server/admin/admin_test.go` checks the key and date validation. End to end, the admin traffic endpoint returned the stored usage with the key and 401 without it, and the tunnel kept working (8 of 8).
+- **Note:** a request to `/traffic` on the manager port now gets 502 instead of 404. The listener treats any single-segment path as a tunnel ticket. It reveals nothing, but it is worth tidying up with the ticket handling.
 
 ### 6. Private key committed to the repository
 - **Where:** `certs/lipstick.key`, `certs/lipstick.csr`, `certs/lipstick.crt`; `.gitignore`

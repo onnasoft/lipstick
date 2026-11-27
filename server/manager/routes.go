@@ -4,11 +4,8 @@ import (
 	"crypto/subtle"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/OnnaSoft/lipstick/logger"
-	"github.com/OnnaSoft/lipstick/server/config"
-	"github.com/OnnaSoft/lipstick/server/db"
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 )
@@ -23,92 +20,23 @@ type router struct {
 	manager *Manager
 }
 
+// The manager port is reachable by tunnel clients and must not reveal anything
+// about domains. Traffic statistics live in the admin API, which requires the
+// admin key.
 func configureRouter(manager *Manager) {
 	router := &router{manager: manager}
 	r := gin.New()
 
-	r.GET("/traffic", router.getTraffic)
 	r.GET("/health", router.health)
 	r.GET("/", router.upgrade)
 
 	manager.engine = r
 }
 
-func (r *router) getTraffic(c *gin.Context) {
-	host := c.Request.Host
-	domainName := strings.Split(host, ":")[0]
-
-	fromParam := c.Query("from")
-	toParam := c.Query("to")
-
-	from, err := time.Parse("2006-01-02", fromParam)
-	if err != nil {
-		logger.Default.Error("Invalid 'from' parameter:", err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid 'from' parameter"})
-		return
-	}
-
-	to, err := time.Parse("2006-01-02", toParam)
-	if err != nil {
-		logger.Default.Error("Invalid 'to' parameter:", err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid 'to' parameter"})
-		return
-	}
-
-	to = to.Add(23*time.Hour + 59*time.Minute + 59*time.Second)
-
-	conf, err := config.GetConfig()
-	if err != nil {
-		logger.Default.Error("Error getting configuration:", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Unable to get config"})
-		return
-	}
-
-	connection, err := db.GetConnection(conf.Database)
-	if err != nil {
-		logger.Default.Error("Error connecting to database:", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Unable to connect to database"})
-		return
-	}
-
-	var consumptions []db.DailyConsumption
-	connection.Where("domain = ? AND date >= ? AND date <= ?", domainName, from, to).Find(&consumptions)
-
-	logger.Default.Info("Traffic data retrieved for domain:", domainName)
-	c.JSON(http.StatusOK, gin.H{
-		"domain":       domainName,
-		"from":         fromParam,
-		"to":           toParam,
-		"consumptions": consumptions,
-	})
-}
-
+// health answers the same way for every host and every domain, so it cannot be
+// used to find out which domains exist or how much they transfer.
 func (r *router) health(c *gin.Context) {
-	host := c.Request.Host
-	domainName := strings.Split(host, ":")[0]
-
-	if domain, ok := r.manager.GetHub(domainName); ok {
-		logger.Default.Info("Health check for active domain:", domainName)
-		c.JSON(http.StatusOK, gin.H{
-			"status":     "ok",
-			"domain":     domain.HubName,
-			"data_usage": domain.totalDataTransferred,
-		})
-		return
-	}
-
-	domain, err := r.manager.authManager.GetDomain(domainName)
-	if err != nil {
-		logger.Default.Error("Domain not found in health check:", domainName, "Error:", err)
-		c.String(http.StatusNotFound, "Domain "+domainName+" not found")
-		return
-	}
-
-	logger.Default.Info("Health check for inactive domain:", domainName)
-	c.JSON(http.StatusOK, gin.H{
-		"status": "ok",
-		"domain": domain.Name,
-	})
+	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
 
 func (r *router) upgrade(c *gin.Context) {

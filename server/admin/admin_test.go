@@ -88,3 +88,18 @@ func TestAdminHealthIsPublic(t *testing.T) {
 		t.Fatalf("health got %d, want 200", rec.Code)
 	}
 }
+
+func TestTrafficRequiresAdminKey(t *testing.T) {
+	a := newTestAdmin(testKey)
+	if rec := do(a, http.MethodGet, "/domains/app.example.com/traffic?from=2026-01-01&to=2026-01-31", ""); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("traffic without key: got %d, want 401", rec.Code)
+	}
+}
+
+func TestTrafficValidatesDatesBeforeDatabase(t *testing.T) {
+	a := newTestAdmin(testKey)
+	rec := do(a, http.MethodGet, "/domains/app.example.com/traffic?from=bad&to=2026-01-31", testKey)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("invalid from: got %d, want 400", rec.Code)
+	}
+}
