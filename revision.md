@@ -339,6 +339,18 @@ Lipstick exposes local ports to the internet through a reverse tunnel. The main 
 
 ---
 
+### 32. Opt-in plain TCP ports for intranet services (design decision, new attack surface)
+- **Where:** `server/manager/intranet.go`, `server/manager/routes.go` (`upgrade`, `writeRefusal`), `server/config/config.go` (`intranet_ports`), `client/config/config.go` (`-intranet-port`), `client/main.go`
+- **What:** Services that cannot speak TLS (for example RAW printing on 9100) cannot be told apart by domain on a plain-TCP port, because the connection carries no SNI or Host. The port itself identifies the service. A client asks for a port in the upgrade request (`X-Lipstick-Intranet-Port`). The server reserves it only if the policy allows: the domain must be listed, the port must be in `port_range`, the port must be free, and the bind address must be a specific intranet interface (not `0.0.0.0` or `::`). Each port serves one domain, and connections from networks outside `allowed_cidrs` are closed before the tunnel. Ports close when the domain has no clients left. The tunnel to the client stays TLS.
+- **Risk:** this is the first plain-text path into the server. It is an exception to "TLS is always required", and it is the main exposure to review.
+- **Mitigations in code:** the policy is owned by the server, not the client; the client only chooses a port inside it. Refusals are explicit (403 policy, 409 taken). The source is filtered on accept. The config refuses a wildcard bind, a wide-open CIDR, a domain without networks, a duplicate domain and a range that overlaps the server's own ports.
+- **Mitigations expected from the operator:** open only the port range, and only to the intranet ranges, in the cloud firewall or security group. Prefer a private bind address.
+- **Verified:** `server/config/intranet_test.go` covers the policy rules. `server/manager/intranet_test.go` covers refusal by domain and by range, the taken port, service to an allowed source, refusal of other sources, and release of the port. `client/config/intranet_test.go` covers the flag. End to end, a reserved port answered an allowed loopback source with the backend response, an out-of-range request got 403 on the wire and the client showed it, and the TLS tunnel kept working.
+- **Not verified:**
+  - A refusal from a non-allowed address on another machine (the tests run on loopback).
+  - The race where a domain loses its last client while another reserves the same port at the same moment. The release runs when the hub goes idle, so a reservation that lands in that window can be closed. This needs a test.
+  - A 409 end to end (two domains on one port). It is covered by unit tests only.
+
 ## Recommended order
 
 1. Items 1, 2, 3, and 4: authentication, unpredictable tickets, TLS verification, and admin API hardening.

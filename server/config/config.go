@@ -66,6 +66,42 @@ type AppConfig struct {
 	Database       DatabaseConfig `yaml:"database"`
 	Redis          RedisConfig    `yaml:"redis"`
 	Nats           NatsConfig     `yaml:"nats"`
+
+	// IntranetPorts reserves plain-TCP ports for services that cannot speak TLS.
+	// Clients ask for a port; the server decides whether it may open it, and
+	// from which networks. Absent means disabled.
+	IntranetPorts *IntranetPortsConfig `yaml:"intranet_ports"`
+}
+
+// IntranetPortsConfig is the policy for intranet ports. The server owns it: a
+// client can only ask for a port inside the range and for its own domain.
+type IntranetPortsConfig struct {
+	// BindAddress is the intranet interface where reserved ports listen. A
+	// wildcard address is refused, so the ports cannot face the internet.
+	BindAddress string `yaml:"bind_address"`
+	// PortRange is [min, max], inclusive.
+	PortRange []int `yaml:"port_range"`
+	// Domains lists the domains allowed to reserve a port, with the networks
+	// that may connect to it.
+	Domains []IntranetDomainConfig `yaml:"domains"`
+}
+
+// IntranetDomainConfig is the policy for one domain.
+type IntranetDomainConfig struct {
+	Name         string   `yaml:"name"`
+	AllowedCIDRs []string `yaml:"allowed_cidrs"`
+}
+
+// DomainNetworks returns the parsed networks of a domain. Validate has already
+// checked them.
+func (c IntranetDomainConfig) DomainNetworks() []*net.IPNet {
+	nets := make([]*net.IPNet, 0, len(c.AllowedCIDRs))
+	for _, cidr := range c.AllowedCIDRs {
+		if _, n, err := net.ParseCIDR(cidr); err == nil {
+			nets = append(nets, n)
+		}
+	}
+	return nets
 }
 
 const minAdminSecretKeyLength = 16
@@ -129,6 +165,10 @@ func (c AppConfig) Validate() error {
 
 	if err := validateNatsURL(c.Nats.URL); err != nil {
 		errs = append(errs, fmt.Errorf("nats.url: %w", err))
+	}
+
+	if c.IntranetPorts != nil {
+		errs = append(errs, c.IntranetPorts.validate(seen)...)
 	}
 
 	// TLS is mandatory: the tunnel never carries plain-text traffic. If the
@@ -376,4 +416,64 @@ func resolvePath(baseDir, p string) string {
 		return p
 	}
 	return filepath.Join(baseDir, p)
+}
+
+func (p *IntranetPortsConfig) validate(seen map[string]string) []error {
+	var errs []error
+
+	ip := net.ParseIP(p.BindAddress)
+	switch {
+	case ip == nil:
+		errs = append(errs, fmt.Errorf("intranet_ports.bind_address %q is not an IP address", p.BindAddress))
+	case ip.IsUnspecified():
+		errs = append(errs, errors.New("intranet_ports.bind_address must be one intranet interface, not 0.0.0.0 or ::"))
+	}
+
+	if len(p.PortRange) != 2 {
+		errs = append(errs, errors.New("intranet_ports.port_range must be [min, max]"))
+	} else {
+		min, max := p.PortRange[0], p.PortRange[1]
+		if min < 1 || max > 65535 || min > max {
+			errs = append(errs, fmt.Errorf("intranet_ports.port_range [%d, %d] is not a valid range of ports", min, max))
+		}
+		// seen maps each listener address (host:port) to its config name. A port
+		// range must not cover a listener the server already uses.
+		for listenAddr, configName := range seen {
+			_, port, err := net.SplitHostPort(listenAddr)
+			if err != nil {
+				continue
+			}
+			if n, err := strconv.Atoi(port); err == nil && n >= min && n <= max {
+				errs = append(errs, fmt.Errorf("intranet_ports.port_range overlaps %s (%s)", configName, listenAddr))
+			}
+		}
+	}
+
+	if len(p.Domains) == 0 {
+		errs = append(errs, errors.New("intranet_ports.domains is empty: no domain may reserve a port"))
+	}
+	names := map[string]bool{}
+	for i, d := range p.Domains {
+		label := fmt.Sprintf("intranet_ports.domains[%d]", i)
+		if d.Name == "" || strings.Contains(d.Name, ":") || strings.Contains(d.Name, "/") {
+			errs = append(errs, fmt.Errorf("%s.name must be a bare host name", label))
+		} else if names[d.Name] {
+			errs = append(errs, fmt.Errorf("%s.name %q is listed twice", label, d.Name))
+		}
+		names[d.Name] = true
+		if len(d.AllowedCIDRs) == 0 {
+			errs = append(errs, fmt.Errorf("%s.allowed_cidrs is required: a domain with no networks cannot use its port", label))
+		}
+		for _, cidr := range d.AllowedCIDRs {
+			_, n, err := net.ParseCIDR(cidr)
+			if err != nil {
+				errs = append(errs, fmt.Errorf("%s.allowed_cidrs: %q is not a CIDR range", label, cidr))
+				continue
+			}
+			if ones, _ := n.Mask.Size(); ones == 0 {
+				errs = append(errs, fmt.Errorf("%s.allowed_cidrs: %q allows the whole internet; list the intranet ranges", label, cidr))
+			}
+		}
+	}
+	return errs
 }

@@ -72,6 +72,7 @@ type Manager struct {
 	trafficManager *traffic.TrafficManager
 	authManager    auth.AuthManager
 	tlsConfig      *tls.Config
+	intranet       *intranetPorts
 }
 
 func SetupManager(tlsConfig *tls.Config) *Manager {
@@ -101,7 +102,10 @@ func (m *Manager) getOrCreateHub(domain string) *NetworkHub {
 	hub := NewNetworkHub(domain, m.trafficManager, 64*1024)
 	// When the hub stops for lack of clients, forget it. CompareAndDelete leaves
 	// a newer hub for the same domain alone.
-	hub.onIdle = func() { m.hubs.CompareAndDelete(domain, hub) }
+	hub.onIdle = func() {
+		m.hubs.CompareAndDelete(domain, hub)
+		m.releaseIntranetPorts(domain)
+	}
 
 	actual, loaded := m.hubs.LoadOrStore(domain, hub)
 	if loaded {
@@ -127,6 +131,7 @@ func (m *Manager) GetHub(domain string) (*NetworkHub, bool) {
 func (m *Manager) DropHub(domain string) {
 	if value, ok := m.hubs.LoadAndDelete(domain); ok {
 		logger.Default.Info("Dropping hub for domain:", domain)
+		m.releaseIntranetPorts(domain)
 		value.(*NetworkHub).stop()
 	}
 }
@@ -134,6 +139,7 @@ func (m *Manager) DropHub(domain string) {
 // Close stops every hub and flushes the pending traffic counters. Called on
 // shutdown.
 func (m *Manager) Close() {
+	m.releaseAllIntranetPorts()
 	m.hubs.Range(func(key, value any) bool {
 		m.hubs.Delete(key)
 		value.(*NetworkHub).stop()

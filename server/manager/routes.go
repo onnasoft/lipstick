@@ -1,8 +1,12 @@
 package manager
 
 import (
+	"bufio"
 	"crypto/subtle"
+	"errors"
+	"net"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/OnnaSoft/lipstick/logger"
@@ -73,6 +77,23 @@ func (r *router) upgrade(c *gin.Context) {
 		return
 	}
 
+	// A client may ask for an intranet port in the upgrade request. The server
+	// checks the request against its policy. A refusal is written on this
+	// connection, so the client can read the status line and report it.
+	if raw := c.GetHeader(intranetPortHeader); raw != "" {
+		port, err := strconv.Atoi(raw)
+		if err != nil {
+			err = ErrPortOutOfRange
+		} else {
+			err = r.manager.reserveIntranetPort(domain.Name, port)
+		}
+		if err != nil {
+			logger.Default.Error("Intranet port request refused, domain:", domain.Name, "port:", raw, "reason:", err)
+			writeRefusal(rw, conn, err)
+			return
+		}
+	}
+
 	hub := r.manager.getOrCreateHub(domain.Name)
 
 	rw.WriteString("HTTP/1.1 200 OK\r\n")
@@ -95,4 +116,22 @@ func (r *router) upgrade(c *gin.Context) {
 		logger.Default.Error("hub stopped before the client could register:", domain.Name)
 		conn.Close()
 	}
+}
+
+// intranetPortHeader carries the port a client asks to reserve.
+const intranetPortHeader = "X-Lipstick-Intranet-Port"
+
+// writeRefusal answers a request that the policy does not allow, with the
+// status the client can read, and closes the connection.
+func writeRefusal(rw *bufio.ReadWriter, conn net.Conn, err error) {
+	status := "403 Forbidden"
+	if errors.Is(err, ErrPortTaken) {
+		status = "409 Conflict"
+	}
+	rw.WriteString("HTTP/1.1 " + status + "\r\n")
+	rw.WriteString("Content-Type: text/plain\r\n")
+	rw.WriteString("\r\n")
+	rw.WriteString(err.Error() + "\n")
+	rw.Flush()
+	conn.Close()
 }

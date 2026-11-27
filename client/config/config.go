@@ -24,6 +24,9 @@ type Config struct {
 	ServerURL string   `yaml:"server_url"` // Server manager URL. Always https://
 	ProxyPass []string `yaml:"proxy_pass"` // Local services to expose, host:port
 	CAFile    string   `yaml:"ca_file"`    // PEM file with the server certificate or its CA (needed for self-signed servers)
+	// IntranetPort asks the server to reserve this plain-TCP port for the domain,
+	// inside the range its policy allows. 0 means no intranet port.
+	IntranetPort int `yaml:"intranet_port"`
 }
 
 const (
@@ -58,17 +61,21 @@ func loadConfig(args []string) (*Config, error) {
 	defaultConfigPath := filepath.Join(execDir, "config.client.yml")
 
 	var configPath, serverURL, proxyPass, apiSecret, caFile string
+	var intranetPort int
 	fs.StringVar(&configPath, "c", defaultConfigPath, "Path to the configuration file")
 	fs.StringVar(&serverURL, "s", "", "Server manager URL, https://host:port (default "+defaultServerURL+")")
 	fs.StringVar(&proxyPass, "p", "", "Local services to expose, host:port, separated by spaces (default "+defaultProxyPass+")")
 	fs.StringVar(&apiSecret, "k", "", "Domain API key")
 	fs.StringVar(&caFile, "ca", "", "PEM file with the server certificate or its CA")
+	fs.IntVar(&intranetPort, "intranet-port", 0, "Ask the server to reserve this plain-TCP port for the domain (intranet services only)")
 	if err := fs.Parse(args); err != nil {
 		return nil, err
 	}
 
 	explicitConfig := false
+	set := map[string]bool{}
 	fs.Visit(func(f *flag.Flag) {
+		set[f.Name] = true
 		if f.Name == "c" {
 			explicitConfig = true
 		}
@@ -105,6 +112,9 @@ func loadConfig(args []string) (*Config, error) {
 	if caFile != "" {
 		cfg.CAFile = caFile
 	}
+	if set["intranet-port"] {
+		cfg.IntranetPort = intranetPort
+	}
 
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid client configuration:\n%w", err)
@@ -115,6 +125,10 @@ func loadConfig(args []string) (*Config, error) {
 // Validate reports every problem in the configuration at once.
 func (c *Config) Validate() error {
 	var errs []error
+
+	if c.IntranetPort < 0 || c.IntranetPort > 65535 {
+		errs = append(errs, fmt.Errorf("intranet_port %d is not a port number", c.IntranetPort))
+	}
 
 	if c.APISecret == "" {
 		errs = append(errs, errors.New("api_secret is required (-k or api_secret in the YAML file)"))

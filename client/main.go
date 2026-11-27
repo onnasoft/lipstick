@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"time"
 
@@ -70,6 +71,9 @@ func startClient(proxyTarget string) {
 	fmt.Println("Connecting to", serverURL)
 	headers := http.Header{}
 	headers.Set("authorization", configuration.APISecret)
+	if configuration.IntranetPort > 0 {
+		headers.Set("X-Lipstick-Intranet-Port", strconv.Itoa(configuration.IntranetPort))
+	}
 
 	retryDelay := minRetryDelay
 	for {

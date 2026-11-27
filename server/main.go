@@ -54,6 +54,15 @@ func main() {
 	admin := admin.SetupAdmin(conf.Admin.Address, conf.AdminSecretKey, tlsConfig)
 	admin.SetDomainChangedHook(manager.DropHub)
 
+	if conf.IntranetPorts != nil {
+		policy := make(map[string][]*net.IPNet, len(conf.IntranetPorts.Domains))
+		for _, d := range conf.IntranetPorts.Domains {
+			policy[d.Name] = d.DomainNetworks()
+		}
+		manager.ConfigureIntranetPorts(conf.IntranetPorts.BindAddress, conf.IntranetPorts.PortRange[0], conf.IntranetPorts.PortRange[1], policy)
+		logger.Default.Info("Intranet ports enabled on", conf.IntranetPorts.BindAddress, "range", conf.IntranetPorts.PortRange)
+	}
+
 	proxy.OnListen(func() { logger.Default.Info("Listening proxy on ", conf.Proxy.Address) })
 	proxy.OnClose(func() { logger.Default.Info("Proxy closed") })
 	proxy.OnTCPConn(func(c net.Conn) {

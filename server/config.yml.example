@@ -39,3 +39,18 @@ database:
 # Servidor NATS, usado para entregar los tickets a los clientes.
 nats:
   url: "nats://localhost:4222"
+
+# Opcional. Puertos TCP SIN TLS para servicios de la intranet que no pueden
+# hablar TLS (impresoras, cámaras, equipos antiguos). El cliente pide un puerto
+# al conectarse, y el servidor lo abre solo si la política lo permite:
+#   - bind_address: una interfaz de la intranet. 0.0.0.0 y :: se rechazan.
+#   - port_range: los puertos que los clientes pueden pedir.
+#   - domains: quién puede pedir puerto y desde qué redes se puede conectar.
+# El puerto no tiene TLS, pero el túnel hacia el cliente sigue siendo TLS.
+# intranet_ports:
+#   bind_address: "10.0.0.10"
+#   port_range: [5100, 5199]
+#   domains:
+#     - name: "robot-42.example.com"
+#       allowed_cidrs:
+#         - "10.20.0.0/16"
