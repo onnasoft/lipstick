@@ -111,6 +111,24 @@ func (r *router) health(c *gin.Context) {
 }
 
 func (r *router) upgrade(c *gin.Context) {
+	host := c.Request.Host
+	domainName := strings.Split(host, ":")[0]
+	domain, err := r.manager.authManager.GetDomain(domainName)
+	if err != nil {
+		logger.Default.Error("Unable to get domain:", domainName, "Error:", err)
+		c.JSON(http.StatusNotFound, gin.H{"error": "Domain not found"})
+		return
+	}
+
+	// Authenticate the tunnel client before hijacking the connection.
+	// An empty ApiKey must never match, so a misconfigured domain stays closed.
+	providedKey := c.GetHeader("Authorization")
+	if domain.ApiKey == "" || subtle.ConstantTimeCompare([]byte(providedKey), []byte(domain.ApiKey)) != 1 {
+		logger.Default.Error("Unauthorized tunnel client for domain:", domainName)
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
 	w := c.Writer
 	hijacker, ok := w.(http.Hijacker)
 	if !ok {
@@ -123,15 +141,6 @@ func (r *router) upgrade(c *gin.Context) {
 	if err != nil {
 		logger.Default.Error("Failed to hijack connection:", err)
 		http.Error(w, "Failed to hijack connection", http.StatusInternalServerError)
-		return
-	}
-
-	host := c.Request.Host
-	domainName := strings.Split(host, ":")[0]
-	domain, err := r.manager.authManager.GetDomain(domainName)
-	if err != nil {
-		logger.Default.Error("Unable to get domain:", domainName, "Error:", err)
-		conn.Close()
 		return
 	}
 
