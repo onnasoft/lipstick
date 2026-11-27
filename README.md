@@ -58,7 +58,7 @@ Si ningún cliente atiende en 30 segundos, el visitante recibe `502`. Cada hub a
 
 - **Hacia afuera (visitantes y clientes):** siempre TLS. No hay modo sin cifrado.
 - **Hacia tu servicio local:** `host:puerto` (TCP plano, pensado para `127.0.0.1`) o `https://host:puerto` (TLS verificado). El túnel en sí siempre va cifrado.
-- **Solo TCP.** No hay tráfico UDP.
+- **UDP solo en puertos de intranet.** El tráfico UDP de un visitante no cruza el túnel por el proxy. Solo los puertos de intranet reservados por el cliente lo llevan, sin TLS, como los TCP. Ver [Puertos UDP de intranet](#puertos-udp-de-intranet).
 
 - **Multiplexación.** El cliente abre 8 conexiones TLS autenticadas, y cada una lleva una sesión yamux. Cada visitante es un stream dentro de una sesión, así que no hace falta una conexión TLS nueva por visitante. Un visitante sin sesión disponible usa el camino del ticket, y nada deja de funcionar. Las sesiones se reconectan solas si el servidor se reinicia.
 
@@ -199,7 +199,7 @@ Lipstick no es el mejor punto de partida si necesitas **producción con SLA**, *
 
 ### Técnicas
 
-- **Solo TCP.** No hay UDP. Quedan fuera DNS sobre UDP, QUIC, WebRTC con medios y multicast (como el descubrimiento de DDS en ROS 2).
+- **UDP solo en intranet.** Un puerto UDP de intranet lleva datagramas unicast, enmarcados sobre TCP, sin latencia garantizada: el túnel sigue siendo TCP por debajo, así que una pérdida retrasa los datagramas que vienen detrás. QUIC, WebRTC con medios y multicast (como el descubrimiento de DDS en ROS 2) quedan fuera.
 - **Un servidor por dominio.** La conexión inversa tiene que llegar a la instancia que tiene al visitante en espera. Un balanceador que reparta clientes entre instancias no funciona tal cual.
 - **El cliente y el servidor tienen que poder alcanzar el mismo host y puerto.** El servidor no conoce la IP pública del cliente, y el cliente siempre marca el host de la URL que configuró.
 - **Latencia y ancho de banda.** Cada byte pasa por el servidor. Un visitante lejano y un servidor lejano suman latencia. El ancho de banda lo limita el servidor.
@@ -420,13 +420,34 @@ Varios servidores pueden servir los mismos dominios. Todos usan la misma base de
 
 - Cada servidor publica por NATS, cada 5 segundos, los dominios para los que tiene sesiones de cliente. Un servidor que deja de publicar se olvida a los 15 segundos.
 - NATS exige credenciales. Un cluster sin credenciales o con `nats://` no arranca. Sin credenciales, NATS rechaza la conexión, y un cliente anónimo no puede leer la presencia (`Authorization Violation`).
-- Un visitante que llega a un servidor sin sesión para su dominio se **reenvía** a un servidor que sí la tiene. El reenvío va por una conexión TLS verificada con el certificado del cluster, y se autentica con una prueba hecha con la clave del dominio.
+- Un visitante que llega a un servidor sin sesión para su dominio se **reenvía** a un servidor que sí la tiene. El reenvío va por una sesión persistente, abierta una vez por par y dominio, sobre una conexión TLS verificada con el certificado del cluster. La sesión se autentica con una prueba hecha con la clave del dominio, y cada visita es un stream dentro de ella.
 - El servidor que recibe el reenvío entrega la visita a una de sus sesiones. El puerto de entrada original se conserva en el registro de peticiones.
 - Si ningún servidor tiene sesión para el dominio, el visitante recibe `502` de inmediato.
 
-Coste: cada visita reenviada pasa por dos servidores. Medido en una misma máquina, con conexiones persistentes el reenvío casi no cuesta (unas 10 200 frente a 10 900 peticiones por segundo). Con una conexión nueva por petición baja a unas 1 700 frente a 2 700, porque el servidor de entrada abre una conexión TLS nueva por visita hacia el otro servidor. Una sesión persistente entre servidores lo reduciría; no está hecha.
+Coste: medido en una misma máquina, un visitante reenviado cuesta casi lo mismo que uno atendido directamente. Con conexión nueva por petición, unas 2 500 peticiones por segundo frente a 2 700 directas (p50 de 4.0 ms frente a 3.6 ms). Con conexiones persistentes, unas 9 700 frente a 10 900.
 
 Pendiente: no se ha probado con servidores en máquinas distintas, ni con caídas de un servidor en mitad de una carga.
+
+## Puertos UDP de intranet
+
+Un cliente puede pedir un puerto UDP además de un puerto TCP, con las mismas reglas: el servidor decide el rango, el dominio y las redes permitidas, y el puerto no tiene TLS.
+
+- Cada origen que envía al puerto (IP y puerto de origen) recibe su propio flujo. Los datagramas viajan enmarcados con una longitud de dos bytes sobre una sesión del cliente, así que sus límites se conservan.
+- El cliente reenvía cada flujo a su servicio UDP local, `udp_target`, y devuelve las respuestas al origen que las pidió.
+- Un flujo sin tráfico durante 60 segundos se cierra. El siguiente datagrama de ese origen abre uno nuevo.
+- Un datagrama de un origen fuera de las redes permitidas se descarta y queda registrado.
+- Si ningún cliente atiende el dominio en ese momento, el datagrama se descarta, como ocurre en UDP.
+
+Configuración del cliente:
+
+```yaml
+intranet_udp_port: 5109          # puerto UDP que reserva el servidor
+udp_target: "127.0.0.1:9109"     # servicio UDP local
+```
+
+Medido en una misma máquina, con el servicio UDP de eco: 200 de 200 datagramas de hasta 1 199 bytes volvieron íntegros, y 2 000 datagramas de un origen permitido volvieron íntegros en 0.14 segundos. Un origen fuera de la política no obtuvo respuesta.
+
+Pendiente: no se ha probado un servicio UDP real (DNS, RTP o BACnet), ni la expiración de flujos en mitad de una carga, ni el comportamiento con pérdida de paquetes en la red entre servidor y cliente.
 
 ## Puertos sin TLS para la intranet
 

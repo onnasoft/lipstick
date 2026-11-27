@@ -145,6 +145,17 @@ func (hub *NetworkHub) removeMux(ms *muxSession) {
 // over it. The first line gives the client the server port the visitor came in
 // on. It returns false when no session can take the visitor.
 func (hub *NetworkHub) takeMux(visitor *helper.RemoteConn, port int) bool {
+	conn, ok := hub.openStream("LIPSTICK-PORT", port)
+	if !ok {
+		return false
+	}
+	go hub.syncConnections(visitor, conn)
+	return true
+}
+
+// openStream opens a stream on a live session and writes its first line, "kind port".
+// It returns false when no session can take it.
+func (hub *NetworkHub) openStream(kind string, port int) (net.Conn, bool) {
 	hub.muxMu.Lock()
 	sessions := append([]*muxSession(nil), hub.muxes...)
 	hub.muxNext++
@@ -161,16 +172,15 @@ func (hub *NetworkHub) takeMux(visitor *helper.RemoteConn, port int) bool {
 			continue
 		}
 		stream.SetWriteDeadline(time.Now().Add(muxWriteTimeout))
-		_, err = stream.Write([]byte("LIPSTICK-PORT " + strconv.Itoa(port) + "\n"))
+		_, err = stream.Write([]byte(kind + " " + strconv.Itoa(port) + "\n"))
 		stream.SetWriteDeadline(time.Time{})
 		if err != nil {
 			stream.Close()
 			continue
 		}
-		go hub.syncConnections(visitor, helper.NewStreamConn(stream, ms.carrier))
-		return true
+		return helper.NewStreamConn(stream, ms.carrier), true
 	}
-	return false
+	return nil, false
 }
 
 // closeMuxes closes every session. Their visitors see the connection end.

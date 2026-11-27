@@ -14,12 +14,16 @@ import (
 )
 
 func TestParseAssignment(t *testing.T) {
-	port, err := parseAssignment("LIPSTICK-PORT 5105\n")
-	if err != nil || port != 5105 {
-		t.Fatalf("got port %d, %v", port, err)
+	kind, port, err := parseAssignment("LIPSTICK-PORT 5105\n")
+	if err != nil || kind != "LIPSTICK-PORT" || port != 5105 {
+		t.Fatalf("got %q %d, %v", kind, port, err)
 	}
-	for _, line := range []string{"HTTP/1.1 401 Unauthorized\n", "LIPSTICK-PORT\n", "LIPSTICK-PORT 70000\n", "LIPSTICK-PORT -1\n", "LIPSTICK-PORT x\n", ""} {
-		if _, err := parseAssignment(line); err == nil {
+	kind, port, err = parseAssignment("LIPSTICK-UDP 5109\n")
+	if err != nil || kind != "LIPSTICK-UDP" || port != 5109 {
+		t.Fatalf("udp got %q %d, %v", kind, port, err)
+	}
+	for _, line := range []string{"HTTP/1.1 401 Unauthorized\n", "LIPSTICK-PORT\n", "LIPSTICK-PORT 70000\n", "LIPSTICK-PORT -1\n", "LIPSTICK-PORT x\n", "LIPSTICK-UDP\n", ""} {
+		if _, _, err := parseAssignment(line); err == nil {
 			t.Errorf("line %q accepted", line)
 		}
 	}

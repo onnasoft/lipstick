@@ -2,6 +2,7 @@ package manager
 
 import (
 	"sort"
+	"strconv"
 	"time"
 )
 
@@ -11,13 +12,13 @@ const statsTimeout = 2 * time.Second
 
 // DomainStats is what the admin panel shows for one domain.
 type DomainStats struct {
-	Domain          string `json:"domain"`
-	Status          string `json:"status"` // "active", "idle" or "unresponsive"
-	Clients         int    `json:"clients"`
-	ActiveSessions  int64  `json:"activeSessions"`
-	PendingVisitors int    `json:"pendingVisitors"`
-	BytesSinceStart int64  `json:"bytesSinceStart"`
-	IntranetPorts   []int  `json:"intranetPorts"`
+	Domain          string   `json:"domain"`
+	Status          string   `json:"status"` // "active", "idle" or "unresponsive"
+	Clients         int      `json:"clients"`
+	ActiveSessions  int64    `json:"activeSessions"`
+	PendingVisitors int      `json:"pendingVisitors"`
+	BytesSinceStart int64    `json:"bytesSinceStart"`
+	IntranetPorts   []string `json:"intranetPorts"`
 }
 
 // Snapshot returns the live state of every hub, sorted by domain. It is safe to
@@ -47,20 +48,20 @@ func (m *Manager) Snapshot() []DomainStats {
 	return out
 }
 
-// intranetPortsOf lists the intranet ports a domain holds, sorted.
-func (m *Manager) intranetPortsOf(domain string) []int {
+// intranetPortsOf lists the intranet ports a domain holds, such as "5101/tcp".
+func (m *Manager) intranetPortsOf(domain string) []string {
 	p := m.intranet
 	if p == nil {
-		return []int{}
+		return []string{}
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	ports := []int{}
-	for port, r := range p.reserved {
+	ports := []string{}
+	for key, r := range p.reserved {
 		if r.domain == domain {
-			ports = append(ports, port)
+			ports = append(ports, strconv.Itoa(key.port)+"/"+key.proto)
 		}
 	}
-	sort.Ints(ports)
+	sort.Strings(ports)
 	return ports
 }

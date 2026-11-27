@@ -20,24 +20,46 @@ var (
 	ErrPortTaken      = errors.New("the port is already reserved or cannot be opened")
 )
 
+// Transports of an intranet port.
+const (
+	protoTCP = "tcp"
+	protoUDP = "udp"
+)
+
 // intranetPorts is the registry of reserved ports. The server owns the policy:
 // which domains may reserve, which networks may connect, and which range of
 // ports is allowed. A client only chooses a port inside that policy.
 //
-// Intranet ports are plain TCP. They have no TLS, so they cannot tell domains
-// apart by name. Each reserved port serves exactly one domain, and the port
-// number is the service identity for the people and systems in the intranet.
+// Intranet ports are plain TCP or UDP. They have no TLS, so they cannot tell
+// domains apart by name. Each reserved port serves exactly one domain, and the
+// port number is the service identity for the people and systems in the intranet.
+// A TCP port and a UDP port may have the same number.
 type intranetPorts struct {
 	mu       sync.Mutex
 	bind     string
 	min, max int
 	policy   map[string][]*net.IPNet
-	reserved map[int]*portReservation
+	reserved map[portKey]*portReservation
+}
+
+type portKey struct {
+	proto string
+	port  int
 }
 
 type portReservation struct {
 	domain string
-	ln     net.Listener
+	ln     net.Listener   // TCP
+	pc     net.PacketConn // UDP
+}
+
+func (r *portReservation) close() {
+	if r.ln != nil {
+		r.ln.Close()
+	}
+	if r.pc != nil {
+		r.pc.Close()
+	}
 }
 
 // ConfigureIntranetPorts enables intranet ports. policy maps each domain allowed
@@ -48,13 +70,23 @@ func (m *Manager) ConfigureIntranetPorts(bind string, minPort, maxPort int, poli
 		min:      minPort,
 		max:      maxPort,
 		policy:   policy,
-		reserved: make(map[int]*portReservation),
+		reserved: make(map[portKey]*portReservation),
 	}
 }
 
-// reserveIntranetPort opens port for domain. Asking again for a port the domain
-// already holds does nothing.
+// reserveIntranetPort opens a TCP port for domain.
 func (m *Manager) reserveIntranetPort(domain string, port int) error {
+	return m.reserveIntranet(domain, protoTCP, port)
+}
+
+// reserveIntranetUDPPort opens a UDP port for domain.
+func (m *Manager) reserveIntranetUDPPort(domain string, port int) error {
+	return m.reserveIntranet(domain, protoUDP, port)
+}
+
+// reserveIntranet opens port for domain under the policy. Asking again for a port
+// the domain already holds does nothing.
+func (m *Manager) reserveIntranet(domain, proto string, port int) error {
 	p := m.intranet
 	if p == nil {
 		return ErrPortNotAllowed
@@ -70,21 +102,34 @@ func (m *Manager) reserveIntranetPort(domain string, port int) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	if r, ok := p.reserved[port]; ok {
+	key := portKey{proto: proto, port: port}
+	if r, ok := p.reserved[key]; ok {
 		if r.domain == domain {
 			return nil
 		}
 		return ErrPortTaken
 	}
 
-	ln, err := net.Listen("tcp", net.JoinHostPort(p.bind, strconv.Itoa(port)))
-	if err != nil {
-		return fmt.Errorf("%w: %v", ErrPortTaken, err)
+	addr := net.JoinHostPort(p.bind, strconv.Itoa(port))
+	res := &portReservation{domain: domain}
+	if proto == protoUDP {
+		pc, err := net.ListenPacket("udp", addr)
+		if err != nil {
+			return fmt.Errorf("%w: %v", ErrPortTaken, err)
+		}
+		res.pc = pc
+		go m.serveIntranetUDP(pc, domain, allowed)
+	} else {
+		ln, err := net.Listen("tcp", addr)
+		if err != nil {
+			return fmt.Errorf("%w: %v", ErrPortTaken, err)
+		}
+		res.ln = ln
+		go m.acceptIntranet(ln, domain, allowed)
 	}
-	p.reserved[port] = &portReservation{domain: domain, ln: ln}
-	go m.acceptIntranet(ln, domain, allowed)
+	p.reserved[key] = res
 
-	logger.Default.Info("WARNING: intranet port (plain TCP, no TLS) reserved:", net.JoinHostPort(p.bind, strconv.Itoa(port)), "domain:", domain)
+	logger.Default.Info("WARNING: intranet port (plain "+proto+", no TLS) reserved:", addr, "domain:", domain)
 	return nil
 }
 
@@ -97,11 +142,11 @@ func (m *Manager) releaseIntranetPorts(domain string) {
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	for port, r := range p.reserved {
+	for key, r := range p.reserved {
 		if r.domain == domain {
-			r.ln.Close()
-			delete(p.reserved, port)
-			logger.Default.Info("Intranet port released:", port, "domain:", domain)
+			r.close()
+			delete(p.reserved, key)
+			logger.Default.Info("Intranet port released:", key.proto, key.port, "domain:", domain)
 		}
 	}
 }
@@ -114,9 +159,9 @@ func (m *Manager) releaseAllIntranetPorts() {
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	for port, r := range p.reserved {
-		r.ln.Close()
-		delete(p.reserved, port)
+	for key, r := range p.reserved {
+		r.close()
+		delete(p.reserved, key)
 	}
 }
 
@@ -155,14 +200,21 @@ func (m *Manager) handleIntranet(conn net.Conn, domain string, allowed []*net.IP
 }
 
 // sourceAllowed reports whether the remote address is inside one of the
-// networks. An address that cannot be parsed is refused.
+// networks. An address that cannot be parsed is refused. TCP and UDP addresses
+// are both accepted.
 func sourceAllowed(addr net.Addr, allowed []*net.IPNet) bool {
-	tcp, ok := addr.(*net.TCPAddr)
-	if !ok || tcp.IP == nil {
+	var ip net.IP
+	switch a := addr.(type) {
+	case *net.TCPAddr:
+		ip = a.IP
+	case *net.UDPAddr:
+		ip = a.IP
+	}
+	if ip == nil {
 		return false
 	}
 	for _, n := range allowed {
-		if n.Contains(tcp.IP) {
+		if n.Contains(ip) {
 			return true
 		}
 	}

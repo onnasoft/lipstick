@@ -12,7 +12,7 @@ import (
 func statsAdmin() *Admin {
 	a := newTestAdmin(testKey)
 	a.SetStatsSource(func() []manager.DomainStats {
-		return []manager.DomainStats{{Domain: "robot-42.example.com", Status: "active", Clients: 1, ActiveSessions: 3, IntranetPorts: []int{5105}}}
+		return []manager.DomainStats{{Domain: "robot-42.example.com", Status: "active", Clients: 1, ActiveSessions: 3, IntranetPorts: []string{"5105/tcp"}}}
 	})
 	return a
 }
@@ -37,7 +37,7 @@ func TestStatsReturnsLiveState(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 1 || got[0].Domain != "robot-42.example.com" || got[0].ActiveSessions != 3 || got[0].IntranetPorts[0] != 5105 {
+	if len(got) != 1 || got[0].Domain != "robot-42.example.com" || got[0].ActiveSessions != 3 || got[0].IntranetPorts[0] != "5105/tcp" {
 		t.Fatalf("unexpected stats: %s", rec.Body.String())
 	}
 }

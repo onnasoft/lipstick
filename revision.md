@@ -437,6 +437,7 @@ Lipstick exposes local ports to the internet through a reverse tunnel. The main 
 - **Trust:** NATS only chooses where to relay. A peer with a different certificate fails TLS verification, so a fake presence message cannot receive visitors.
 - **Verified:** unit tests for presence (freshness, own messages, stale peers, the freshest peer), config validation, and the no-cluster 502. Live, with two servers sharing the database and NATS: a visitor entering B reached a client on A (200); a visitor entering A reached a client on B (200); with no session anywhere, both entries returned 502 in about 3 ms; the request log on the serving server recorded the original port (5050 for a visitor that entered A).
 - **Not verified:** servers on different machines; a server failing in the middle of a load; cluster certificates signed by a CA (the `ca_file` path is written but not exercised).
+- **Update (see 44):** relays now use one persistent session per peer and domain. The per-visit TLS connection described above is gone.
 
 ### 43. NATS accepted anonymous and plaintext connections (security)
 - **Where:** `server/config/config.go` (`NatsConfig`, `validateAuth`), `server/subscriptions/subscriptions.go` (`NewSubscriptionManager`)
@@ -444,6 +445,20 @@ Lipstick exposes local ports to the internet through a reverse tunnel. The main 
 - **Fix:** `nats.username` and `nats.password`, or `nats.token`, are passed to the connection. Credentials are refused over a plain URL. A cluster refuses to start without credentials and without `tls://`. A single server may still run without credentials, as before. The password is never logged.
 - **Verified:** config tests for each rule. Live, against a separate authenticated TLS NATS on port 4223 (the normal NATS on 4222 was not changed): a wrong password stops the server with `Authorization Violation`; an anonymous connection is refused; two cluster servers with correct credentials relay a visitor (200); the password does not appear in any log.
 - **Not verified:** NATS ACLs per subject (the server can still publish on any subject); credentials rotation; `nats.ca_file` with a CA-signed NATS certificate.
+
+### 44. Relays opened a new TLS connection per visitor (performance)
+- **Where:** `server/manager/cluster.go` (`relayFor`, `dialRelay`, `serveRelayStreams`), `server/manager/relay_session_test.go`
+- **What:** each relayed visitor dialed the peer again, which cost a full TLS handshake. Measured: about 1 700 req/s with new connections, against 2 700 direct.
+- **Fix:** one persistent yamux session per peer and domain, authenticated once with the relay proof. Each visit is one stream. A session that fails is dropped and reopened on the next visit.
+- **Measured here:** about 2 500 req/s with new connections (p50 4.0 ms), against 2 700 direct (p50 3.6 ms). With keep-alive, about 9 700 req/s.
+- **Verified:** tests show a relayed visitor reaches a client session with its original port, and a relayed visitor with no session gets 502 back over the relay. Live: 30 relayed visits left the connection count between the servers unchanged.
+
+### 45. UDP intranet ports (feature)
+- **Where:** `server/manager/udp.go`, `server/manager/intranet.go` (registry keyed by protocol and port; `reserveIntranetUDPPort`), `server/manager/mux.go` (`openStream`), `server/manager/routes.go` (`X-Lipstick-Intranet-UDP-Port`), `helper/udpframe.go`, `client/mux.go` (`serveUDPFlow`), `client/config/config.go` (`intranet_udp_port`, `udp_target`)
+- **What:** a client can reserve a plain UDP port inside the server's policy, the same as a TCP one. Each source address gets a flow: one stream in a client session, with datagrams framed by a 2-byte length. Flows close after 60 seconds without traffic. Datagrams from sources outside the allowed networks are dropped and logged. A full flow queue drops datagrams, as UDP does.
+- **Design choice:** the port stays plain, without TLS, as the TCP intranet ports are. The server decides the policy, and the client only chooses a port inside it.
+- **Verified:** unit tests for framing (boundaries, empty and maximum sizes), a full round trip through the server and the client's local service, and policy for UDP addresses. Live, on the intranet address: 200 of 200 echoed datagrams came back intact; 2 000 bulk datagrams came back intact in 0.14 seconds; a datagram from an outside address got no reply.
+- **Not verified:** a real UDP service (DNS, RTP, BACnet); flow expiry under sustained load; packet loss on the link between server and client, which TCP turns into delay.
 
 ## Recommended order
 

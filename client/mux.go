@@ -107,15 +107,71 @@ func serveMuxStream(stream *yamux.Stream, carrier net.Conn, proxyTarget string) 
 	if err != nil {
 		return
 	}
-	port, err := parseAssignment(line)
+	kind, port, err := parseAssignment(line)
 	if err != nil {
 		log.Printf("mux: %v", err)
 		return
 	}
 	pending, _ := reader.Peek(reader.Buffered())
 	wrapped := helper.NewConnWithBuffer(netStream, append([]byte(nil), pending...))
+	if kind == "LIPSTICK-UDP" {
+		serveUDPFlow(wrapped, udpTarget)
+		return
+	}
 	protocol, targetAddress := helper.ParseTargetEndpoint(proxyTarget)
 	serveVisitor(wrapped, protocol, targetAddress, port, currentReport())
+}
+
+// udpTarget is the local UDP service for datagrams from the server. It is set once
+// from the configuration at startup.
+var udpTarget string
+
+// udpFlowIdle matches the server: a flow with no datagrams for this long is closed.
+const udpFlowIdle = 60 * time.Second
+
+// serveUDPFlow carries the datagrams of one source between the server stream and
+// the local UDP service. Each flow has its own UDP socket, so replies from the
+// service come back to the flow that asked.
+func serveUDPFlow(conn net.Conn, target string) {
+	if target == "" {
+		return
+	}
+	raddr, err := net.ResolveUDPAddr("udp", target)
+	if err != nil {
+		log.Printf("udp: bad target %q: %v", target, err)
+		return
+	}
+	sock, err := net.DialUDP("udp", nil, raddr)
+	if err != nil {
+		log.Printf("udp: cannot reach %s: %v", target, err)
+		return
+	}
+	defer sock.Close()
+
+	// Server to service. The stream ends when the server closes the flow.
+	go func() {
+		for {
+			p, err := helper.ReadFrame(conn)
+			if err != nil {
+				sock.Close()
+				return
+			}
+			sock.Write(p)
+		}
+	}()
+
+	// Service to server. A flow quiet for udpFlowIdle ends.
+	buf := make([]byte, helper.MaxDatagram)
+	for {
+		sock.SetReadDeadline(time.Now().Add(udpFlowIdle))
+		n, err := sock.Read(buf)
+		if err != nil {
+			return
+		}
+		if err := helper.WriteFrame(conn, buf[:n]); err != nil {
+			return
+		}
+	}
 }
 
 // dialMux opens one authenticated connection for a mux session, with a fresh
@@ -144,17 +200,18 @@ func muxClientConfig() *yamux.Config {
 	return cfg
 }
 
-// parseAssignment reads the first line of a visitor stream: "LIPSTICK-PORT <port>".
-// It is an error unless the port is a valid number.
-func parseAssignment(line string) (int, error) {
+// parseAssignment reads the first line of a stream: "LIPSTICK-PORT <port>" for a
+// TCP visitor, or "LIPSTICK-UDP <port>" for a UDP flow. It is an error unless the
+// port is a valid number.
+func parseAssignment(line string) (string, int, error) {
 	line = strings.TrimRight(line, "\r\n")
-	rest, ok := strings.CutPrefix(line, "LIPSTICK-PORT ")
-	if !ok {
-		return 0, fmt.Errorf("unexpected line on mux stream: %q", line)
+	kind, rest, ok := strings.Cut(line, " ")
+	if !ok || (kind != "LIPSTICK-PORT" && kind != "LIPSTICK-UDP") {
+		return "", 0, fmt.Errorf("unexpected line on mux stream: %q", line)
 	}
 	n, err := strconv.Atoi(rest)
 	if err != nil || n < 0 || n > 65535 {
-		return 0, errors.New("invalid port on mux stream")
+		return "", 0, errors.New("invalid port on mux stream")
 	}
-	return n, nil
+	return kind, n, nil
 }

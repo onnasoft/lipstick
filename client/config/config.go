@@ -27,6 +27,11 @@ type Config struct {
 	// IntranetPort asks the server to reserve this plain-TCP port for the domain,
 	// inside the range its policy allows. 0 means no intranet port.
 	IntranetPort int `yaml:"intranet_port"`
+	// IntranetUDPPort asks the server to reserve this plain-UDP port. Datagrams
+	// that arrive on it are sent to UDPTarget, a local UDP service. 0 means none.
+	IntranetUDPPort int `yaml:"intranet_udp_port"`
+	// UDPTarget is the local UDP service, host:port, for datagrams from the server.
+	UDPTarget string `yaml:"udp_target"`
 }
 
 const (
@@ -67,7 +72,8 @@ func loadConfig(args []string) (*Config, error) {
 	defaultConfigPath := filepath.Join(execDir, "config.client.yml")
 
 	var configPath, serverURL, proxyPass, apiSecret, caFile string
-	var intranetPort int
+	var intranetPort, intranetUDPPort int
+	var udpTarget string
 	var check bool
 	fs.StringVar(&configPath, "c", defaultConfigPath, "Path to the configuration file")
 	fs.StringVar(&serverURL, "s", "", "Server manager URL, https://host:port (default "+defaultServerURL+")")
@@ -76,6 +82,8 @@ func loadConfig(args []string) (*Config, error) {
 	fs.StringVar(&caFile, "ca", "", "PEM file with the server certificate or its CA")
 	fs.BoolVar(&check, "check", false, "Validate the configuration and exit, without connecting")
 	fs.IntVar(&intranetPort, "intranet-port", 0, "Ask the server to reserve this plain-TCP port for the domain (intranet services only)")
+	fs.IntVar(&intranetUDPPort, "intranet-udp-port", 0, "Ask the server to reserve this plain-UDP port for the domain (intranet services only)")
+	fs.StringVar(&udpTarget, "udp-target", "", "Local UDP service, host:port, for datagrams that arrive on the intranet UDP port")
 	if err := fs.Parse(args); err != nil {
 		return nil, err
 	}
@@ -124,6 +132,12 @@ func loadConfig(args []string) (*Config, error) {
 	if set["intranet-port"] {
 		cfg.IntranetPort = intranetPort
 	}
+	if set["intranet-udp-port"] {
+		cfg.IntranetUDPPort = intranetUDPPort
+	}
+	if set["udp-target"] {
+		cfg.UDPTarget = udpTarget
+	}
 
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid client configuration:\n%w", err)
@@ -137,6 +151,17 @@ func (c *Config) Validate() error {
 
 	if c.IntranetPort < 0 || c.IntranetPort > 65535 {
 		errs = append(errs, fmt.Errorf("intranet_port %d is not a port number", c.IntranetPort))
+	}
+	if c.IntranetUDPPort < 0 || c.IntranetUDPPort > 65535 {
+		errs = append(errs, fmt.Errorf("intranet_udp_port %d is not a port number", c.IntranetUDPPort))
+	}
+	if c.UDPTarget != "" {
+		if _, _, err := net.SplitHostPort(c.UDPTarget); err != nil {
+			errs = append(errs, fmt.Errorf("udp_target %q must be host:port", c.UDPTarget))
+		}
+	}
+	if c.IntranetUDPPort > 0 && c.UDPTarget == "" {
+		errs = append(errs, errors.New("intranet_udp_port needs udp_target: the local UDP service the datagrams go to"))
 	}
 
 	if c.APISecret == "" {

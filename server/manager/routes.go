@@ -94,6 +94,21 @@ func (r *router) upgrade(c *gin.Context) {
 		}
 	}
 
+	// The same for a UDP port, which may be asked for alongside the TCP one.
+	if raw := c.GetHeader(intranetUDPPortHeader); raw != "" {
+		port, err := strconv.Atoi(raw)
+		if err != nil {
+			err = ErrPortOutOfRange
+		} else {
+			err = r.manager.reserveIntranetUDPPort(domain.Name, port)
+		}
+		if err != nil {
+			logger.Default.Error("Intranet UDP port request refused, domain:", domain.Name, "port:", raw, "reason:", err)
+			writeRefusal(rw, conn, err)
+			return
+		}
+	}
+
 	hub := r.manager.getOrCreateHub(domain.Name)
 
 	rw.WriteString("HTTP/1.1 200 OK\r\n")
@@ -120,6 +135,9 @@ func (r *router) upgrade(c *gin.Context) {
 
 // intranetPortHeader carries the port a client asks to reserve.
 const intranetPortHeader = "X-Lipstick-Intranet-Port"
+
+// intranetUDPPortHeader carries the UDP port a client asks to reserve.
+const intranetUDPPortHeader = "X-Lipstick-Intranet-UDP-Port"
 
 // writeRefusal answers a request that the policy does not allow, with the
 // status the client can read, and closes the connection.
