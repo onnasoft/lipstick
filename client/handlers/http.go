@@ -41,12 +41,24 @@ var client = &http.Client{
 	},
 }
 
+// RequestReport describes one finished request. It never includes headers or
+// bodies, so it cannot carry cookies or credentials. The query string is also
+// left out of Path.
+type RequestReport struct {
+	Method        string `json:"method"`
+	Path          string `json:"path"`
+	Status        int    `json:"status"`
+	DurationMS    int64  `json:"durationMs"`
+	ResponseBytes int64  `json:"responseBytes"`
+}
+
 // HandleHTTP serves the requests of one visitor connection, one after another,
-// until the visitor closes it or a message says the connection must end.
+// until the visitor closes it or a message says the connection must end. Each
+// finished request is passed to report, which may be nil.
 //
 // The reader is shared by all requests. A buffered reader reads ahead, so a new
 // reader per request would lose the start of the next request.
-func HandleHTTP(connection net.Conn, proxyTarget, protocol string) {
+func HandleHTTP(connection net.Conn, proxyTarget, protocol string, report func(RequestReport)) {
 	reader := bufio.NewReader(connection)
 	for {
 		req, err := http.ReadRequest(reader)
@@ -59,7 +71,7 @@ func HandleHTTP(connection net.Conn, proxyTarget, protocol string) {
 			sendErrorResponse(connection)
 			return
 		}
-		if !serveRequest(connection, reader, req, proxyTarget, protocol) {
+		if !serveRequest(connection, reader, req, proxyTarget, protocol, report) {
 			return
 		}
 	}
@@ -67,7 +79,25 @@ func HandleHTTP(connection net.Conn, proxyTarget, protocol string) {
 
 // serveRequest forwards one request to the local service and writes its
 // response. It reports whether the connection can carry another request.
-func serveRequest(connection net.Conn, reader *bufio.Reader, req *http.Request, proxyTarget, protocol string) bool {
+func serveRequest(connection net.Conn, reader *bufio.Reader, req *http.Request, proxyTarget, protocol string, report func(RequestReport)) bool {
+	started := time.Now()
+	emit := func(status int, responseBytes int64) {
+		if report == nil {
+			return
+		}
+		path := req.URL.Path
+		if path == "" {
+			path = "/"
+		}
+		report(RequestReport{
+			Method:        req.Method,
+			Path:          path,
+			Status:        status,
+			DurationMS:    time.Since(started).Milliseconds(),
+			ResponseBytes: responseBytes,
+		})
+	}
+
 	if protocol != "http" && protocol != "https" {
 		protocol = "http"
 	}
@@ -98,13 +128,16 @@ func serveRequest(connection net.Conn, reader *bufio.Reader, req *http.Request, 
 	if err != nil {
 		fmt.Println("Error forwarding request to server:", err)
 		sendErrorResponse(connection)
+		emit(http.StatusBadGateway, -1)
 		return false
 	}
 	defer resp.Body.Close()
 
 	if err := resp.Write(connection); err != nil {
+		emit(resp.StatusCode, -1)
 		return false
 	}
+	emit(resp.StatusCode, resp.ContentLength)
 	// Drain what the service did not read, so the next request starts clean.
 	io.Copy(io.Discard, req.Body)
 

@@ -2,9 +2,9 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log"
 	"net"
 	"net/http"
@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/OnnaSoft/lipstick/client/config"
@@ -92,18 +93,49 @@ func startClient(proxyTarget string) {
 		retryDelay = minRetryDelay
 
 		fmt.Println("Connected to server at", serverURL)
-		go checkConnection(conn)
-		handleTickets(conn, proxyTarget)
+		ctrl := &controlWriter{conn: conn}
+		go checkConnection(ctrl)
+		handleTickets(conn, proxyTarget, ctrl.reportRequest)
 		fmt.Println("Disconnected from server at", serverURL)
 		time.Sleep(minRetryDelay)
 	}
 }
 
-func checkConnection(connection io.ReadWriter) {
-	writeMessage := []byte("ping")
+// controlWriter sends lines on the control connection. The keep-alive ping and
+// the request reports come from different goroutines, so each line is written
+// under a lock, and a write has a deadline so a stuck server cannot block it.
+type controlWriter struct {
+	mu   sync.Mutex
+	conn net.Conn
+}
+
+func (c *controlWriter) send(line string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.conn.SetWriteDeadline(time.Now().Add(controlWriteTimeout))
+	_, err := c.conn.Write([]byte(line))
+	return err
+}
+
+// reportRequest sends one finished request to the server as "log {json}".
+func (c *controlWriter) reportRequest(r handlers.RequestReport) {
+	data, err := json.Marshal(r)
+	if err != nil {
+		return
+	}
+	if err := c.send("log " + string(data) + "\n"); err != nil {
+		log.Printf("could not report a request: %v", err)
+	}
+}
+
+// controlWriteTimeout bounds one write on the control connection.
+const controlWriteTimeout = 5 * time.Second
+
+// checkConnection sends a ping every 30 seconds. The server drops a client that
+// stays silent for 90 seconds.
+func checkConnection(ctrl *controlWriter) {
 	for {
-		_, err := connection.Write(writeMessage)
-		if err != nil {
+		if err := ctrl.send("ping\n"); err != nil {
 			return
 		}
 		time.Sleep(30 * time.Second)
@@ -140,7 +172,7 @@ func isTicket(s string) bool {
 	return true
 }
 
-func handleTickets(connection net.Conn, proxyTarget string) {
+func handleTickets(connection net.Conn, proxyTarget string, report func(handlers.RequestReport)) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("ticket loop stopped: %v", r)
@@ -157,11 +189,11 @@ func handleTickets(connection net.Conn, proxyTarget string) {
 		}
 
 		protocol, targetAddress := helper.ParseTargetEndpoint(proxyTarget)
-		go establishConnection(protocol, targetAddress, ticket)
+		go establishConnection(protocol, targetAddress, ticket, report)
 	}
 }
 
-func establishConnection(protocol, proxyTarget, ticket string) {
+func establishConnection(protocol, proxyTarget, ticket string, report func(handlers.RequestReport)) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("connection for ticket %s failed: %v", ticket, r)
@@ -187,7 +219,7 @@ func establishConnection(protocol, proxyTarget, ticket string) {
 	conn := helper.NewConnWithBuffer(connection, buff)
 
 	if helper.IsHTTPRequest(string(buff)) {
-		handlers.HandleHTTP(conn, proxyTarget, protocol)
+		handlers.HandleHTTP(conn, proxyTarget, protocol, report)
 		return
 	}
 

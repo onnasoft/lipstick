@@ -382,6 +382,12 @@ Lipstick exposes local ports to the internet through a reverse tunnel. The main 
   - With the backend down, the visitor got `HTTP/1.1 502 Bad Gateway`. After the backend came back, the next request returned 200.
 - **Not verified:** chunked responses from the backend, `Expect: 100-continue`, and long-lived streams (SSE or MJPEG) across the keep-alive loop.
 
+### 36. Visitor request body lost when it arrived with the headers (server bug)
+- **Where:** `helper/listener.go` (`handleHTTPConn`), `helper/net.go` (`ConnWithBuffer.Unread`)
+- **What:** When a request's headers and body arrived in one read, the listener consumed the headers and then replaced the buffer with the headers alone (`SetBuffer`). The body was dropped, and the tunnel client received a corrupted stream: a POST with a small body got no reply. Found with `curl --data-binary`. Python sent the headers and body in separate writes, so it had hidden the bug.
+- **Fix:** the headers are put back in front of the bytes not yet read (`Unread`), so the stream reaches the client exactly as it was sent.
+- **Verified:** `helper/unread_test.go` covers the headers-and-body single read. Live: `curl --data-binary` of 3 bytes and of 1 MiB (SHA-256 matches) now return 200.
+
 ## Recommended order
 
 1. Items 1, 2, 3, and 4: authentication, unpredictable tickets, TLS verification, and admin API hardening.

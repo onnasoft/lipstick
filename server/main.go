@@ -58,6 +58,8 @@ func main() {
 	manager := manager.SetupManager(tlsConfig)
 	admin := admin.SetupAdmin(conf.Admin.Address, conf.AdminSecretKey, tlsConfig)
 	admin.SetDomainChangedHook(manager.DropHub)
+	admin.SetStatsSource(manager.Snapshot)
+	admin.SetRequestSource(manager.RecentRequests)
 
 	if conf.IntranetPorts != nil {
 		policy := make(map[string][]*net.IPNet, len(conf.IntranetPorts.Domains))

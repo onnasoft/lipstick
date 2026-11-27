@@ -6,6 +6,7 @@ import (
 
 	"github.com/OnnaSoft/lipstick/logger"
 	"github.com/OnnaSoft/lipstick/server/auth"
+	"github.com/OnnaSoft/lipstick/server/manager"
 	"github.com/gin-gonic/gin"
 )
 
@@ -16,6 +17,18 @@ type Admin struct {
 	adminKey    string
 	tlsConfig   *tls.Config
 	onChanged   func(domain string)
+	stats       func() []manager.DomainStats
+	requests    func(domain string, limit int) []manager.RequestRecord
+}
+
+// SetRequestSource sets the function that returns recent requests.
+func (a *Admin) SetRequestSource(fn func(domain string, limit int) []manager.RequestRecord) {
+	a.requests = fn
+}
+
+// SetStatsSource sets the function that returns the live state of every domain.
+func (a *Admin) SetStatsSource(fn func() []manager.DomainStats) {
+	a.stats = fn
 }
 
 // SetDomainChangedHook sets the function called when a domain is deleted or

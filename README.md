@@ -366,6 +366,9 @@ Todas las rutas, salvo `/health`, requieren la clave de admin en el header `Auth
 | `PATCH /domains/:name` | Cambia `apiKey` o `allowMultipleConnections`. Desconecta los clientes del dominio. |
 | `DELETE /domains/:name` | Borra el dominio. Desconecta sus clientes. |
 | `GET /domains/:name/traffic?from=YYYY-MM-DD&to=YYYY-MM-DD` | Bytes transferidos por día. |
+| `GET /stats` | Estado en vivo de cada dominio: estado, clientes, sesiones activas, visitantes en espera, bytes desde el arranque y puertos de intranet. |
+| `GET /ui` | Panel web que consume `/stats` y el tráfico del día. Pide la clave en el navegador y no guarda datos en la página. |
+| `GET /requests?domain=&limit=` | Peticiones HTTP recientes (método, ruta sin query, estado, duración y tamaño de respuesta), de más reciente a más antigua. Sin cabeceras ni cuerpos. Máximo 500. |
 
 Ejemplo:
 

@@ -73,7 +73,11 @@ type Manager struct {
 	authManager    auth.AuthManager
 	tlsConfig      *tls.Config
 	intranet       *intranetPorts
+	reqlog         *RequestLog
 }
+
+// requestLogSize is how many finished requests the admin panel keeps in memory.
+const requestLogSize = 1000
 
 func SetupManager(tlsConfig *tls.Config) *Manager {
 	gin.SetMode(gin.ReleaseMode)
@@ -83,6 +87,7 @@ func SetupManager(tlsConfig *tls.Config) *Manager {
 		authManager:    auth.MakeAuthManager(),
 		trafficManager: traffic.NewTrafficManager(64 * 1024),
 		tlsConfig:      tlsConfig,
+		reqlog:         NewRequestLog(requestLogSize),
 	}
 
 	configureRouter(manager)
@@ -100,6 +105,7 @@ func (m *Manager) getOrCreateHub(domain string) *NetworkHub {
 	}
 
 	hub := NewNetworkHub(domain, m.trafficManager, 64*1024)
+	hub.requests = m.reqlog
 	// When the hub stops for lack of clients, forget it. CompareAndDelete leaves
 	// a newer hub for the same domain alone.
 	hub.onIdle = func() {

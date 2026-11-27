@@ -35,6 +35,13 @@ func NewConnWithBuffer(conn net.Conn, buff []byte) *ConnWithBuffer {
 	return &ConnWithBuffer{Conn: conn, buff: buff}
 }
 
+// Unread puts p back in front of the bytes not yet read. The listener uses it to
+// hand the visitor's stream on with the headers it already consumed, followed by
+// any body that arrived in the same read. SetBuffer would drop that body.
+func (c *ConnWithBuffer) Unread(p []byte) {
+	c.buff = append(append([]byte{}, p...), c.buff...)
+}
+
 func (c *ConnWithBuffer) SetBuffer(buff []byte) {
 	c.buff = buff
 }

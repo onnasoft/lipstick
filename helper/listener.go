@@ -95,7 +95,7 @@ func (l *ListenerManager) handleHTTPConn(conn *ConnWithBuffer) error {
 		if err != nil {
 			return err
 		}
-		conn.SetBuffer(b)
+		conn.Unread(b)
 		req, err := http.ReadRequest(bufio.NewReader(bytes.NewBuffer(b)))
 		if err != nil {
 			return err

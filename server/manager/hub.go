@@ -1,8 +1,12 @@
 package manager
 
 import (
+	"bufio"
+	"encoding/json"
 	"net"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/OnnaSoft/lipstick/helper"
@@ -69,6 +73,16 @@ type NetworkHub struct {
 	done     chan struct{}
 	stopOnce sync.Once
 
+	// statsReq asks the loop for a snapshot. The loop owns the maps, so the
+	// snapshot is taken there, never from another goroutine.
+	statsReq chan chan HubStats
+
+	// activeSessions counts relays in progress (visitor and tunnel joined).
+	activeSessions atomic.Int64
+
+	// requests receives the requests that clients report.
+	requests *RequestLog
+
 	// onIdle runs in the hub loop when the last client leaves. The manager uses
 	// it to forget the hub.
 	onIdle func()
@@ -84,6 +98,7 @@ func NewNetworkHub(name string, trafficManager *traffic.TrafficManager, threshol
 		incomingClientConn:              make(chan *helper.RemoteConn),
 		serverRequests:                  make(chan *request),
 		natsMessages:                    make(chan string, natsQueueSize),
+		statsReq:                        make(chan chan HubStats),
 		trafficManager:                  trafficManager,
 		dataUsageAccumulator:            0,
 		threshold:                       threshold,
@@ -145,6 +160,8 @@ const relayDrainTimeout = 10 * time.Second
 // reply. Without this, a visitor that closes would leave the session open
 // forever, and a client that waits for end-of-file would never finish.
 func (hub *NetworkHub) syncConnections(pipe net.Conn, destination net.Conn) {
+	hub.activeSessions.Add(1)
+	defer hub.activeSessions.Add(-1)
 	defer pipe.Close()
 	defer destination.Close()
 
@@ -234,6 +251,8 @@ func (hub *NetworkHub) listen() {
 			hub.handleIncomingClientConn(remoteConn)
 		case msg := <-hub.natsMessages:
 			hub.handleNatsMessage(msg)
+		case reply := <-hub.statsReq:
+			reply <- hub.snapshot()
 		case now := <-expire.C:
 			hub.expirePendingVisitors(now)
 		case <-hub.done:
@@ -445,20 +464,89 @@ func (hub *NetworkHub) handleShutdown() {
 	logger.Default.Info("Hub stopped:", hub.HubName)
 }
 
-// checkConnection reads from a tunnel client until it fails or stays silent for
-// clientIdleTimeout. The client sends a ping every 30 seconds, so a silent
-// client has died without closing its socket.
+// maxClientLine bounds one line from a client. A longer line closes the
+// connection instead of growing memory.
+const maxClientLine = 8192
+
+// checkConnection reads the lines a tunnel client sends: "ping", and "log {json}"
+// for each finished request. A client that stays silent for clientIdleTimeout is
+// dropped, and so is a client that sends a line that is too long.
 func (h *NetworkHub) checkConnection(connection *ProxyNotificationConn) {
 	defer func() {
 		h.unregisterClient(connection)
 		logger.Default.Info("Connection closed for ProxyNotificationConn in hub:", h.HubName)
 	}()
-	buf := make([]byte, 16)
+	reader := bufio.NewReaderSize(connection.conn, maxClientLine)
 	for {
 		connection.conn.SetReadDeadline(time.Now().Add(clientIdleTimeout))
-		if _, err := connection.conn.Read(buf); err != nil {
-			logger.Default.Debug("Tunnel client stopped responding or disconnected:", err)
+		line, err := reader.ReadSlice('\n')
+		if err != nil {
+			if err == bufio.ErrBufferFull {
+				logger.Default.Error("Client line too long, dropping client of hub:", h.HubName)
+			} else {
+				logger.Default.Debug("Tunnel client stopped responding or disconnected:", err)
+			}
 			return
 		}
+		h.handleClientLine(strings.TrimSpace(string(line)))
+	}
+}
+
+// handleClientLine applies one line from a tunnel client. Unknown lines are
+// ignored, so newer clients can add messages without breaking older servers.
+func (h *NetworkHub) handleClientLine(line string) {
+	const prefix = "log "
+	if !strings.HasPrefix(line, prefix) || h.requests == nil {
+		return
+	}
+	var rec RequestRecord
+	if err := json.Unmarshal([]byte(line[len(prefix):]), &rec); err != nil {
+		logger.Default.Error("Invalid request report from client of hub:", h.HubName)
+		return
+	}
+	rec.Time = time.Now()
+	rec.Domain = h.HubName
+	h.requests.Add(rec)
+}
+
+// HubStats is a point-in-time view of one domain's hub.
+type HubStats struct {
+	Domain          string
+	Clients         int
+	PendingVisitors int
+	ActiveSessions  int64
+	BytesSinceStart int64
+}
+
+// snapshot runs in the hub loop, the only goroutine that reads the hub's maps.
+func (hub *NetworkHub) snapshot() HubStats {
+	hub.mu.Lock()
+	total := hub.totalDataTransferred
+	hub.mu.Unlock()
+	return HubStats{
+		Domain:          hub.HubName,
+		Clients:         len(hub.ProxyNotificationConns),
+		PendingVisitors: len(hub.incomingClientConns),
+		ActiveSessions:  hub.activeSessions.Load(),
+		BytesSinceStart: total,
+	}
+}
+
+// Stats asks the hub loop for a snapshot. It gives up after timeout, so a hub
+// that is stuck cannot hang the admin panel.
+func (hub *NetworkHub) Stats(timeout time.Duration) (HubStats, bool) {
+	reply := make(chan HubStats, 1)
+	select {
+	case hub.statsReq <- reply:
+	case <-hub.done:
+		return HubStats{}, false
+	case <-time.After(timeout):
+		return HubStats{}, false
+	}
+	select {
+	case st := <-reply:
+		return st, true
+	case <-time.After(timeout):
+		return HubStats{}, false
 	}
 }

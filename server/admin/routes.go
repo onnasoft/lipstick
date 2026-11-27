@@ -4,12 +4,14 @@ import (
 	"crypto/subtle"
 	"errors"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/OnnaSoft/lipstick/logger"
 	"github.com/OnnaSoft/lipstick/server/auth"
 	"github.com/OnnaSoft/lipstick/server/config"
 	"github.com/OnnaSoft/lipstick/server/db"
+	"github.com/OnnaSoft/lipstick/server/manager"
 	"github.com/gin-gonic/gin"
 )
 
@@ -22,6 +24,9 @@ func configureRouter(admin *Admin) {
 	r := gin.New()
 
 	r.GET("/health", router.health)
+	r.GET("/stats", router.getStats)
+	r.GET("/ui", router.ui)
+	r.GET("/requests", router.getRequests)
 
 	r.GET("/domains", router.getDomains)
 	const domainNamePath = "/domains/:domainName"
@@ -255,4 +260,54 @@ func (r *router) getTraffic(c *gin.Context) {
 		"to":           toParam,
 		"consumptions": consumptions,
 	})
+}
+
+// getStats returns the live state of every domain: clients, sessions, pending
+// visitors, bytes since start, and intranet ports.
+func (r *router) getStats(c *gin.Context) {
+	if !r.authorized(c) {
+		return
+	}
+	if r.admin.stats == nil {
+		c.JSON(http.StatusOK, []manager.DomainStats{})
+		return
+	}
+	c.JSON(http.StatusOK, r.admin.stats())
+}
+
+// ui serves the panel. The page holds no data: it asks for the admin key and
+// then calls /stats with it, so nothing sensitive is in the HTML itself.
+func (r *router) ui(c *gin.Context) {
+	c.Header("Content-Security-Policy", "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'")
+	c.Header("X-Content-Type-Options", "nosniff")
+	c.Header("X-Frame-Options", "DENY")
+	c.Header("Referrer-Policy", "no-referrer")
+	c.Header("Cache-Control", "no-store")
+	c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(panelHTML))
+}
+
+// getRequests returns the most recent finished requests, newest first. The
+// optional domain parameter filters them. limit defaults to 100 and is capped
+// at 500.
+func (r *router) getRequests(c *gin.Context) {
+	if !r.authorized(c) {
+		return
+	}
+	limit := 100
+	if raw := c.Query("limit"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 1 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "limit must be a positive number"})
+			return
+		}
+		if n > 500 {
+			n = 500
+		}
+		limit = n
+	}
+	if r.admin.requests == nil {
+		c.JSON(http.StatusOK, []manager.RequestRecord{})
+		return
+	}
+	c.JSON(http.StatusOK, r.admin.requests(c.Query("domain"), limit))
 }
