@@ -458,7 +458,15 @@ Lipstick exposes local ports to the internet through a reverse tunnel. The main 
 - **What:** a client can reserve a plain UDP port inside the server's policy, the same as a TCP one. Each source address gets a flow: one stream in a client session, with datagrams framed by a 2-byte length. Flows close after 60 seconds without traffic. Datagrams from sources outside the allowed networks are dropped and logged. A full flow queue drops datagrams, as UDP does.
 - **Design choice:** the port stays plain, without TLS, as the TCP intranet ports are. The server decides the policy, and the client only chooses a port inside it.
 - **Verified:** unit tests for framing (boundaries, empty and maximum sizes), a full round trip through the server and the client's local service, and policy for UDP addresses. Live, on the intranet address: 200 of 200 echoed datagrams came back intact; 2 000 bulk datagrams came back intact in 0.14 seconds; a datagram from an outside address got no reply.
-- **Not verified:** a real UDP service (DNS, RTP, BACnet); flow expiry under sustained load; packet loss on the link between server and client, which TCP turns into delay.
+- **Not verified:** RTP or BACnet; flow expiry under sustained load; packet loss on the link between server and client, which TCP turns into delay.
+- **DNS (see 46).**
+
+### 46. DNS through intranet ports (verification)
+- **Where:** no code change; the UDP intranet port of entry 45 and the TCP intranet port.
+- **Setup:** dnsmasq as a real DNS server on loopback, with two records and one large TXT record. Lipstick reserved a TCP port and a UDP port on the intranet address, and forwarded both to dnsmasq.
+- **Verified:** A and TXT queries over UDP return the right answers; 300 of 300 sequential queries were answered (p50 0.07 ms); an 800-byte answer over UDP with EDNS came back complete 100 times out of 100; a 1 544-byte answer was truncated over UDP (TC bit) and came back complete over the TCP port; a source outside the allowed network got no answer.
+- **Note:** dnsmasq's default EDNS limit is 1 232 bytes, so larger answers are truncated over UDP by the server, as the DNS protocol expects. That is dnsmasq's policy, not a tunnel limit.
+- **Not verified:** DNS over a link that drops packets; resolvers that query the reserved port from many source ports at once.
 
 ## Recommended order
 

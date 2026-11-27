@@ -199,7 +199,7 @@ Lipstick no es el mejor punto de partida si necesitas **producción con SLA**, *
 
 ### Técnicas
 
-- **UDP solo en intranet.** Un puerto UDP de intranet lleva datagramas unicast, enmarcados sobre TCP, sin latencia garantizada: el túnel sigue siendo TCP por debajo, así que una pérdida retrasa los datagramas que vienen detrás. QUIC, WebRTC con medios y multicast (como el descubrimiento de DDS en ROS 2) quedan fuera.
+- **UDP solo en intranet.** Un puerto UDP de intranet lleva datagramas unicast (DNS probado con dnsmasq), enmarcados sobre TCP, sin latencia garantizada: el túnel sigue siendo TCP por debajo, así que una pérdida retrasa los datagramas que vienen detrás. QUIC, WebRTC con medios y multicast (como el descubrimiento de DDS en ROS 2) quedan fuera.
 - **Un servidor por dominio.** La conexión inversa tiene que llegar a la instancia que tiene al visitante en espera. Un balanceador que reparta clientes entre instancias no funciona tal cual.
 - **El cliente y el servidor tienen que poder alcanzar el mismo host y puerto.** El servidor no conoce la IP pública del cliente, y el cliente siempre marca el host de la URL que configuró.
 - **Latencia y ancho de banda.** Cada byte pasa por el servidor. Un visitante lejano y un servidor lejano suman latencia. El ancho de banda lo limita el servidor.
@@ -447,7 +447,14 @@ udp_target: "127.0.0.1:9109"     # servicio UDP local
 
 Medido en una misma máquina, con el servicio UDP de eco: 200 de 200 datagramas de hasta 1 199 bytes volvieron íntegros, y 2 000 datagramas de un origen permitido volvieron íntegros en 0.14 segundos. Un origen fuera de la política no obtuvo respuesta.
 
-Pendiente: no se ha probado un servicio UDP real (DNS, RTP o BACnet), ni la expiración de flujos en mitad de una carga, ni el comportamiento con pérdida de paquetes en la red entre servidor y cliente.
+DNS real, con dnsmasq como servidor, a través de un puerto UDP de intranet y de un puerto TCP de intranet:
+
+- Consultas A y TXT por UDP: correctas. 300 de 300 consultas seguidas contestadas, con p50 de 0.07 ms en la misma máquina.
+- Respuesta de unos 800 bytes por UDP con EDNS: 100 de 100 completas.
+- Respuesta mayor que el límite de UDP (1 544 bytes): llega truncada por UDP (bit TC) y completa por el puerto TCP. Es el flujo que DNS espera.
+- Un origen fuera de la red permitida no recibe respuesta.
+
+Pendiente: RTP o BACnet reales, la expiración de flujos en mitad de una carga, y el comportamiento con pérdida de paquetes en la red entre servidor y cliente.
 
 ## Puertos sin TLS para la intranet
 
