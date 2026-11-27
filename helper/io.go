@@ -53,6 +53,11 @@ func Copy(destination, source io.ReadWriter) (int64, error) {
 func HTTPRequestToString(request *http.Request) string {
 	var requestString string
 	requestString += fmt.Sprintf("%s %s %s\r\n", request.Method, request.URL.RequestURI(), request.Proto)
+	// Go keeps Host in request.Host, not in request.Header, so it must be written
+	// here. Without it, servers such as Jupyter reject a WebSocket handshake with 400.
+	if request.Host != "" {
+		requestString += fmt.Sprintf("Host: %s\r\n", request.Host)
+	}
 	for key, values := range request.Header {
 		for _, value := range values {
 			requestString += fmt.Sprintf("%s: %s\r\n", key, value)

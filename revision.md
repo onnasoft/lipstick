@@ -388,6 +388,12 @@ Lipstick exposes local ports to the internet through a reverse tunnel. The main 
 - **Fix:** the headers are put back in front of the bytes not yet read (`Unread`), so the stream reaches the client exactly as it was sent.
 - **Verified:** `helper/unread_test.go` covers the headers-and-body single read. Live: `curl --data-binary` of 3 bytes and of 1 MiB (SHA-256 matches) now return 200.
 
+### 37. WebSocket handshake rejected: Host header not forwarded (client bug)
+- **Where:** `helper/io.go` (`HTTPRequestToString`), used by `client/handlers/http.go` (`handleWebSocket`)
+- **What:** Go keeps the `Host` header in `request.Host`, not in `request.Header`. The forwarding wrote only `request.Header`, so the WebSocket handshake reached the service without `Host`. Jupyter answers `400 Bad Request` to that handshake, so no WebSocket connection could be opened through the tunnel. The same request with `Host` gets `101 Switching Protocols`.
+- **Fix:** `HTTPRequestToString` writes `Host` from `request.Host`.
+- **Verified:** `helper/io_test.go` covers the header. Live: a Jupyter kernel executed `print(2+2)`, `sum(i*i for i in range(1000))` and a 2000-line output through `wss://localhost:5050`.
+
 ## Recommended order
 
 1. Items 1, 2, 3, and 4: authentication, unpredictable tickets, TLS verification, and admin API hardening.

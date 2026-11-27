@@ -123,8 +123,8 @@ Muchas organizaciones tienen recursos **on-premise** (una oficina, una planta, u
 | **Impresora de red** | IPP sobre HTTP (puerto 631), la web de administración (HTTP o HTTPS), impresión RAW (9100) | Funciona | IPP y la web de administración son HTTP, así que van por el túnel sin cambios. RAW no tiene TLS ni nombre: usa un puerto reservado con `-intranet-port` (ver [Puertos sin TLS](#puertos-sin-tls-para-la-intranet)). |
 | **Cámara IP** | Interfaz web, instantánea JPEG, MJPEG, HLS por HTTP, ONVIF | Funciona | El video en vivo por HTTP funciona mientras la conexión esté abierta. RTSP con RTP usa UDP y **no** pasa por el túnel. |
 | **Control de robótica** | HTTP y WebSocket, gRPC, MQTT sobre TLS, Modbus TCP | Funciona para supervisión | El control en tiempo real no es adecuado. Ver [Robótica](#robótica). |
-| **Apache Spark** | Interfaz web (4040), Spark Connect (gRPC, 15002), Livy (REST, 8998), envío REST del master (6066) | Funciona cuando el envío es de una sola vía | Ver la nota sobre Spark abajo: las aplicaciones de dos vías no funcionan. |
-| **Notebooks** (Jupyter y similares) | HTTP y WebSocket | Funciona | Protege el notebook con contraseña o token. |
+| **Apache Spark** | Interfaz web (4040), envío REST del master (6066), Spark Connect (gRPC, 15002), Livy (REST, 8998) | Funciona cuando el envío es de una sola vía (probado con el envío REST del master) | Las aplicaciones de dos vías no funcionan. Ver la nota sobre Spark abajo. |
+| **Notebooks** (Jupyter y similares) | HTTP y WebSocket | Probado con JupyterLab, incluida la ejecución de código por WebSocket | Protege el notebook con contraseña o token. Ver [Servicios probados](#servicios-probados). |
 | **Acceso SSH** a equipos locales | TCP | Funciona | Usa claves, no contraseñas. |
 | **Bases de datos** | TCP (PostgreSQL 5432, MySQL 3306) | Funciona, con cuidado | Adecuado para administración. No lo uses como canal de datos de alto volumen. |
 
@@ -145,11 +145,29 @@ go run ./client -c /etc/lipstick/spark.yml         # api_secret de spark-ui, pro
 
 Cada archivo de configuración tiene su propio subdominio y su propia clave. Así también puedes dar de baja un servicio sin afectar a los demás.
 
+#### Servicios probados
+
+Probados a través del túnel, con un servidor y un cliente en la misma máquina:
+
+| Servicio | Qué se probó | Notas |
+|----------|--------------|-------|
+| **JupyterLab** | API REST (estado, creación de kernels), página de lab, y ejecución de código por WebSocket en un kernel Python: salida de texto, resultado y 2000 líneas de salida | Requiere token. Para que el WebSocket funcionara hubo que corregir el reenvío del `Host` (punto 37 de `revision.md`). |
+| **Ollama** | `/api/tags`, generación completa y generación en streaming (NDJSON, 16 líneas, `done: true`) | Con CPU, una respuesta corta tarda unos 9 segundos con un modelo de 4B parámetros. Lo lento es el modelo, no el túnel. |
+| **Apache Spark** (API REST de envío del master) | Envío, estado, cancelación, y un job que terminó con el resultado correcto | Solo envío de una vía. Ver la nota sobre Spark abajo. |
+
+Probados en el cliente (HTTP y TCP genéricos): descargas de hasta 5 MiB, subidas de hasta 1 MiB con el mismo SHA-256 al llegar, keep-alive con 10 peticiones en una conexión, y 20 clientes en paralelo.
+
+Pendiente de probar, aunque es probable que funcione por el mismo camino: MinIO o cualquier API S3, Grafana y Prometheus (HTTP), y SSH o bases de datos sobre un puerto de intranet (TCP). Si los usas, pruébalos antes de confiar en ellos.
+
 #### Spark: qué sí y qué no
 
-- **Sí, si el envío es de una sola vía.** La interfaz web (4040), la REST de Livy (8998), Spark Connect (gRPC, 15002) y el envío REST del master standalone (6066, en modo cluster). El cliente solo abre conexiones hacia el servicio, y el driver corre dentro del cluster, así que nunca necesita que el cluster se conecte de vuelta. Este es el caso de encolar tareas desde fuera.
-- **No, si la aplicación necesita comunicación en ambos sentidos.** Por ejemplo, `spark-submit` contra el master en 7077 en modo client: el driver queda en tu máquina y los executors tienen que conectarse de vuelta a él. Tampoco funciona el tráfico interno entre master, workers, driver y executors (RPC en 7077 entre nodos y puertos de bloques), porque el túnel solo lleva conexiones que empiezan fuera del servicio y entran hacia él.
-- Antes de depender de un flujo concreto, pruébalo con tu versión de Spark. Los detalles de puertos y modos de despliegue cambian entre versiones.
+Probado con un master standalone Spark 3.5.3 y un worker en la misma máquina, a través del túnel:
+
+- **Sí, envío de una sola vía.** Encolar un trabajo en el master por su API REST (puerto 6066, `spark.master.rest.enabled=true`) funciona a través del túnel: el envío, el estado del driver y el cancelado pasan por el proxy. El driver corre en un worker del cluster, así que el cliente nunca necesita recibir conexiones. Un job de suma distribuida terminó en `FINISHED` con el resultado correcto. Las mismas conexiones de una sola vía sirven para Spark Connect (15002) y Livy (8998), que no probé.
+- **Sí, `spark-submit` en modo client por un puerto de intranet**, siempre que el cluster pueda llegar al driver. Con el driver en una dirección alcanzable, el job terminó bien a través del puerto de intranet 5101.
+- **No, cuando el cluster no puede llegar al driver.** En modo client, los executors tienen que conectarse de vuelta al driver. Con `spark.driver.host` en una dirección que el cluster no alcanza, los executors arrancan pero nunca se registran, y el job se queda en "Initial job has not accepted any resources". Esa conexión de vuelta no pasa por el túnel, así que este caso no se puede resolver con Lipstick. Es el caso de "dos sentidos" de arriba.
+- **Requisitos de Java.** Spark 3.5 no arranca con Java 25 (`getSubject is not supported`). Con Java 17 hace falta pasar `--add-opens` al driver y a los executors (`spark.driver.extraJavaOptions` y `spark.executor.extraJavaOptions`). Un worker con poca memoria también bloquea el job: el driver de modo cluster reserva la memoria del worker.
+- Los puertos y modos de despliegue cambian entre versiones de Spark. Prueba el flujo concreto con tu versión antes de depender de él.
 
 #### Principio general
 
