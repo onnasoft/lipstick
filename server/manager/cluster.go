@@ -1,6 +1,7 @@
 package manager
 
 import (
+	"bufio"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
@@ -18,6 +19,7 @@ import (
 	"github.com/OnnaSoft/lipstick/logger"
 	"github.com/OnnaSoft/lipstick/server/config"
 	"github.com/OnnaSoft/lipstick/server/subscriptions"
+	"github.com/hashicorp/yamux"
 	"github.com/nats-io/nats.go"
 )
 
@@ -48,6 +50,9 @@ type cluster struct {
 
 	mu    sync.Mutex
 	peers map[string]map[string]time.Time // domain -> server -> last presence
+
+	relayMu sync.Mutex
+	relays  map[string]*relaySession // peer|domain -> session
 }
 
 // observe records a presence message. Messages from this server are ignored, and a
@@ -103,6 +108,7 @@ func (manager *Manager) StartCluster(conf config.ClusterConfig, tlsConfig *tls.C
 		advertise: conf.AdvertiseAddress,
 		tls:       &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS12},
 		peers:     make(map[string]map[string]time.Time),
+		relays:    make(map[string]*relaySession),
 	}
 	if _, err := mgr.SubscribeBroadcast(presenceSubject, func(msg *nats.Msg) {
 		var m presenceMsg
@@ -165,6 +171,16 @@ func (manager *Manager) publishPresence(mgr *subscriptions.SubscriptionManager) 
 	}
 }
 
+// relaySession is a persistent session from this server to one peer, for one
+// domain. The peer accepts streams on it; each stream is one visitor.
+type relaySession struct {
+	session *yamux.Session
+	carrier net.Conn
+}
+
+// relayTimeout bounds the header line and the first write on a relayed stream.
+const relayTimeout = 5 * time.Second
+
 // routeVisitor relays a visitor to another server of the cluster. It does not block:
 // the relay runs in its own goroutine, so the hub loop is never held. Without a
 // server that has a session for the domain, the visitor gets 502.
@@ -184,93 +200,218 @@ func (manager *Manager) relayVisitor(domain string, visitor *helper.RemoteConn, 
 		rejectVisitor(visitor)
 		return
 	}
-	record, err := manager.authManager.GetDomain(domain)
-	if err != nil {
-		rejectVisitor(visitor)
-		return
+	// The key is read only when a session must be opened, not for every visitor.
+	apiKey := func() (string, error) {
+		record, err := manager.authManager.GetDomain(domain)
+		if err != nil {
+			return "", err
+		}
+		return record.ApiKey, nil
 	}
-	nonce, err := helper.NewMuxNonce(time.Now())
-	if err != nil {
-		rejectVisitor(visitor)
-		return
-	}
-
-	tlsConf := c.tls.Clone()
-	if host, _, err := net.SplitHostPort(peer); err == nil {
-		tlsConf.ServerName = host
-	}
-	peerConn, err := tls.DialWithDialer(&net.Dialer{Timeout: relayDialTimeout}, "tcp", peer, tlsConf)
+	rs, err := c.relayFor(peer, domain, apiKey)
 	if err != nil {
 		logger.Default.Error("Cannot relay to peer", peer, "for domain", domain, ":", err)
 		rejectVisitor(visitor)
 		return
 	}
-	defer peerConn.Close()
 
-	request := fmt.Sprintf("GET /relay HTTP/1.1\r\nHost: %s\r\n%s: %s\r\n%s: %s\r\n%s: %d\r\n\r\n",
-		domain,
-		helper.RelayNonceHeader, nonce,
-		helper.ProofHeader, helper.RelayProof(record.ApiKey, nonce),
-		helper.RelayPortHeader, port)
-	peerConn.SetWriteDeadline(time.Now().Add(relayWriteWait))
-	if _, err := peerConn.Write([]byte(request)); err != nil {
+	stream, err := rs.session.OpenStream()
+	if err != nil {
+		c.dropRelay(peer, domain, rs)
 		rejectVisitor(visitor)
 		return
 	}
-	peerConn.SetWriteDeadline(time.Time{})
+	stream.SetWriteDeadline(time.Now().Add(relayTimeout))
+	_, err = stream.Write([]byte("LIPSTICK-RELAY " + strconv.Itoa(port) + "\n"))
+	stream.SetWriteDeadline(time.Time{})
+	if err != nil {
+		stream.Close()
+		c.dropRelay(peer, domain, rs)
+		rejectVisitor(visitor)
+		return
+	}
+	relayBothWays(visitor, helper.NewStreamConn(stream, rs.carrier))
+}
 
-	// The visitor's own request follows the headers. Bytes flow both ways until
-	// both sides have finished.
+// relayFor returns the session to peer for domain, opening it if there is none.
+func (c *cluster) relayFor(peer, domain string, apiKey func() (string, error)) (*relaySession, error) {
+	key := peer + "|" + domain
+	c.relayMu.Lock()
+	current := c.relays[key]
+	c.relayMu.Unlock()
+	if current != nil && !current.session.IsClosed() {
+		return current, nil
+	}
+
+	k, err := apiKey()
+	if err != nil {
+		return nil, err
+	}
+	fresh, err := dialRelay(c.tls, peer, domain, k)
+	if err != nil {
+		return nil, err
+	}
+
+	c.relayMu.Lock()
+	defer c.relayMu.Unlock()
+	if cur := c.relays[key]; cur != nil && !cur.session.IsClosed() {
+		// Another visit opened one meanwhile. Keep that one.
+		fresh.session.Close()
+		return cur, nil
+	}
+	c.relays[key] = fresh
+	return fresh, nil
+}
+
+// dropRelay forgets a session that failed, so the next visit opens a new one.
+func (c *cluster) dropRelay(peer, domain string, rs *relaySession) {
+	key := peer + "|" + domain
+	c.relayMu.Lock()
+	if c.relays[key] == rs {
+		delete(c.relays, key)
+	}
+	c.relayMu.Unlock()
+	rs.session.Close()
+}
+
+// dialRelay opens the authenticated relay session to a peer. The peer checks the
+// proof once, when the session opens.
+func dialRelay(base *tls.Config, peer, domain, apiKey string) (*relaySession, error) {
+	nonce, err := helper.NewMuxNonce(time.Now())
+	if err != nil {
+		return nil, err
+	}
+	tlsConf := base.Clone()
+	if host, _, err := net.SplitHostPort(peer); err == nil {
+		tlsConf.ServerName = host
+	}
+	conn, err := tls.DialWithDialer(&net.Dialer{Timeout: relayDialTimeout}, "tcp", peer, tlsConf)
+	if err != nil {
+		return nil, err
+	}
+	request := fmt.Sprintf("GET /relay HTTP/1.1\r\nHost: %s\r\n%s: %s\r\n%s: %s\r\n\r\n",
+		domain,
+		helper.RelayNonceHeader, nonce,
+		helper.ProofHeader, helper.RelayProof(apiKey, nonce))
+	conn.SetWriteDeadline(time.Now().Add(relayWriteWait))
+	if _, err := conn.Write([]byte(request)); err != nil {
+		conn.Close()
+		return nil, err
+	}
+	conn.SetWriteDeadline(time.Time{})
+	session, err := yamux.Client(conn, muxConfig())
+	if err != nil {
+		conn.Close()
+		return nil, err
+	}
+	return &relaySession{session: session, carrier: conn}, nil
+}
+
+// relayBothWays copies bytes both ways until both sides have finished.
+func relayBothWays(visitor net.Conn, peer net.Conn) {
 	done := make(chan struct{}, 2)
 	go func() {
-		io.Copy(peerConn, visitor)
-		helper.CloseWrite(peerConn)
+		io.Copy(peer, visitor)
+		helper.CloseWrite(peer)
 		done <- struct{}{}
 	}()
 	go func() {
-		io.Copy(visitor, peerConn)
+		io.Copy(visitor, peer)
 		helper.CloseWrite(visitor)
 		done <- struct{}{}
 	}()
 	<-done
 	<-done
 	visitor.Close()
+	peer.Close()
 }
 
-// handleRelay receives a visitor relayed by another server. It checks the proof and
-// the nonce, then gives the visitor to a session of this server. It never relays
-// again: a visitor without a session here gets 502.
+// handleRelay opens a relay session from a peer. It checks the proof and the nonce
+// once. The peer's streams then arrive as visitors, served by serveRelayStreams.
 func (manager *Manager) handleRelay(conn net.Conn, req *http.Request) {
 	domainName := strings.Split(req.Host, ":")[0]
 	nonce := req.Header.Get(helper.RelayNonceHeader)
 	now := time.Now()
 
 	if _, ok := helper.MuxNonceTime(nonce, now); !ok {
-		logger.Default.Error("Relay with an expired or malformed nonce for domain:", domainName)
+		logger.Default.Error("Relay session with an expired or malformed nonce for domain:", domainName)
 		conn.Close()
 		return
 	}
 	record, err := manager.authManager.GetDomain(domainName)
 	if err != nil || !helper.VerifyRelayProof(record.ApiKey, nonce, req.Header.Get(helper.ProofHeader)) {
-		logger.Default.Error("Relay without a valid proof for domain:", domainName)
+		logger.Default.Error("Relay session without a valid proof for domain:", domainName)
 		conn.Close()
 		return
 	}
 	if !manager.nonces.take(nonce, now) {
-		logger.Default.Error("Relay with a replayed nonce for domain:", domainName)
+		logger.Default.Error("Relay session with a replayed nonce for domain:", domainName)
 		conn.Close()
 		return
 	}
-
-	port, err := strconv.Atoi(req.Header.Get(helper.RelayPortHeader))
-	if err != nil || port < 0 || port > 65535 {
-		port = 0
-	}
-	visitor := &helper.RemoteConn{Conn: conn, Domain: domainName}
 	hub, ok := manager.GetHub(domainName)
-	if !ok || !hub.takeMux(visitor, port) {
+	if !ok {
+		conn.Close()
+		return
+	}
+	session, err := yamux.Server(conn, muxConfig())
+	if err != nil {
+		conn.Close()
+		return
+	}
+	go hub.serveRelayStreams(session, conn, domainName)
+}
+
+// serveRelayStreams takes the visitors a peer relays over one session.
+func (hub *NetworkHub) serveRelayStreams(session *yamux.Session, carrier net.Conn, domain string) {
+	defer session.Close()
+	for {
+		stream, err := session.AcceptStream()
+		if err != nil {
+			return
+		}
+		go hub.serveRelayStream(stream, carrier, domain)
+	}
+}
+
+// serveRelayStream gives one relayed visitor to a client session of this hub. The
+// first line carries the port the visitor came in on. A visitor that no session
+// can take gets 502 back through the relay.
+func (hub *NetworkHub) serveRelayStream(stream *yamux.Stream, carrier net.Conn, domain string) {
+	stream.SetReadDeadline(time.Now().Add(relayTimeout))
+	reader := bufio.NewReader(stream)
+	line, err := reader.ReadString('\n')
+	if err != nil {
+		stream.Close()
+		return
+	}
+	stream.SetReadDeadline(time.Time{})
+	port, err := parseRelayLine(line)
+	if err != nil {
+		logger.Default.Error("Bad relay line:", err)
+		stream.Close()
+		return
+	}
+	pending, _ := reader.Peek(reader.Buffered())
+	wrapped := helper.NewConnWithBuffer(helper.NewStreamConn(stream, carrier), append([]byte(nil), pending...))
+	visitor := &helper.RemoteConn{Conn: wrapped, Domain: domain}
+	if !hub.takeMux(visitor, port) {
 		rejectVisitor(visitor)
 	}
+}
+
+// parseRelayLine reads "LIPSTICK-RELAY <port>". The port must be a valid number.
+func parseRelayLine(line string) (int, error) {
+	line = strings.TrimRight(line, "\r\n")
+	rest, ok := strings.CutPrefix(line, "LIPSTICK-RELAY ")
+	if !ok {
+		return 0, fmt.Errorf("unexpected relay line %q", line)
+	}
+	n, err := strconv.Atoi(rest)
+	if err != nil || n < 0 || n > 65535 {
+		return 0, fmt.Errorf("invalid relay port %q", rest)
+	}
+	return n, nil
 }
 
 // muxCount returns how many sessions the hub holds.

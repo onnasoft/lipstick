@@ -31,6 +31,12 @@ type AdminConfig struct {
 
 type NatsConfig struct {
 	URL string `yaml:"url"`
+	// Username and Password, or Token, authenticate this server to NATS.
+	Username string `yaml:"username"`
+	Password string `yaml:"password"`
+	Token    string `yaml:"token"`
+	// CAFile is the CA that signs the NATS server's certificate, for tls:// URLs.
+	CAFile string `yaml:"ca_file"`
 }
 
 type TLSConfig struct {
@@ -181,6 +187,7 @@ func (c AppConfig) Validate() error {
 	if err := validateNatsURL(c.Nats.URL); err != nil {
 		errs = append(errs, fmt.Errorf("nats.url: %w", err))
 	}
+	errs = append(errs, c.Nats.validateAuth(c.Cluster != nil)...)
 
 	if c.Cluster != nil {
 		if c.Cluster.AdvertiseAddress == "" {
@@ -222,6 +229,35 @@ func validateListenAddress(addr string) error {
 		return fmt.Errorf("port %q is not in range 1-65535", port)
 	}
 	return nil
+}
+
+// validateAuth checks the NATS credentials. Credentials never go over a plain
+// connection. A cluster must authenticate, because its presence messages decide
+// where visitors are relayed.
+func (n NatsConfig) validateAuth(cluster bool) []error {
+	var errs []error
+	hasUser := n.Username != "" || n.Password != ""
+	hasToken := n.Token != ""
+	if hasUser && hasToken {
+		errs = append(errs, errors.New("nats: use username and password, or token, not both"))
+	}
+	if hasUser && (n.Username == "" || n.Password == "") {
+		errs = append(errs, errors.New("nats: username and password must be set together"))
+	}
+	authenticated := hasUser || hasToken
+	secure := strings.HasPrefix(n.URL, "tls://")
+	if authenticated && !secure {
+		errs = append(errs, errors.New("nats.url must start with tls:// when nats credentials are set"))
+	}
+	if cluster {
+		if !authenticated {
+			errs = append(errs, errors.New("a cluster needs nats credentials: set nats.username and nats.password, or nats.token"))
+		}
+		if !secure {
+			errs = append(errs, errors.New("a cluster needs a tls:// nats.url"))
+		}
+	}
+	return errs
 }
 
 func validateNatsURL(raw string) error {

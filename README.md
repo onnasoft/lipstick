@@ -363,7 +363,10 @@ El servidor lee un YAML (`-c`, por defecto `/etc/lipstick/config.yml`). Parte de
 | `database.password` | vacío | Contraseña. |
 | `database.database` | `app_db` | Base de datos. |
 | `database.ssl_mode` | `disable` | `disable`, `allow`, `prefer`, `require`, `verify-ca` o `verify-full`. |
-| `nats.url` | `nats://localhost:4222` | Servidor NATS. Obligatorio para el cluster. |
+| `nats.url` | `nats://localhost:4222` | Servidor NATS. Obligatorio para el cluster, y debe ser `tls://` con credenciales. |
+| `nats.username` / `nats.password` | vacío | Credenciales de NATS. Van juntas, y nunca por una conexión `nats://` sin TLS. |
+| `nats.token` | vacío | Alternativa a usuario y contraseña. No se combina con ellos. |
+| `nats.ca_file` | vacío | CA que firma el certificado del servidor NATS, para `tls://`. |
 | `cluster.advertise_address` | desactivado | Dirección `host:puerto` del puerto de manager de este servidor, tal como la alcanzan los otros servidores. Activa el cluster. |
 | `cluster.ca_file` | vacío | CA que firma los certificados de los otros servidores. Vacío: se confía en el certificado propio de este servidor. |
 | `intranet_ports` | desactivado | Puertos TCP sin TLS, reservados por los clientes dentro de una política. Ver [Puertos sin TLS](#puertos-sin-tls-para-la-intranet). |
@@ -416,6 +419,7 @@ curl -sk -X POST https://127.0.0.1:5052/domains \
 Varios servidores pueden servir los mismos dominios. Todos usan la misma base de datos, el mismo NATS y el mismo certificado (o certificados firmados por la misma CA, indicada en `cluster.ca_file`).
 
 - Cada servidor publica por NATS, cada 5 segundos, los dominios para los que tiene sesiones de cliente. Un servidor que deja de publicar se olvida a los 15 segundos.
+- NATS exige credenciales. Un cluster sin credenciales o con `nats://` no arranca. Sin credenciales, NATS rechaza la conexión, y un cliente anónimo no puede leer la presencia (`Authorization Violation`).
 - Un visitante que llega a un servidor sin sesión para su dominio se **reenvía** a un servidor que sí la tiene. El reenvío va por una conexión TLS verificada con el certificado del cluster, y se autentica con una prueba hecha con la clave del dominio.
 - El servidor que recibe el reenvío entrega la visita a una de sus sesiones. El puerto de entrada original se conserva en el registro de peticiones.
 - Si ningún servidor tiene sesión para el dominio, el visitante recibe `502` de inmediato.

@@ -26,17 +26,17 @@ func GetSubscriptionManager() (*SubscriptionManager, error) {
 	if err != nil {
 		return nil, fmt.Errorf("cannot read configuration: %w", err)
 	}
-	return sharedManager(conf.Nats.URL)
+	return sharedManager(conf.Nats)
 }
 
-func sharedManager(url string) (*SubscriptionManager, error) {
+func sharedManager(conf config.NatsConfig) (*SubscriptionManager, error) {
 	managerMu.Lock()
 	defer managerMu.Unlock()
 
 	if manager != nil {
 		return manager, nil
 	}
-	m, err := NewSubscriptionManager(url)
+	m, err := NewSubscriptionManager(conf)
 	if err != nil {
 		return nil, err
 	}
@@ -44,13 +44,25 @@ func sharedManager(url string) (*SubscriptionManager, error) {
 	return m, nil
 }
 
-func NewSubscriptionManager(url string) (*SubscriptionManager, error) {
-	conn, err := nats.Connect(url)
+// NewSubscriptionManager connects to NATS with the configured credentials. The
+// credentials are not logged, and the URL is logged without them.
+func NewSubscriptionManager(conf config.NatsConfig) (*SubscriptionManager, error) {
+	opts := []nats.Option{nats.Name("lipstick")}
+	switch {
+	case conf.Token != "":
+		opts = append(opts, nats.Token(conf.Token))
+	case conf.Username != "":
+		opts = append(opts, nats.UserInfo(conf.Username, conf.Password))
+	}
+	if conf.CAFile != "" {
+		opts = append(opts, nats.RootCAs(conf.CAFile))
+	}
+	conn, err := nats.Connect(conf.URL, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("error connecting to NATS: %v", err)
 	}
 
-	logger.Default.Info("Connected to NATS:", url)
+	logger.Default.Info("Connected to NATS:", conf.URL)
 	return &SubscriptionManager{conn: conn}, nil
 }
 

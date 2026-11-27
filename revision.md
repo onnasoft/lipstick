@@ -438,6 +438,13 @@ Lipstick exposes local ports to the internet through a reverse tunnel. The main 
 - **Verified:** unit tests for presence (freshness, own messages, stale peers, the freshest peer), config validation, and the no-cluster 502. Live, with two servers sharing the database and NATS: a visitor entering B reached a client on A (200); a visitor entering A reached a client on B (200); with no session anywhere, both entries returned 502 in about 3 ms; the request log on the serving server recorded the original port (5050 for a visitor that entered A).
 - **Not verified:** servers on different machines; a server failing in the middle of a load; cluster certificates signed by a CA (the `ca_file` path is written but not exercised).
 
+### 43. NATS accepted anonymous and plaintext connections (security)
+- **Where:** `server/config/config.go` (`NatsConfig`, `validateAuth`), `server/subscriptions/subscriptions.go` (`NewSubscriptionManager`)
+- **What:** the server connected to NATS without credentials and over plain `nats://`. Presence messages decide where visitors are relayed, so anyone who could publish on NATS could steer relays, and anyone who could read it could learn which domains run where.
+- **Fix:** `nats.username` and `nats.password`, or `nats.token`, are passed to the connection. Credentials are refused over a plain URL. A cluster refuses to start without credentials and without `tls://`. A single server may still run without credentials, as before. The password is never logged.
+- **Verified:** config tests for each rule. Live, against a separate authenticated TLS NATS on port 4223 (the normal NATS on 4222 was not changed): a wrong password stops the server with `Authorization Violation`; an anonymous connection is refused; two cluster servers with correct credentials relay a visitor (200); the password does not appear in any log.
+- **Not verified:** NATS ACLs per subject (the server can still publish on any subject); credentials rotation; `nats.ca_file` with a CA-signed NATS certificate.
+
 ## Recommended order
 
 1. Items 1, 2, 3, and 4: authentication, unpredictable tickets, TLS verification, and admin API hardening.

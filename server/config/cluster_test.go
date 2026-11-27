@@ -8,6 +8,10 @@ import (
 func clusterConfig(c *ClusterConfig) AppConfig {
 	cfg := validConfig()
 	cfg.Cluster = c
+	if c != nil {
+		// A cluster needs authenticated TLS NATS, so the tests set it.
+		cfg.Nats = NatsConfig{URL: "tls://nats.internal:4222", Token: "test-token"}
+	}
 	return cfg
 }
 
