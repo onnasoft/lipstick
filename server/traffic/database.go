@@ -1,7 +1,7 @@
 package traffic
 
 import (
-	"log"
+	"fmt"
 	"time"
 
 	"github.com/OnnaSoft/lipstick/server/config"
@@ -9,17 +9,17 @@ import (
 	"gorm.io/gorm"
 )
 
-func (tm *TrafficManager) updateDatabase(domain string, traffic int64) {
+// updateDatabase adds bytes to today's counter of a domain. It returns an error
+// instead of stopping the process, so the caller can keep the bytes for later.
+func (tm *TrafficManager) updateDatabase(domain string, traffic int64) error {
 	conf, err := config.GetConfig()
 	if err != nil {
-		log.Fatalf("Error getting config: %v", err)
-		return
+		return fmt.Errorf("cannot read configuration: %w", err)
 	}
 
 	connection, err := db.GetConnection(conf.Database)
 	if err != nil {
-		log.Printf("Error connecting to database: %v", err)
-		return
+		return fmt.Errorf("cannot connect to database: %w", err)
 	}
 
 	today := time.Now().Truncate(24 * time.Hour)
@@ -27,26 +27,24 @@ func (tm *TrafficManager) updateDatabase(domain string, traffic int64) {
 
 	var dailyConsumption db.DailyConsumption
 	err = connection.Where("domain = ? AND date = ?", domain, today).First(&dailyConsumption).Error
-
 	if err != nil {
-		if err == gorm.ErrRecordNotFound {
-			newConsumption := db.DailyConsumption{
-				Domain:    domain,
-				Date:      today,
-				Month:     month,
-				BytesUsed: traffic,
-			}
-			if createErr := connection.Create(&newConsumption).Error; createErr != nil {
-				log.Printf("Error creating DailyConsumption: %v", createErr)
-			}
-		} else {
-			log.Printf("Error querying DailyConsumption: %v", err)
+		if err != gorm.ErrRecordNotFound {
+			return fmt.Errorf("cannot query daily consumption: %w", err)
 		}
-		return
+		newConsumption := db.DailyConsumption{
+			Domain:    domain,
+			Date:      today,
+			Month:     month,
+			BytesUsed: traffic,
+		}
+		if err := connection.Create(&newConsumption).Error; err != nil {
+			return fmt.Errorf("cannot create daily consumption: %w", err)
+		}
+		return nil
 	}
 
-	tx := connection.Model(&dailyConsumption).Update("bytes_used", gorm.Expr("bytes_used + ?", traffic))
-	if tx.Error != nil {
-		log.Printf("Error updating DailyConsumption: %v", tx.Error)
+	if err := connection.Model(&dailyConsumption).Update("bytes_used", gorm.Expr("bytes_used + ?", traffic)).Error; err != nil {
+		return fmt.Errorf("cannot update daily consumption: %w", err)
 	}
+	return nil
 }

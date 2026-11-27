@@ -150,6 +150,8 @@ func (r *router) updateDomain(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Unable to update domain"})
 		return
 	}
+	// A new key or a new policy must apply to the clients already connected.
+	r.admin.domainChanged(record.Name)
 
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
@@ -170,6 +172,7 @@ func (r *router) deleteDomain(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Unable to delete domain"})
 		return
 	}
+	r.admin.domainChanged(record.Name)
 
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }

@@ -91,9 +91,25 @@ func SetupManager(tlsConfig *tls.Config) *Manager {
 	return manager
 }
 
-func (m *Manager) AddHub(domain string, hub *NetworkHub) {
-	logger.Default.Debug("Adding hub for domain:", domain)
-	m.hubs.Store(domain, hub)
+// getOrCreateHub returns the hub of a domain, starting its loop when it does not
+// exist yet. Two clients connecting at the same time get the same hub.
+func (m *Manager) getOrCreateHub(domain string) *NetworkHub {
+	if value, ok := m.hubs.Load(domain); ok {
+		return value.(*NetworkHub)
+	}
+
+	hub := NewNetworkHub(domain, m.trafficManager, 64*1024)
+	// When the hub stops for lack of clients, forget it. CompareAndDelete leaves
+	// a newer hub for the same domain alone.
+	hub.onIdle = func() { m.hubs.CompareAndDelete(domain, hub) }
+
+	actual, loaded := m.hubs.LoadOrStore(domain, hub)
+	if loaded {
+		return actual.(*NetworkHub)
+	}
+	go hub.listen()
+	logger.Default.Info("New hub created for domain:", domain)
+	return hub
 }
 
 func (m *Manager) GetHub(domain string) (*NetworkHub, bool) {
@@ -105,9 +121,25 @@ func (m *Manager) GetHub(domain string) (*NetworkHub, bool) {
 	return value.(*NetworkHub), true
 }
 
-func (m *Manager) RemoveHub(domain string) {
-	logger.Default.Debug("Removing hub for domain:", domain)
-	m.hubs.Delete(domain)
+// DropHub stops the hub of a domain and disconnects its clients. Called when
+// the domain is deleted or its key changes. The clients must reconnect, and
+// they are then checked against the current configuration.
+func (m *Manager) DropHub(domain string) {
+	if value, ok := m.hubs.LoadAndDelete(domain); ok {
+		logger.Default.Info("Dropping hub for domain:", domain)
+		value.(*NetworkHub).stop()
+	}
+}
+
+// Close stops every hub and flushes the pending traffic counters. Called on
+// shutdown.
+func (m *Manager) Close() {
+	m.hubs.Range(func(key, value any) bool {
+		m.hubs.Delete(key)
+		value.(*NetworkHub).stop()
+		return true
+	})
+	m.trafficManager.Close()
 }
 
 func (manager *Manager) handleTunnel(conn net.Conn, req *http.Request, ticket string) {
@@ -117,11 +149,15 @@ func (manager *Manager) handleTunnel(conn net.Conn, req *http.Request, ticket st
 	domain, ok := manager.GetHub(domainName)
 	if !ok {
 		logger.Default.Error("hub not found for domain:", domainName)
+		conn.Close()
 		return
 	}
 
 	logger.Default.Debug("Handling tunnel for domain:", domainName)
-	domain.serverRequests <- &request{ticket: ticket, conn: conn}
+	if !domain.submitTunnel(&request{ticket: ticket, conn: conn}) {
+		logger.Default.Error("hub stopped before the tunnel connection arrived:", domainName)
+		conn.Close()
+	}
 }
 
 func (manager *Manager) Listen() {
@@ -166,11 +202,16 @@ func (manager *Manager) HandleHTTPConn(conn net.Conn, req *http.Request) {
 
 	logger.Default.Debug("Handling HTTP connection for domain:", domain)
 	if remoteConn, ok := conn.(*helper.RemoteConn); ok {
-		hub.incomingClientConn <- remoteConn
+		if !hub.submitVisitor(remoteConn) {
+			rejectVisitor(remoteConn)
+		}
 		return
 	}
 
-	hub.incomingClientConn <- &helper.RemoteConn{Conn: conn, Domain: domain}
+	remoteConn := &helper.RemoteConn{Conn: conn, Domain: domain}
+	if !hub.submitVisitor(remoteConn) {
+		rejectVisitor(remoteConn)
+	}
 }
 
 func (manager *Manager) HandleTCPConn(conn net.Conn) {
@@ -198,9 +239,14 @@ func (manager *Manager) HandleTCPConn(conn net.Conn) {
 
 	logger.Default.Debug("Handling TCP connection for domain:", domain)
 	if remoteConn, ok := conn.(*helper.RemoteConn); ok {
-		hub.incomingClientConn <- remoteConn
+		if !hub.submitVisitor(remoteConn) {
+			rejectVisitor(remoteConn)
+		}
 		return
 	}
 
-	hub.incomingClientConn <- &helper.RemoteConn{Conn: conn, Domain: domain}
+	remoteConn := &helper.RemoteConn{Conn: conn, Domain: domain}
+	if !hub.submitVisitor(remoteConn) {
+		rejectVisitor(remoteConn)
+	}
 }

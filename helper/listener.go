@@ -22,31 +22,6 @@ func NewListenerManagerTCP(addr string, tlsConfig *tls.Config) (*ListenerManager
 	return NewListenerManager(l), nil
 }
 
-type ListenerConn struct {
-	net.Conn
-}
-
-func NewListenerConn(conn net.Conn) *ListenerConn {
-	return &ListenerConn{Conn: conn}
-}
-
-func (l *ListenerConn) Close() error {
-	return nil
-}
-
-func (l *ListenerConn) Accept() (net.Conn, error) {
-	if l.Conn == nil {
-		return nil, errors.New("listener closed")
-	}
-	conn := l.Conn
-	l.Conn = nil
-	return conn, nil
-}
-
-func (l *ListenerConn) Addr() net.Addr {
-	return l.LocalAddr()
-}
-
 type ListenerManager struct {
 	net.Listener
 	onClose    func()

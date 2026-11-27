@@ -73,17 +73,7 @@ func (r *router) upgrade(c *gin.Context) {
 		return
 	}
 
-	hub, ok := r.manager.GetHub(domain.Name)
-	if !ok {
-		hub = NewNetworkHub(
-			domain.Name,
-			r.manager.trafficManager,
-			64*1024,
-		)
-		r.manager.AddHub(domain.Name, hub)
-		go hub.listen()
-		logger.Default.Info("New hub created for domain:", domain.Name)
-	}
+	hub := r.manager.getOrCreateHub(domain.Name)
 
 	rw.WriteString("HTTP/1.1 200 OK\r\n")
 	rw.WriteString("Content-Type: text/plain\r\n")
@@ -101,5 +91,8 @@ func (r *router) upgrade(c *gin.Context) {
 		AllowMultipleConnections: domain.AllowMultipleConnections,
 	}
 
-	hub.registerProxyNotificationConn <- notification
+	if !hub.registerClient(notification) {
+		logger.Default.Error("hub stopped before the client could register:", domain.Name)
+		conn.Close()
+	}
 }

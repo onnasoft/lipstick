@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -90,51 +91,70 @@ func checkConnection(connection io.ReadWriter) {
 		time.Sleep(30 * time.Second)
 	}
 }
-func readMessage(reader *bufio.Reader) (string, string, error) {
+
+// readMessage reads one ticket line from the server. The server sends only the
+// ticket: a hex string, so it cannot contain separators or URL characters.
+func readMessage(reader *bufio.Reader) (string, error) {
 	line, err := reader.ReadString('\n')
 	if err != nil {
-		return "", "", fmt.Errorf("error reading until newline: %w", err)
+		return "", fmt.Errorf("error reading until newline: %w", err)
 	}
-	line = line[:len(line)-1]
+	line = strings.TrimRight(line, "\r\n")
 	if line == "close" {
-		fmt.Println("Connection closed by server")
-		return "", "", fmt.Errorf("connection closed by server")
+		return "", errors.New("connection closed by server")
 	}
+	if !isTicket(line) {
+		return "", fmt.Errorf("invalid ticket from server: %q", line)
+	}
+	return line, nil
+}
 
-	data := strings.Split(line, ":")
-
-	return data[0], data[1], nil
+// isTicket accepts 1 to 64 lowercase hex characters.
+func isTicket(s string) bool {
+	if len(s) == 0 || len(s) > 64 {
+		return false
+	}
+	for _, c := range s {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+			return false
+		}
+	}
+	return true
 }
 
 func handleTickets(connection net.Conn, proxyTarget string) {
 	defer func() {
-		recover()
+		if r := recover(); r != nil {
+			log.Printf("ticket loop stopped: %v", r)
+		}
 	}()
 	defer connection.Close()
 
 	reader := bufio.NewReader(connection)
 	for {
-		addr, ticket, err := readMessage(reader)
+		ticket, err := readMessage(reader)
 		if err != nil {
+			fmt.Println(err)
 			return
 		}
 
-		if len(ticket) > 0 {
-			protocol, targetAddress := helper.ParseTargetEndpoint(proxyTarget)
-			go establishConnection(protocol, addr, targetAddress, string(ticket))
-		}
+		protocol, targetAddress := helper.ParseTargetEndpoint(proxyTarget)
+		go establishConnection(protocol, targetAddress, ticket)
 	}
 }
 
-func establishConnection(protocol, addr, proxyTarget, uuid string) {
+func establishConnection(protocol, proxyTarget, ticket string) {
 	defer func() {
-		recover()
+		if r := recover(); r != nil {
+			log.Printf("connection for ticket %s failed: %v", ticket, r)
+		}
 	}()
-	url := serverURL + "/" + uuid
+	url := serverURL + "/" + ticket
 
 	connection, err := httpmanager.ConnectByAddress(url, nil)
 	if err != nil {
-		fmt.Fprintf(connection, helper.BadGatewayResponse)
+		// No connection exists yet, so there is nothing to answer on.
+		log.Printf("reverse connection failed: %v", err)
 		return
 	}
 	defer connection.Close()
@@ -142,7 +162,7 @@ func establishConnection(protocol, addr, proxyTarget, uuid string) {
 	b := make([]byte, 1024)
 	n, err := connection.Read(b)
 	if err != nil {
-		fmt.Fprintf(connection, helper.BadGatewayResponse)
+		connection.Write([]byte(helper.BadGatewayResponse))
 		return
 	}
 	buff := b[:n]

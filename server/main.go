@@ -52,6 +52,7 @@ func main() {
 
 	manager := manager.SetupManager(tlsConfig)
 	admin := admin.SetupAdmin(conf.Admin.Address, conf.AdminSecretKey, tlsConfig)
+	admin.SetDomainChangedHook(manager.DropHub)
 
 	proxy.OnListen(func() { logger.Default.Info("Listening proxy on ", conf.Proxy.Address) })
 	proxy.OnClose(func() { logger.Default.Info("Proxy closed") })
@@ -67,4 +68,5 @@ func main() {
 	go proxy.ListenAndServe()
 	<-interrupt
 	fmt.Println("Desconectando...")
+	manager.Close()
 }

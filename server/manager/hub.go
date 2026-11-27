@@ -2,7 +2,6 @@ package manager
 
 import (
 	"net"
-	"strings"
 	"sync"
 	"time"
 
@@ -34,6 +33,11 @@ const (
 
 var rng = helper.NewXORShift(uint32(time.Now().UnixNano()))
 
+// clientIdleTimeout is how long a tunnel client may stay silent. Clients ping
+// every 30 seconds, so a longer silence means the client is gone. It is a
+// variable so tests can shorten it.
+var clientIdleTimeout = 90 * time.Second
+
 // pendingVisitor is a visitor connection waiting for its tunnel client.
 type pendingVisitor struct {
 	conn  net.Conn
@@ -58,8 +62,16 @@ type NetworkHub struct {
 	mu                              sync.Mutex
 	totalDataTransferred            int64
 	tickerManager                   *TickerManager
-	shutdownSignal                  chan struct{}
 	subscription                    *nats.Subscription
+
+	// done is closed to stop the hub. Every channel send from outside selects
+	// on done, so no sender can block on a hub that has stopped.
+	done     chan struct{}
+	stopOnce sync.Once
+
+	// onIdle runs in the hub loop when the last client leaves. The manager uses
+	// it to forget the hub.
+	onIdle func()
 }
 
 func NewNetworkHub(name string, trafficManager *traffic.TrafficManager, threshold int64) *NetworkHub {
@@ -76,7 +88,50 @@ func NewNetworkHub(name string, trafficManager *traffic.TrafficManager, threshol
 		dataUsageAccumulator:            0,
 		threshold:                       threshold,
 		tickerManager:                   &TickerManager{},
-		shutdownSignal:                  make(chan struct{}),
+		done:                            make(chan struct{}),
+	}
+}
+
+// stop asks the hub loop to close its clients and exit. It is safe to call more
+// than once and never blocks.
+func (hub *NetworkHub) stop() {
+	hub.stopOnce.Do(func() { close(hub.done) })
+}
+
+// Senders outside the hub loop use these helpers. Each returns false when the
+// hub has stopped, so the caller can close its connection instead of blocking.
+
+func (hub *NetworkHub) registerClient(ws *ProxyNotificationConn) bool {
+	select {
+	case hub.registerProxyNotificationConn <- ws:
+		return true
+	case <-hub.done:
+		return false
+	}
+}
+
+func (hub *NetworkHub) unregisterClient(ws *ProxyNotificationConn) {
+	select {
+	case hub.unregisterProxyNotificationConn <- ws:
+	case <-hub.done:
+	}
+}
+
+func (hub *NetworkHub) submitVisitor(visitor *helper.RemoteConn) bool {
+	select {
+	case hub.incomingClientConn <- visitor:
+		return true
+	case <-hub.done:
+		return false
+	}
+}
+
+func (hub *NetworkHub) submitTunnel(req *request) bool {
+	select {
+	case hub.serverRequests <- req:
+		return true
+	case <-hub.done:
+		return false
 	}
 }
 
@@ -141,7 +196,6 @@ func (hub *NetworkHub) addDataUsage(bytes int64) {
 }
 
 func (hub *NetworkHub) listen() {
-	shutdownComplete := make(chan struct{})
 	expire := time.NewTicker(expireInterval)
 	defer expire.Stop()
 
@@ -159,8 +213,8 @@ func (hub *NetworkHub) listen() {
 			hub.handleNatsMessage(msg)
 		case now := <-expire.C:
 			hub.expirePendingVisitors(now)
-		case <-hub.shutdownSignal:
-			hub.handleShutdown(shutdownComplete)
+		case <-hub.done:
+			hub.handleShutdown()
 			return
 		}
 	}
@@ -210,20 +264,29 @@ func (hub *NetworkHub) handleUnregisterProxyNotificationConn(ws *ProxyNotificati
 	}
 	ws.Close()
 
+	if len(hub.ProxyNotificationConns) > 0 {
+		return
+	}
+
 	// Visitors waiting for a ticket can only be served by a client of this hub.
 	// When the last client is gone, nothing will serve them, so they get 502 now.
-	// While other clients remain, they keep waiting until they expire.
-	if len(hub.ProxyNotificationConns) == 0 {
-		for ticket, visitor := range hub.incomingClientConns {
-			delete(hub.incomingClientConns, ticket)
-			rejectVisitor(visitor.conn)
-		}
-		if hub.subscription != nil {
-			hub.subscription.Unsubscribe()
-			hub.subscription = nil
-			logger.Default.Debug("Unsubscribed from NATS for hub:", hub.HubName)
-		}
+	for ticket, visitor := range hub.incomingClientConns {
+		delete(hub.incomingClientConns, ticket)
+		rejectVisitor(visitor.conn)
 	}
+	if hub.subscription != nil {
+		hub.subscription.Unsubscribe()
+		hub.subscription = nil
+		logger.Default.Debug("Unsubscribed from NATS for hub:", hub.HubName)
+	}
+
+	// No clients left: the hub has nothing to do, so it stops and the manager
+	// forgets it. A later client creates a new hub.
+	logger.Default.Info("No tunnel clients left, stopping hub:", hub.HubName)
+	if hub.onIdle != nil {
+		hub.onIdle()
+	}
+	hub.stop()
 }
 
 func (hub *NetworkHub) handleServerRequest(request *request) {
@@ -258,9 +321,10 @@ func (hub *NetworkHub) handleIncomingClientConn(visitor *helper.RemoteConn) {
 		return
 	}
 
+	// The client only needs the ticket. The reverse connection goes to the
+	// server URL it already has, so no address is sent.
 	ws := hub.getProxyNotificationConn()
-	msg := helper.GetPublicIP() + ":" + ticket
-	if _, err := ws.Write([]byte(msg + "\n")); err != nil {
+	if _, err := ws.Write([]byte(ticket + "\n")); err != nil {
 		logger.Default.Error("Error writing ticket to ProxyNotificationConn:", err)
 		rejectVisitor(visitor)
 		return
@@ -272,17 +336,17 @@ func (hub *NetworkHub) handleIncomingClientConn(visitor *helper.RemoteConn) {
 
 // handleNatsMessage forwards a ticket that arrived over NATS to a tunnel client.
 // If no client can take it, the visitor it belongs to gets 502.
-func (hub *NetworkHub) handleNatsMessage(msg string) {
+func (hub *NetworkHub) handleNatsMessage(ticket string) {
 	ws := hub.getProxyNotificationConn()
 	if ws == nil {
 		logger.Default.Error("No ProxyNotificationConns available for hub:", hub.HubName)
-		hub.rejectPendingTicket(msg[strings.LastIndex(msg, ":")+1:])
+		hub.rejectPendingTicket(ticket)
 		return
 	}
 
-	if _, err := ws.Write([]byte(msg + "\n")); err != nil {
+	if _, err := ws.Write([]byte(ticket + "\n")); err != nil {
 		logger.Default.Error("Error writing NATS ticket to ProxyNotificationConn:", err)
-		hub.rejectPendingTicket(msg[strings.LastIndex(msg, ":")+1:])
+		hub.rejectPendingTicket(ticket)
 	}
 }
 
@@ -340,27 +404,38 @@ func rejectVisitor(conn net.Conn) {
 	}()
 }
 
-func (hub *NetworkHub) handleShutdown(shutdownComplete chan struct{}) {
-	close(hub.registerProxyNotificationConn)
-	close(hub.unregisterProxyNotificationConn)
-	close(hub.incomingClientConn)
-	close(hub.serverRequests)
-	close(hub.shutdownSignal)
-	logger.Default.Info("Shutdown completed for hub:", hub.HubName)
-	shutdownComplete <- struct{}{}
+// handleShutdown runs in the hub loop when the hub is stopped. It disconnects
+// every client and answers every waiting visitor.
+func (hub *NetworkHub) handleShutdown() {
+	for ws := range hub.ProxyNotificationConns {
+		delete(hub.ProxyNotificationConns, ws)
+		ws.Close()
+	}
+	for ticket, visitor := range hub.incomingClientConns {
+		delete(hub.incomingClientConns, ticket)
+		rejectVisitor(visitor.conn)
+	}
+	if hub.subscription != nil {
+		hub.subscription.Unsubscribe()
+		hub.subscription = nil
+	}
+	logger.Default.Info("Hub stopped:", hub.HubName)
 }
 
+// checkConnection reads from a tunnel client until it fails or stays silent for
+// clientIdleTimeout. The client sends a ping every 30 seconds, so a silent
+// client has died without closing its socket.
 func (h *NetworkHub) checkConnection(connection *ProxyNotificationConn) {
 	defer func() {
-		h.unregisterProxyNotificationConn <- connection
+		h.unregisterClient(connection)
 		logger.Default.Info("Connection closed for ProxyNotificationConn in hub:", h.HubName)
 	}()
+	buf := make([]byte, 16)
 	for {
-		b := make([]byte, 16)
-		_, err := connection.conn.Read(b)
-		if err != nil {
-			logger.Default.Debug("Error reading from ProxyNotificationConn:", err)
-			break
+		connection.conn.SetReadDeadline(time.Now().Add(clientIdleTimeout))
+		if _, err := connection.conn.Read(buf); err != nil {
+			logger.Default.Debug("Tunnel client stopped responding or disconnected:", err)
+			return
 		}
 	}
 }

@@ -4,13 +4,17 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"sync"
 
 	"github.com/OnnaSoft/lipstick/server/config"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
 
-var defaultConnection *gorm.DB
+var (
+	connMu            sync.Mutex
+	defaultConnection *gorm.DB
+)
 
 func NewConnection(conf config.DatabaseConfig) (*gorm.DB, error) {
 	dsn := fmt.Sprintf(
@@ -33,7 +37,12 @@ func NewConnection(conf config.DatabaseConfig) (*gorm.DB, error) {
 	return connection, nil
 }
 
+// GetConnection returns the shared database handle, opening it on first use.
+// It is safe to call from several goroutines.
 func GetConnection(conf config.DatabaseConfig) (*gorm.DB, error) {
+	connMu.Lock()
+	defer connMu.Unlock()
+
 	if defaultConnection == nil {
 		connection, err := NewConnection(conf)
 		if err != nil {

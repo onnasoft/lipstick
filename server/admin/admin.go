@@ -15,6 +15,20 @@ type Admin struct {
 	addr        string
 	adminKey    string
 	tlsConfig   *tls.Config
+	onChanged   func(domain string)
+}
+
+// SetDomainChangedHook sets the function called when a domain is deleted or
+// updated. The manager uses it to disconnect the domain's clients, so they
+// reconnect under the current configuration.
+func (a *Admin) SetDomainChangedHook(fn func(domain string)) {
+	a.onChanged = fn
+}
+
+func (a *Admin) domainChanged(domain string) {
+	if a.onChanged != nil {
+		a.onChanged(domain)
+	}
 }
 
 // SetupAdmin builds the admin API. adminKey is the value clients must send in

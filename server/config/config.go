@@ -193,8 +193,8 @@ func GetConfig() (AppConfig, error) {
 func loadConfig() (AppConfig, error) {
 	var configPath string
 	var adminAddress, managerAddress, proxyAddress, adminSecretKey, tlsCert, tlsKey string
-	var redisHost, redisPassword, rabbitMQHost, rabbitMQUser, rabbitMQPassword, rabbitMQVHost string
-	var redisPort, redisDatabase, redisPoolSize, redisMinIdleConns, redisPoolTimeout, rabbitMQPort int
+	var redisHost, redisPassword string
+	var redisPort, redisDatabase, redisPoolSize, redisMinIdleConns, redisPoolTimeout int
 	var dbHost, dbUser, dbPassword, dbName, dbSSLMode string
 	var dbPort int
 	var natsURL string
@@ -238,40 +238,111 @@ func loadConfig() (AppConfig, error) {
 	}
 
 	flag.StringVar(&configPath, "c", "/etc/lipstick/config.yml", "Path to the configuration file")
-	flag.StringVar(&adminAddress, "admin-addr", "", "Address for the admin API")
-	flag.StringVar(&managerAddress, "manager-addr", "", "Address for WebSocket manager connections")
-	flag.StringVar(&proxyAddress, "proxy-addr", "", "Address for the proxy")
-	flag.StringVar(&adminSecretKey, "admin-secret", "", "Secret key for admin API authorization")
-	flag.StringVar(&tlsCert, "tls-cert", "", "Path to the TLS certificate")
-	flag.StringVar(&tlsKey, "tls-key", "", "Path to the TLS key")
-	flag.StringVar(&redisHost, "redis-host", "", "Redis host")
-	flag.IntVar(&redisPort, "redis-port", 0, "Redis port")
-	flag.StringVar(&redisPassword, "redis-password", "", "Redis password")
-	flag.IntVar(&redisDatabase, "redis-db", 0, "Redis database index")
-	flag.IntVar(&redisPoolSize, "redis-pool-size", 0, "Redis pool size")
-	flag.IntVar(&redisMinIdleConns, "redis-min-idle-conns", 0, "Redis minimum idle connections")
-	flag.IntVar(&redisPoolTimeout, "redis-pool-timeout", 0, "Redis pool timeout in seconds")
-	flag.StringVar(&rabbitMQHost, "rabbitmq-host", "", "RabbitMQ host")
-	flag.IntVar(&rabbitMQPort, "rabbitmq-port", 0, "RabbitMQ port")
-	flag.StringVar(&rabbitMQUser, "rabbitmq-user", "", "RabbitMQ user")
-	flag.StringVar(&rabbitMQPassword, "rabbitmq-password", "", "RabbitMQ password")
-	flag.StringVar(&rabbitMQVHost, "rabbitmq-vhost", "", "RabbitMQ virtual host")
-	flag.StringVar(&dbHost, "db-host", "", "Database host")
-	flag.IntVar(&dbPort, "db-port", 0, "Database port")
-	flag.StringVar(&dbUser, "db-user", "", "Database user")
-	flag.StringVar(&dbPassword, "db-password", "", "Database password")
-	flag.StringVar(&dbName, "db-name", "", "Database name")
-	flag.StringVar(&dbSSLMode, "db-ssl-mode", "", "Database SSL mode")
-	flag.StringVar(&natsURL, "nats-url", "", "NATS URL")
+	flag.StringVar(&adminAddress, "admin-addr", "", "Address for the admin API (overrides admin.address)")
+	flag.StringVar(&managerAddress, "manager-addr", "", "Address for tunnel client connections (overrides manager.address)")
+	flag.StringVar(&proxyAddress, "proxy-addr", "", "Address for visitors (overrides proxy.address)")
+	flag.StringVar(&adminSecretKey, "admin-secret", "", "Admin API key (overrides admin_secret_key)")
+	flag.StringVar(&tlsCert, "tls-cert", "", "Path to the TLS certificate (overrides tls.certificate_path)")
+	flag.StringVar(&tlsKey, "tls-key", "", "Path to the TLS key (overrides tls.key_path)")
+	flag.StringVar(&redisHost, "redis-host", "", "Redis host (overrides redis.host)")
+	flag.IntVar(&redisPort, "redis-port", 0, "Redis port (overrides redis.port)")
+	flag.StringVar(&redisPassword, "redis-password", "", "Redis password (overrides redis.password)")
+	flag.IntVar(&redisDatabase, "redis-db", 0, "Redis database index (overrides redis.database)")
+	flag.IntVar(&redisPoolSize, "redis-pool-size", 0, "Redis pool size (overrides redis.pool_size)")
+	flag.IntVar(&redisMinIdleConns, "redis-min-idle-conns", 0, "Redis minimum idle connections (overrides redis.min_idle_conns)")
+	flag.IntVar(&redisPoolTimeout, "redis-pool-timeout", 0, "Redis pool timeout in seconds (overrides redis.pool_timeout)")
+	flag.StringVar(&dbHost, "db-host", "", "Database host (overrides database.host)")
+	flag.IntVar(&dbPort, "db-port", 0, "Database port (overrides database.port)")
+	flag.StringVar(&dbUser, "db-user", "", "Database user (overrides database.user)")
+	flag.StringVar(&dbPassword, "db-password", "", "Database password (overrides database.password)")
+	flag.StringVar(&dbName, "db-name", "", "Database name (overrides database.database)")
+	flag.StringVar(&dbSSLMode, "db-ssl-mode", "", "Database SSL mode (overrides database.ssl_mode)")
+	flag.StringVar(&natsURL, "nats-url", "", "NATS URL (overrides nats.url)")
 
 	flag.Parse()
 
-	return loadConfigFrom(configPath, defaultConfig)
+	// Only flags the user actually wrote override the file. A flag left at its
+	// zero value, such as -redis-db 0, still counts when it is written.
+	set := map[string]bool{}
+	flag.Visit(func(f *flag.Flag) { set[f.Name] = true })
+
+	overrides := func(cfg *AppConfig) {
+		if set["admin-addr"] {
+			cfg.Admin.Address = adminAddress
+		}
+		if set["manager-addr"] {
+			cfg.Manager.Address = managerAddress
+		}
+		if set["proxy-addr"] {
+			cfg.Proxy.Address = proxyAddress
+		}
+		if set["admin-secret"] {
+			cfg.AdminSecretKey = adminSecretKey
+		}
+		if set["tls-cert"] {
+			cfg.TLS.CertificatePath = tlsCert
+		}
+		if set["tls-key"] {
+			cfg.TLS.KeyPath = tlsKey
+		}
+		if set["redis-host"] {
+			cfg.Redis.Host = redisHost
+		}
+		if set["redis-port"] {
+			cfg.Redis.Port = redisPort
+		}
+		if set["redis-password"] {
+			cfg.Redis.Password = redisPassword
+		}
+		if set["redis-db"] {
+			cfg.Redis.Database = redisDatabase
+		}
+		if set["redis-pool-size"] {
+			cfg.Redis.PoolSize = redisPoolSize
+		}
+		if set["redis-min-idle-conns"] {
+			cfg.Redis.MinIdleConns = redisMinIdleConns
+		}
+		if set["redis-pool-timeout"] {
+			cfg.Redis.PoolTimeout = redisPoolTimeout
+		}
+		if set["db-host"] {
+			cfg.Database.Host = dbHost
+		}
+		if set["db-port"] {
+			cfg.Database.Port = dbPort
+		}
+		if set["db-user"] {
+			cfg.Database.User = dbUser
+		}
+		if set["db-password"] {
+			cfg.Database.Password = dbPassword
+		}
+		if set["db-name"] {
+			cfg.Database.Database = dbName
+		}
+		if set["db-ssl-mode"] {
+			cfg.Database.SSLMode = dbSSLMode
+		}
+		if set["nats-url"] {
+			cfg.Nats.URL = natsURL
+		}
+	}
+
+	return loadConfigWith(configPath, defaultConfig, overrides)
 }
 
 // loadConfigFrom reads the YAML file over the given defaults, then validates
-// the result.
+// the result. Used by tests and by loadConfig.
 func loadConfigFrom(configPath string, defaultConfig AppConfig) (AppConfig, error) {
+	return loadConfigWith(configPath, defaultConfig, nil)
+}
+
+// loadConfigWith applies the file, then the command-line overrides, then
+// validates. Relative TLS paths from the file are resolved against the file's
+// directory. Paths given on the command line are used as written, relative to
+// the working directory, as usual for flags.
+func loadConfigWith(configPath string, defaultConfig AppConfig, overrides func(*AppConfig)) (AppConfig, error) {
 	data, err := os.ReadFile(configPath)
 	if err != nil {
 		return AppConfig{}, fmt.Errorf("cannot read configuration file %q: %w (use -c to point to another file)", configPath, err)
@@ -285,14 +356,16 @@ func loadConfigFrom(configPath string, defaultConfig AppConfig) (AppConfig, erro
 		return AppConfig{}, fmt.Errorf("invalid configuration file %q: %w", configPath, err)
 	}
 
-	// Relative TLS paths are resolved against the configuration file's
-	// directory, so the server behaves the same regardless of the working dir.
 	baseDir := filepath.Dir(configPath)
 	defaultConfig.TLS.CertificatePath = resolvePath(baseDir, defaultConfig.TLS.CertificatePath)
 	defaultConfig.TLS.KeyPath = resolvePath(baseDir, defaultConfig.TLS.KeyPath)
 
+	if overrides != nil {
+		overrides(&defaultConfig)
+	}
+
 	if err := defaultConfig.Validate(); err != nil {
-		return AppConfig{}, fmt.Errorf("invalid configuration file %q:\n%w", configPath, err)
+		return AppConfig{}, fmt.Errorf("invalid configuration (file %q and command-line flags):\n%w", configPath, err)
 	}
 
 	return defaultConfig, nil

@@ -175,8 +175,10 @@ Lipstick exposes local ports to the internet through a reverse tunnel. The main 
   - With `https`/`wss`, the client calls `tls.Dial("tcp", addr)` with no port and fails with "missing port".
   - With `http`/`ws`, the client ignores `addr` and connects to the host in the URL.
 - **Fix:** Have the server send an explicit public address and port, or have the client always use the configured URL. Remove the dependence on `GetPublicIP`.
-- **Status:** Fixed for the client side. `ConnectByAddress` now dials the host from the server URL for both plain and TLS connections (`client/manager/http.go`). The `addr` argument was removed. `GetPublicIP` is still used by the server and should be removed as part of a proper fix.
+- **Status:** Fixed for the client side. `ConnectByAddress` now dials the host from the server URL for both plain and TLS connections (`client/manager/http.go`). The `addr` argument was removed. 
 - **Verified:** Visitor requests over `https://localhost:5050` return the backend response through the tunnel (6 of 6 requests with one live client). Before the fix, the same setup timed out.
+- **Status (completed):** the server now sends only the ticket. The address it used to send (from `GetPublicIP`) is gone, and `helper.GetPublicIP` was deleted. The client parses one ticket per line and checks it is hex (`client/main.go`).
+- **Verified:** end to end over TLS with the new ticket format, 8 of 8 visitor requests returned the backend response.
 
 ### 14. Client panics on bad input
 - **Where:** `client/main.go` (`readMessage`, `establishConnection`)
@@ -185,17 +187,33 @@ Lipstick exposes local ports to the internet through a reverse tunnel. The main 
   - `establishConnection` writes to `connection` when it is `nil`.
   - The `recover()` calls hide these panics, and the client silently drops the ticket loop.
 - **Fix:** Parse with `strings.LastIndex` (or `net.SplitHostPort`) and check the result. Do not write to a nil connection.
+- **Status (completed):**
+  - `readMessage` reads one line and checks it with `isTicket` (1 to 64 lowercase hex characters). Any other line is an error, so a ticket cannot inject a URL or a separator.
+  - `establishConnection` no longer writes to a nil connection. When the reverse connection fails there is nothing to answer, so it logs the error.
+  - `recover` is kept, but it logs the panic instead of hiding it.
+- **Verified:** `client/main_test.go` covers valid tickets, bad lines, EOF, and the length limit.
 
 ### 15. Hubs and goroutines are never released
 - **Where:** `server/manager/manager.go` (`hubs`), `server/manager/hub.go` (`listen`, `handleShutdown`)
 - **What:** Hubs are stored in a `sync.Map` and never removed. Deleting a domain through the admin API does not stop its hub. `handleShutdown` is never triggered.
 - **Fix:** Remove the hub when its last client disconnects, and stop its goroutine.
+- **Status (completed):**
+  - A hub stops when its last tunnel client leaves. It tells the manager to forget it (`onIdle`), and its loop exits. A later client creates a new hub.
+  - Deleting a domain, or updating its key or policy, calls `Manager.DropHub` through `Admin.SetDomainChangedHook`. The hub disconnects its clients, so they reconnect under the current configuration.
+  - Shutdown calls `Manager.Close`, which stops every hub and flushes the traffic counters.
+  - Senders outside the hub loop select on `done`, so they never block on a stopped hub.
+- **Verified:** `hub_test.go` and `lifecycle_test.go` cover the idle stop, `DropHub`, and singleton creation. Live: changing the domain key dropped the hub, the client reconnected by itself, and the tunnel answered 8 of 8.
 
 ### 16. Dead clients are not detected
 - **Where:** `server/manager/hub.go` (`checkConnection`), `client/main.go` (`checkConnection`)
 - **What:** The server has no keepalive or read deadline. A client that disappears without closing its TCP connection stays registered until a write to it fails. Visitors are assigned to that dead socket in the meantime.
 - **Fix:** Add read deadlines, and make the client send pings within that interval.
 - **Observed:** Clients killed with `kill -9` are removed from the hub immediately (the server's read returns EOF). But during testing, one registration stayed in the hub after its client was gone. Visitors whose ticket was sent to that registration timed out, so requests intermittently failed (1 of 3 in one run). The cause is not confirmed yet; the hub does not log which registration is stale.
+- **Status (completed):**
+  - The server sets a read deadline of 90 seconds on each tunnel client (`clientIdleTimeout`). A client that stops responding is removed instead of staying registered.
+  - Clients already send a `ping` every 30 seconds, so a healthy client never hits the deadline.
+  - Writes to a client have a 5-second deadline (done in the previous step).
+- **Verified:** `TestSilentClientIsDetected` checks that a silent client is removed. Not yet tested live with a frozen client process, which would take 90 seconds.
 
 ### 17. Traffic counters are lost on database errors
 - **Where:** `server/traffic/manager.go` (`saveAllToDatabase`), `server/traffic/database.go` (`updateDatabase`)
@@ -205,11 +223,19 @@ Lipstick exposes local ports to the internet through a reverse tunnel. The main 
   - `TrafficManager.Close` is never called.
   - `db.GetConnection` lazily initializes a global without synchronization.
 - **Fix:** Reset counters only after a successful write. Log errors instead of exiting. Guard the connection initialization with `sync.Once`.
+- **Status (completed):**
+  - Counters are reduced only by the amount that was written. If the database is down, the bytes stay pending for the next save.
+  - Saves are serialized, so the same bytes are never written twice.
+  - `updateDatabase` returns an error instead of calling `log.Fatalf`.
+  - `TrafficManager.Close` runs on shutdown through `Manager.Close`.
+  - `db.GetConnection` is guarded by a mutex.
+- **Not verified:** no test yet for the retry after a failed write. Only the build was checked.
 
 ### 18. Ticket values are printed to stdout
 - **Where:** `server/manager/hub.go` (`handleServerRequest`)
 - **What:** For an invalid ticket, every pending ticket is printed with `fmt.Println`.
 - **Fix:** Remove the debug print.
+- **Status (completed):** the `fmt.Println` of pending tickets was removed when the hub was rewritten. Checked: `grep` finds no print in `server/manager`.
 
 ---
 
@@ -219,11 +245,15 @@ Lipstick exposes local ports to the internet through a reverse tunnel. The main 
 - **Where:** `server/config/config.go` (`loadConfig`)
 - **What:** `-admin-addr`, `-manager-addr`, `-proxy-addr`, `-admin-secret`, `-tls-cert`, `-tls-key`, the Redis and database flags, and the NATS flag are parsed but never copied into `appConfig`.
 - **Fix:** Apply each non-empty flag value over the file and default values.
+- **Status (completed):** the flags now override the file. Each flag the user writes replaces its value, and the result is validated like the file. A flag left unwritten changes nothing, so `-redis-db 0` works. The RabbitMQ flags were removed, because the configuration has no RabbitMQ settings.
+- **Verified:** `overrides_test.go` covers overrides applied after the file, bad overrides rejected, and flag paths not rebased. Live: `-admin-secret short -proxy-addr nope` made the server print both errors and exit with code 1.
 
 ### 20. Example configuration does not match the config structs
 - **Where:** `server/config.yml.example`, `server/config/config.go`
 - **What:** The example uses `certs:`, `database.dbname`, and `serverUrl`. The structs expect `tls.certificate_path` and `tls.key_path`, and `database.database`. Unknown keys are ignored silently, so the database name falls back to `app_db`.
 - **Fix:** Make the example match the structs, and reject unknown keys.
+- **Status (completed):** `server/config.yml.example` and `client/config.example.yml` were regenerated, and they use the keys the structs read.
+- **Verified:** `shipped_example_test.go` loads the shipped example, and checks that it is refused while the placeholder key is still in it.
 
 ### 21. `allowMultipleConnections: false` may be stored as `true` **(verify)**
 - **Where:** `server/db/models.go`, `server/auth/postgres.go` (`AddDomain`)

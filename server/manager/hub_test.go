@@ -109,7 +109,7 @@ func TestNatsTicketWithoutClientRejectsVisitor(t *testing.T) {
 	visitor, peer := visitorPair(t)
 	hub.incomingClientConns["t42"] = &pendingVisitor{conn: visitor, since: time.Now()}
 
-	go hub.handleNatsMessage("10.0.0.5:t42")
+	go hub.handleNatsMessage("t42")
 	if got := readAll(t, peer); !strings.Contains(got, "502") {
 		t.Fatalf("visitor got %q, want 502", got)
 	}
