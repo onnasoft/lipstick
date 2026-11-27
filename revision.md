@@ -351,6 +351,20 @@ Lipstick exposes local ports to the internet through a reverse tunnel. The main 
   - The race where a domain loses its last client while another reserves the same port at the same moment. The release runs when the hub goes idle, so a reservation that lands in that window can be closed. This needs a test.
   - A 409 end to end (two domains on one port). It is covered by unit tests only.
 
+### 33. TCP sessions never ended and end-of-file was lost (relay bug)
+- **Where:** `server/manager/hub.go` (`syncConnections`), `client/handlers/tcp.go` (`HandleTCP`), `helper/net.go` (`CloseWrite`), `client/manager/http.go` (`CustomConn.CloseWrite`)
+- **What:** Two problems in the relay of raw TCP traffic. The relay only ended when the tunnel side failed, so a visitor that closed left its session open forever. Half-close was not passed on, so a client waiting for end-of-file never finished, and its reply was lost. Found while testing intranet ports: about 100 sessions stayed in `syncConnections`, and a visitor that waited for end-of-file timed out.
+- **Fix:** each direction now passes its end-of-file on (`CloseWrite`). The server tells the client when the visitor is done, and the client half-closes the service. Each side has a bounded drain time (10 s), so an idle peer cannot keep a session open. Both sides can finish their reply after the other has finished.
+- **Verified:** `server/manager/relay_test.go` checks end-of-file in both directions and that the session ends when the visitor closes. `client/handlers/relay_test.go` checks that the service finishes its reply after the tunnel side ends. Live: 200 of 200 raw round-trips completed, the TLS raw path went 8 of 8 at sizes from 100 to 4096 bytes, and HTTP through the TLS port went 8 of 8.
+- **Why the earlier tests passed:** they read exactly as many bytes as they sent, and never waited for end-of-file. The end-of-file test found the bug.
+
+### 34. Two clients on one domain with different targets share visitors at random (open)
+- **Where:** `server/manager/hub.go` (`getProxyNotificationConn`), `client/main.go` (one control connection per `-p` target)
+- **What:** With `allowMultipleConnections: true`, the hub picks a client at random for each visitor. If a stale client for the same domain is still connected with another target, half the visitors reach the wrong service. Seen live: an old client on `-p 127.0.0.1:8082` received raw visitors meant for an echo service on `8090`, and returned an HTML error page.
+- **Why it matters:** an intranet port is one service, so a second service under the same domain is silently mixed in. It is the same rule as "one service per domain", and the server cannot detect it today.
+- **Possible fix:** the client sends its target label in the upgrade request, and the hub refuses a client whose label differs from the others on the same domain (403). Or the policy names one target per domain in the server configuration.
+- **Status:** open. Not changed.
+
 ## Recommended order
 
 1. Items 1, 2, 3, and 4: authentication, unpredictable tickets, TLS verification, and admin API hardening.

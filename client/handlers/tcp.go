@@ -5,10 +5,19 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"time"
 
 	"github.com/OnnaSoft/lipstick/client/tlsconf"
+	"github.com/OnnaSoft/lipstick/helper"
 )
 
+// relayDrainTimeout bounds how long the client waits for the tunnel side after
+// the service has finished its reply.
+const relayDrainTimeout = 10 * time.Second
+
+// HandleTCP relays a tunnel connection to a local service. Each side can finish
+// on its own: when the tunnel side is done, the service gets end-of-file and can
+// still send its reply, and when the service is done, the tunnel side is told.
 func HandleTCP(connection net.Conn, proxyTarget, protocol string) {
 	var err error
 	var serverConnection net.Conn
@@ -24,19 +33,18 @@ func HandleTCP(connection net.Conn, proxyTarget, protocol string) {
 	}
 	defer serverConnection.Close()
 
+	// tunnel -> service
+	toService := make(chan struct{})
 	go func() {
-		for {
-			buffer := make([]byte, 1024)
-			n, err := serverConnection.Read(buffer)
-			if err != nil {
-				break
-			}
-			_, err = connection.Write(buffer[:n])
-			if err != nil {
-				break
-			}
-		}
+		defer close(toService)
+		io.Copy(serverConnection, connection)
+		helper.CloseWrite(serverConnection)
 	}()
 
-	io.Copy(serverConnection, connection)
+	// service -> tunnel: runs until the service finishes its reply.
+	io.Copy(connection, serverConnection)
+	helper.CloseWrite(connection)
+
+	connection.SetReadDeadline(time.Now().Add(relayDrainTimeout))
+	<-toService
 }

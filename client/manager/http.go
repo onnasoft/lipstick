@@ -24,6 +24,10 @@ type CustomConn struct {
 	buffer []byte
 }
 
+// CloseWrite half-closes the tunnel connection, so the server sees end-of-file
+// while the rest of the reply can still arrive.
+func (c *CustomConn) CloseWrite() error { return helper.CloseWrite(c.Conn) }
+
 func (c *CustomConn) SetBuffer(buffer []byte) {
 	c.buffer = buffer
 }

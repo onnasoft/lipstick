@@ -135,44 +135,67 @@ func (hub *NetworkHub) submitTunnel(req *request) bool {
 	}
 }
 
+// relayDrainTimeout bounds how long a relay waits for the visitor after the
+// tunnel side has finished, so an idle visitor cannot keep the session forever.
+const relayDrainTimeout = 10 * time.Second
+
+// syncConnections relays bytes between a visitor (pipe) and the tunnel
+// connection (destination) until both directions have finished. A direction
+// that ends is passed on as end-of-file, so the other side can still finish its
+// reply. Without this, a visitor that closes would leave the session open
+// forever, and a client that waits for end-of-file would never finish.
 func (hub *NetworkHub) syncConnections(pipe net.Conn, destination net.Conn) {
 	defer pipe.Close()
 	defer destination.Close()
 
 	var originToDest int64
-	var destToOrigin int64
+	toTunnel := make(chan struct{})
 
+	// visitor -> tunnel
 	go func() {
+		defer close(toTunnel)
 		buffer := make([]byte, 4096)
 		for {
 			n, err := pipe.Read(buffer)
+			if n > 0 {
+				written, werr := destination.Write(buffer[:n])
+				originToDest += int64(written)
+				hub.addDataUsage(int64(written))
+				if werr != nil {
+					break
+				}
+			}
 			if err != nil {
 				break
 			}
-			written, err := destination.Write(buffer[:n])
-			if err != nil {
-				break
-			}
-			originToDest += int64(written)
-			hub.addDataUsage(int64(written))
 		}
-		logger.Default.Debug("Finished transferring from origin to destination, total bytes:", originToDest)
+		// The visitor will send no more: tell the client.
+		helper.CloseWrite(destination)
 	}()
 
+	// tunnel -> visitor
+	var destToOrigin int64
 	buffer := make([]byte, 4096)
 	for {
 		n, err := destination.Read(buffer)
+		if n > 0 {
+			written, werr := pipe.Write(buffer[:n])
+			destToOrigin += int64(written)
+			hub.addDataUsage(int64(written))
+			if werr != nil {
+				break
+			}
+		}
 		if err != nil {
 			break
 		}
-		written, err := pipe.Write(buffer[:n])
-		if err != nil {
-			break
-		}
-		destToOrigin += int64(written)
-		hub.addDataUsage(int64(written))
 	}
-	logger.Default.Debug("Finished transferring from destination to origin, total bytes:", destToOrigin)
+
+	// The client finished its reply: tell the visitor, and give it a bounded
+	// time to finish sending before the session is closed.
+	helper.CloseWrite(pipe)
+	pipe.SetReadDeadline(time.Now().Add(relayDrainTimeout))
+	<-toTunnel
 
 	logger.Default.Debug("Connection data usage:",
 		"origin → destination:", originToDest, "bytes,",
