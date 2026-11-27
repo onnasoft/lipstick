@@ -147,17 +147,22 @@ Cada archivo de configuración tiene su propio subdominio y su propia clave. As�
 
 #### Servicios probados
 
-Probados a través del túnel, con un servidor y un cliente en la misma máquina:
+Probados a través del túnel, con un servidor y un cliente en la misma máquina. Los servicios corrieron en contenedores Docker o en procesos locales, según el caso.
 
-| Servicio | Qué se probó | Notas |
-|----------|--------------|-------|
-| **JupyterLab** | API REST (estado, creación de kernels), página de lab, y ejecución de código por WebSocket en un kernel Python: salida de texto, resultado y 2000 líneas de salida | Requiere token. Para que el WebSocket funcionara hubo que corregir el reenvío del `Host` (punto 37 de `revision.md`). |
-| **Ollama** | `/api/tags`, generación completa y generación en streaming (NDJSON, 16 líneas, `done: true`) | Con CPU, una respuesta corta tarda unos 9 segundos con un modelo de 4B parámetros. Lo lento es el modelo, no el túnel. |
-| **Apache Spark** (API REST de envío del master) | Envío, estado, cancelación, y un job que terminó con el resultado correcto | Solo envío de una vía. Ver la nota sobre Spark abajo. |
+| Servicio | Camino | Qué se probó | Notas |
+|----------|--------|--------------|-------|
+| **JupyterLab** | HTTP y WebSocket | API REST, página de lab, y ejecución de código en un kernel Python por WebSocket: salida, resultado y 2000 líneas | Requiere token. |
+| **Ollama** | HTTP | `/api/tags`, generación completa y generación en streaming (NDJSON, `done: true`) | Con CPU, una respuesta corta tarda unos 9 segundos con un modelo de 4B parámetros. Lo lento es el modelo, no el túnel. |
+| **Apache Spark** (API REST de envío del master) | HTTP | Envío, estado, cancelación, y un job que terminó con el resultado correcto | Solo envío de una vía. Ver la nota sobre Spark abajo. |
+| **S3 (SeaweedFS)** | HTTP | Crear bucket, subir y bajar objetos de 1 KiB, 1 MiB y 5 MiB con el mismo SHA-256, listar y borrar | Probado con SeaweedFS porque la imagen de MinIO no estaba disponible aquí. La API S3 es la misma. |
+| **Prometheus** | HTTP | `/-/ready`, consulta instantánea (`up`) y consulta de rango con 7 puntos | |
+| **Grafana** | HTTP y WebSocket | Health, login, una llamada autenticada a `/api/user`, y conexión a Grafana Live por WebSocket | Requiere `GF_SERVER_ROOT_URL=https://localhost:5050/` (la URL pública). Sin eso, Grafana responde `403 origin not allowed` al WebSocket. |
+| **Redis** | TCP por puerto de intranet | `PING`, valor de 2 MiB con el mismo contenido al volver, y 500 `INCR` en pipeline | |
+| **SSH** | TCP por puerto de intranet | Comando remoto con clave, y `scp` de 5 MiB en ambos sentidos con el mismo SHA-256 | Probado con OpenSSH en Alpine. El puerto de intranet va sin TLS, así que usa esta vía solo dentro de la red de confianza. |
 
 Probados en el cliente (HTTP y TCP genéricos): descargas de hasta 5 MiB, subidas de hasta 1 MiB con el mismo SHA-256 al llegar, keep-alive con 10 peticiones en una conexión, y 20 clientes en paralelo.
 
-Pendiente de probar, aunque es probable que funcione por el mismo camino: MinIO o cualquier API S3, Grafana y Prometheus (HTTP), y SSH o bases de datos sobre un puerto de intranet (TCP). Si los usas, pruébalos antes de confiar en ellos.
+Pendiente de probar: bases de datos SQL por puerto de intranet (PostgreSQL, MySQL) y servicios con gRPC o MQTT. Si los usas, pruébalos antes de confiar en ellos.
 
 #### Spark: qué sí y qué no
 

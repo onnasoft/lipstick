@@ -102,7 +102,6 @@ func serveRequest(connection net.Conn, reader *bufio.Reader, req *http.Request, 
 	if protocol != "http" && protocol != "https" {
 		protocol = "http"
 	}
-	host := strings.Split(proxyTarget, ":")[0]
 	serverURL := protocol + "://" + proxyTarget + req.URL.RequestURI()
 
 	out, err := http.NewRequest(req.Method, serverURL, req.Body)
@@ -118,7 +117,10 @@ func serveRequest(connection net.Conn, reader *bufio.Reader, req *http.Request, 
 	out.Header.Del("Transfer-Encoding")
 	out.ContentLength = req.ContentLength
 	out.TransferEncoding = req.TransferEncoding
-	out.Host = host
+	// The service sees the Host the visitor sent, as it would behind any reverse
+	// proxy. Apps that check Origin against Host (Grafana Live, for one) need it.
+	// Keeping the target's address here made those checks fail through the tunnel.
+	out.Host = req.Host
 
 	if isWebSocket(req) {
 		handleWebSocket(connection, reader, proxyTarget, protocol, out)

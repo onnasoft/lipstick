@@ -394,6 +394,12 @@ Lipstick exposes local ports to the internet through a reverse tunnel. The main 
 - **Fix:** `HTTPRequestToString` writes `Host` from `request.Host`.
 - **Verified:** `helper/io_test.go` covers the header. Live: a Jupyter kernel executed `print(2+2)`, `sum(i*i for i in range(1000))` and a 2000-line output through `wss://localhost:5050`.
 
+### 38. Forwarded Host was the target address, which broke services that check Origin (client behavior)
+- **Where:** `client/handlers/http.go` (`serveRequest`)
+- **What:** the request to the service carried `Host: 127.0.0.1` (the target), not the `Host` the visitor sent. Grafana Live compares `Origin` with `Host` and answered `403 origin not allowed` to a WebSocket that came through the tunnel.
+- **Fix:** the service receives the visitor's `Host`, including its port, as a reverse proxy normally passes it on. This is a behavior change: services that depended on seeing the target address in `Host` will now see the public one.
+- **Verified:** `client/handlers/host_test.go`. Live: Grafana Live accepts the WebSocket with `GF_SERVER_ROOT_URL` set to the tunnel address; Jupyter and S3 pass again after the change. Ollama and Prometheus were not re-run after this change.
+
 ## Recommended order
 
 1. Items 1, 2, 3, and 4: authentication, unpredictable tickets, TLS verification, and admin API hardening.
