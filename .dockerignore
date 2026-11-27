@@ -1,0 +1,10 @@
+# Keep secrets and local state out of the build context and the image.
+.git
+config.yml
+client_key.txt
+certs/
+server/certs/
+*.key
+revision.md
+RUN.md
+bin/

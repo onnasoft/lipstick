@@ -1,33 +1,36 @@
 [Unit]
-Description=Advanced Tunnel
-After=network.target
-Documentation=https://github.com/OnnaSoft/lipstick/blob/master/README.md
+Description=Lipstick reverse tunnel server
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
+# A dedicated user created by install.sh. The service never runs as root.
+User=lipstick
+Group=lipstick
 ExecStart=/usr/bin/lipstick -c /etc/lipstick/config.yml
-PIDFile=/run/lipstick/lipstick.pid
-TimeoutStopSec=0
-Restart=always
-User=root
-Group=nogroup
+Restart=on-failure
+RestartSec=3
+UMask=0027
 
-UMask=007
-ReadOnlyDirectories=/
-ReadWritePaths=-/var/log/lipstick
-ReadWritePaths=-/var/run/lipstick
+# The configuration is read-only for the service. Certificates are generated
+# into /etc/lipstick/certs, the only writable path.
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadOnlyPaths=/etc/lipstick/config.yml
+ReadWritePaths=/etc/lipstick/certs
 
+# Ports 5050 to 5052 are above 1024, so no capability is needed.
 NoNewPrivileges=true
-CapabilityBoundingSet=CAP_SETGID CAP_SETUID CAP_SYS_RESOURCE
-MemoryDenyWriteExecute=true
-ProtectKernelModules=false
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
 ProtectKernelTunables=true
 ProtectControlGroups=true
-RestrictRealtime=true
-RestrictNamespaces=true
-RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
-ProtectSystem=true
+MemoryDenyWriteExecute=true
+LockPersonality=true
 
 [Install]
 WantedBy=multi-user.target
-Alias=lipstick.service

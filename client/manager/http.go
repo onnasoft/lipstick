@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/OnnaSoft/lipstick/client/tlsconf"
+	"github.com/OnnaSoft/lipstick/helper"
 )
 
 type HTTPManager struct {
@@ -66,13 +67,35 @@ func dialServer(req *http.Request) (*CustomConn, error) {
 }
 
 // Connect opens the control connection to the server manager.
+//
+// It returns an error unless the server answers 200. A refused connection, such
+// as a wrong key (401), must not look like a connection that works, so the
+// caller can report it and retry.
 func (m *HTTPManager) Connect(url string, headers http.Header) (*CustomConn, error) {
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("error creating request: %w", err)
 	}
 	req.Header = headers
-	return dialServer(req)
+
+	conn, err := dialServer(req)
+	if err != nil {
+		return nil, err
+	}
+
+	head, err := helper.ReadUntilHeadersEnd(conn)
+	if err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("no response to the connection request: %w", err)
+	}
+
+	statusLine := strings.SplitN(string(head), "\n", 2)[0]
+	fields := strings.Fields(statusLine)
+	if len(fields) < 2 || fields[1] != "200" {
+		conn.Close()
+		return nil, fmt.Errorf("server refused the connection: %s", strings.TrimSpace(statusLine))
+	}
+	return conn, nil
 }
 
 // ConnectByAddress opens the reverse connection for a ticket. It always dials

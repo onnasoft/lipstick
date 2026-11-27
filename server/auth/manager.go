@@ -1,5 +1,10 @@
 package auth
 
+import "errors"
+
+// ErrDomainNotFound is returned when no domain has the requested name.
+var ErrDomainNotFound = errors.New("domain not found")
+
 type Domain struct {
 	ID                       uint   `json:"id"`
 	Name                     string `json:"name"`

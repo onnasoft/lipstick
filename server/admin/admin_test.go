@@ -18,6 +18,9 @@ func (fakeAuth) GetDomains() ([]*auth.Domain, error) {
 	return []*auth.Domain{{ID: 1, Name: "app.example.com", ApiKey: clientSecret, AllowMultipleConnections: true}}, nil
 }
 func (fakeAuth) GetDomain(name string) (*auth.Domain, error) {
+	if name == "missing.example.com" {
+		return nil, auth.ErrDomainNotFound
+	}
 	return &auth.Domain{ID: 1, Name: name, ApiKey: clientSecret}, nil
 }
 func (fakeAuth) AddDomain(*auth.Domain) error    { return nil }
@@ -101,5 +104,84 @@ func TestTrafficValidatesDatesBeforeDatabase(t *testing.T) {
 	rec := do(a, http.MethodGet, "/domains/app.example.com/traffic?from=bad&to=2026-01-31", testKey)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("invalid from: got %d, want 400", rec.Code)
+	}
+}
+
+func patch(a *Admin, path, body string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(http.MethodPatch, path, strings.NewReader(body))
+	req.Header.Set("Authorization", testKey)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	a.engine.ServeHTTP(rec, req)
+	return rec
+}
+
+func TestPatchUnknownDomainIs404(t *testing.T) {
+	a := newTestAdmin(testKey)
+	if rec := patch(a, "/domains/missing.example.com", `{"apiKey":"newkey0123456789"}`); rec.Code != http.StatusNotFound {
+		t.Fatalf("unknown domain: got %d, want 404", rec.Code)
+	}
+}
+
+// A wrong JSON type must be a 400. Before the fix it panicked.
+func TestPatchWrongTypesAre400(t *testing.T) {
+	a := newTestAdmin(testKey)
+	for _, body := range []string{
+		`{"apiKey":5}`,
+		`{"apiKey":""}`,
+		`{"allowMultipleConnections":"yes"}`,
+	} {
+		if rec := patch(a, "/domains/app.example.com", body); rec.Code != http.StatusBadRequest {
+			t.Errorf("body %s: got %d, want 400", body, rec.Code)
+		}
+	}
+}
+
+func TestPatchValidFieldsIsOK(t *testing.T) {
+	a := newTestAdmin(testKey)
+	if rec := patch(a, "/domains/app.example.com", `{"allowMultipleConnections":false}`); rec.Code != http.StatusOK {
+		t.Fatalf("valid patch: got %d, want 200", rec.Code)
+	}
+}
+
+// recordingAuth remembers the last domain added, so the create path can be checked.
+type recordingAuth struct {
+	fakeAuth
+	added *auth.Domain
+}
+
+func (r *recordingAuth) AddDomain(d *auth.Domain) error {
+	r.added = d
+	return nil
+}
+
+func postDomain(a *Admin, body string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(http.MethodPost, "/domains", strings.NewReader(body))
+	req.Header.Set("Authorization", testKey)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	a.engine.ServeHTTP(rec, req)
+	return rec
+}
+
+// An omitted allowMultipleConnections keeps the default (true). An explicit
+// false must reach the store as false.
+func TestCreateDomainMultipleConnectionsDefaults(t *testing.T) {
+	rec := &recordingAuth{}
+	a := &Admin{authManager: rec, adminKey: testKey}
+	configureRouter(a)
+
+	if r := postDomain(a, `{"name":"a.example.com","apiKey":"0123456789abcdef"}`); r.Code != http.StatusOK {
+		t.Fatalf("create without field: %d", r.Code)
+	}
+	if !rec.added.AllowMultipleConnections {
+		t.Fatal("omitted field should default to true")
+	}
+
+	if r := postDomain(a, `{"name":"b.example.com","apiKey":"0123456789abcdef","allowMultipleConnections":false}`); r.Code != http.StatusOK {
+		t.Fatalf("create with false: %d", r.Code)
+	}
+	if rec.added.AllowMultipleConnections {
+		t.Fatal("explicit false was lost")
 	}
 }

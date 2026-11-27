@@ -1,141 +1,126 @@
+# Lipstick
 
-# Lipstick Documentation
+**Lipstick** exposes a local service on a public server through a reverse tunnel, without a VPN. The client runs next to your service and connects out to the server. Visitors then reach your service through the server.
 
-**Lipstick** is a tool that allows you to share local ports with remote servers immediately, without the need for a VPN. It is currently in an experimental phase and requires authentication. For added security, you can integrate it with a reverse proxy like Nginx.
+Status: experimental. Read `revision.md` for the open security and stability items before using it on anything public.
 
----
+## Requirements
 
-## Overview
+- Go 1.25 or later, to build from source.
+- PostgreSQL. The schema is created on startup.
+- NATS. The server connects to it at startup.
 
-**Lipstick** provides a way to expose services running on your local machine to remote servers securely. Below is an explanation of its components and their configurations.
+## Quick start
 
-### Server
+See [RUN.md](RUN.md) for the full steps: start the server, create a domain, connect a client, and test the tunnel.
 
-The **server** refers to the remote host where your local ports are exposed. It is responsible for managing client connections and forwarding traffic to the appropriate destinations.
+```bash
+./server-run                 # starts the server, prints the client command
+```
 
-#### How to Use
+## Ports
 
-The `lipstick-server` application provides the following options:
+| Port | Who uses it | Notes |
+|------|-------------|-------|
+| `5050` | Visitors | `proxy.address`. HTTPS only. |
+| `5051` | Tunnel clients | `manager.address`. HTTPS only. |
+| `5052` | Admin API | `admin.address`. Defaults to `127.0.0.1`, so only the local machine can reach it. HTTPS. |
+
+TLS is always required. The server refuses to start without a certificate and key. If the files do not exist, it generates a self-signed certificate at the configured paths.
+
+## Server
+
+### Configuration file
+
+The server reads a YAML file (`-c`, default `/etc/lipstick/config.yml`). Start from [`server/config.yml.example`](server/config.yml.example). Unknown keys are an error, so a misspelled key cannot be ignored.
+
+| Key | Default | Purpose |
+|-----|---------|---------|
+| `admin_secret_key` | none, required | Key for the admin API. At least 16 characters. |
+| `proxy.address` | `:5050` | Visitor listener. |
+| `manager.address` | `:5051` | Tunnel client listener. |
+| `admin.address` | `127.0.0.1:5052` | Admin API listener. |
+| `tls.certificate_path` | `certs/server.crt` | Certificate. Generated if missing. Relative paths are relative to the configuration file. |
+| `tls.key_path` | `certs/server.key` | Private key. Generated if missing. |
+| `database.host` | `localhost` | PostgreSQL host. |
+| `database.port` | `5432` | PostgreSQL port. |
+| `database.user` | `postgres` | PostgreSQL user. |
+| `database.password` | empty | PostgreSQL password. |
+| `database.database` | `app_db` | PostgreSQL database. |
+| `database.ssl_mode` | `disable` | One of `disable`, `allow`, `prefer`, `require`, `verify-ca`, `verify-full`. |
+| `nats.url` | `nats://localhost:4222` | NATS server. |
+
+### Command-line flags
+
+Flags override the file for the values they name. They are validated the same way.
 
 ```text
-Usage of lipstick-server:
-  -c string
-    	Config path (default "config.server.yml")
-  -m string
-    	Port where your client will connect via WebSocket. You can manage this port in your firewall. (default ":8081")
-  -p string
-    	Port where you will receive requests from the local network or the internet. (default ":8080")
-  -k string
-        Secret key to authenticate clients. (default "super_secret_key")
-  -cert string
-        Path to the TLS certificate. (optional)
-  -key string
-        Path to the TLS key. (optional)
+-c                  path to the configuration file (default /etc/lipstick/config.yml)
+-admin-addr         admin.address
+-manager-addr       manager.address
+-proxy-addr         proxy.address
+-admin-secret       admin_secret_key
+-tls-cert           tls.certificate_path
+-tls-key            tls.key_path
+-db-host            database.host
+-db-port            database.port
+-db-user            database.user
+-db-password        database.password
+-db-name            database.database
+-db-ssl-mode        database.ssl_mode
+-nats-url           nats.url
+-redis-host, -redis-port, -redis-password, -redis-db,
+-redis-pool-size, -redis-min-idle-conns, -redis-pool-timeout
+                    redis.* (the server does not use Redis yet)
 ```
 
-### Client
+### Admin API
 
-The **client** is the local machine running the service you want to expose. For example, this could be your local web server or any application listening on a specific port.
+All endpoints except `/health` need the admin key in the `Authorization` header, sent as-is (no `Bearer` prefix).
 
-#### How to Use
+| Method and path | Purpose |
+|-----------------|---------|
+| `GET /health` | Liveness. No authentication. |
+| `GET /domains` | List domains. The tunnel keys are not returned. |
+| `GET /domains/:name` | One domain. The key is not returned. |
+| `POST /domains` | Create a domain: `{"name", "apiKey", "allowMultipleConnections"}`. |
+| `PATCH /domains/:name` | Change `apiKey` or `allowMultipleConnections`. Disconnects the domain's clients. |
+| `DELETE /domains/:name` | Delete a domain. Disconnects its clients. |
+| `GET /domains/:name/traffic?from=YYYY-MM-DD&to=YYYY-MM-DD` | Daily traffic. |
 
-The `lipstick-client` application provides the following options:
+## Client
+
+### Command-line flags
 
 ```text
-Usage of lipstick-client:
-  -c string
-    	Config path (default "/etc/lipstick/config.client.yml")
-  -p string
-    	Host/port where you want to connect from the remote server. (default "127.0.0.1:8082")
-  -s string
-    	WebSocket URL of the server manager where your client will connect. (default "ws://localhost:8081/ws")
-  -k string
-        Secret key to authenticate with the server. (default "super_secret_key")
+-s   server URL. Must start with https://. Default https://localhost:5051
+-p   local services to expose, host:port, separated by spaces: -p "127.0.0.1:8082 127.0.0.1:9000". Default 127.0.0.1:8082
+-k   domain key, the one created in the admin API
+-ca  PEM file with the server certificate or its CA. Needed for a self-signed server
+-c   configuration file. Default config.client.yml next to the binary
 ```
 
----
+### Configuration file
 
-## Environment Variables
+Start from [`client/config.example.yml`](client/config.example.yml).
 
-Lipstick supports environment variables for configuration. These variables can be used as an alternative to the configuration file or command-line arguments:
+| Key | Purpose |
+|-----|---------|
+| `api_secret` | Domain key. Required. |
+| `server_url` | Server URL, `https://`. |
+| `proxy_pass` | List of local services, `host:port`. |
+| `ca_file` | PEM file to trust, for a self-signed server. |
 
-### General Configuration
+Flags override the file. Unknown keys are an error.
 
-| Variable          | Description                                         | Default         |
-|--------------------|-----------------------------------------------------|-----------------|
-| `ADMIN_ADDR`       | Address for the admin API                          | `:5052`         |
-| `MANAGER_ADDR`     | Address for WebSocket manager connections          | `:5051`         |
-| `PROXY_ADDR`       | Address for the proxy                              | `:5050`         |
-| `ADMIN_SECRET_KEY` | Secret key for admin API authorization             | `""`            |
+### Behaviour
 
-### TLS Configuration
-
-| Variable         | Description                  | Default       |
-|-------------------|------------------------------|---------------|
-| `TLS_CERT`        | Path to the TLS certificate | `""`          |
-| `TLS_KEY`         | Path to the TLS key         | `""`          |
-
-### Redis Configuration
-
-| Variable            | Description                                         | Default   |
-|----------------------|-----------------------------------------------------|-----------|
-| `REDIS_HOST`         | Redis host address                                 | `localhost` |
-| `REDIS_PORT`         | Redis port                                         | `6379`    |
-| `REDIS_PASSWORD`     | Redis password (leave empty if not set)            | `""`      |
-| `REDIS_DB`           | Redis database index                               | `0`       |
-| `REDIS_POOL_SIZE`    | Maximum number of connections in the Redis pool    | `10`      |
-| `REDIS_MIN_IDLE_CONNS` | Minimum number of idle connections in the pool    | `3`       |
-| `REDIS_POOL_TIMEOUT` | Timeout (in seconds) for getting a connection      | `30`      |
-
-### Database Configuration
-
-| Variable        | Description                    | Default      |
-|------------------|--------------------------------|--------------|
-| `DB_HOST`        | Database host address         | `localhost`  |
-| `DB_PORT`        | Database port                 | `5432`       |
-| `DB_USER`        | Database user                 | `postgres`   |
-| `DB_PASSWORD`    | Database password             | `""`         |
-| `DB_NAME`        | Database name                 | `app_db`     |
-| `DB_SSL_MODE`    | Database SSL mode             | `disable`    |
-
----
-
-## Example Configuration File
-
-Here is an example of a configuration file (`config.yml`) for Lipstick:
-
-```yaml
-admin_secret_key: "super_secret_key"
-proxy:
-  address: ":5050"
-manager:
-  address: ":5051"
-admin:
-  address: ":5052"
-tls:
-  certificate_path: "/path/to/cert.pem"
-  key_path: "/path/to/key.pem"
-database:
-  host: "db.example.com"
-  port: 5432
-  user: "dbuser"
-  password: "dbpassword"
-  database: "app_db"
-  ssl_mode: "disable"
-redis:
-  host: "localhost"
-  port: 6379
-  password: "redispassword"
-  database: 1
-  pool_size: 20
-  min_idle_conns: 5
-  pool_timeout: 30
-```
-
----
+- The client verifies the server certificate. There is no option to skip verification.
+- If the server refuses the connection, for example with a wrong key, the client prints the status and retries with a wait that doubles up to 60 seconds.
+- Local services can be `host:port` (plain TCP) or `https://host:port` (verified TLS). The tunnel to the server is always TLS.
 
 ## Notes
 
-- Lipstick is in an **experimental** phase and may not yet support all production scenarios.
-- For enhanced security, it is recommended to integrate Lipstick with a reverse proxy like **Nginx** or **Traefik**.
-- Ensure that the ports used by Lipstick are properly secured and monitored to prevent unauthorized access.
+- The tunnel carries API keys and visitor traffic. Keep `config.yml`, `client_key.txt` and the `certs/` directory out of version control. They are already in `.gitignore`.
+- Lipstick is experimental. Use a firewall in front of ports `5050` and `5051`, and keep `5052` local.
+- `DEBUG=true` in the environment starts the Go profiler on `:6060` and turns on extra logging.

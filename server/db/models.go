@@ -6,7 +6,7 @@ type Domain struct {
 	ID                       uint   `gorm:"primary_key"`
 	Name                     string `gorm:"unique;not null"`
 	ApiKey                   string `gorm:"not null"`
-	AllowMultipleConnections bool   `gorm:"not null;default:true"`
+	AllowMultipleConnections bool   `gorm:"not null"`
 }
 
 type DailyConsumption struct {

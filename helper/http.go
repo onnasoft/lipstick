@@ -3,11 +3,14 @@ package helper
 import (
 	"bufio"
 	"crypto/tls"
+	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"reflect"
 	"strings"
+	"time"
 )
 
 func GetResponseWriter(w http.ResponseWriter) http.ResponseWriter {
@@ -93,18 +96,41 @@ func ParseHTTPRequest(conn net.Conn) (*http.Request, error) {
 	return request, nil
 }
 
+const (
+	// maxHeaderBytes bounds a header block, so a client cannot grow memory
+	// without limit by never ending its headers.
+	maxHeaderBytes = 64 << 10
+
+	// headerReadTimeout bounds how long a client may take to send its headers.
+	headerReadTimeout = 10 * time.Second
+)
+
+// ReadUntilHeadersEnd reads a header block up to and including the empty line
+// that ends it. Both \r\n and \n line endings are accepted.
+//
+// It reads one byte at a time on purpose. A buffered reader would read past the
+// end of the headers and throw away the start of the body. With this reader the
+// body stays on the connection. The read deadline is cleared before returning,
+// so the connection can be used afterwards without a stale deadline.
 func ReadUntilHeadersEnd(conn net.Conn) ([]byte, error) {
-	reader := bufio.NewReader(conn)
-	result := []byte{}
+	if err := conn.SetReadDeadline(time.Now().Add(headerReadTimeout)); err != nil {
+		return nil, fmt.Errorf("error setting header deadline: %w", err)
+	}
+	defer conn.SetReadDeadline(time.Time{})
+
+	result := make([]byte, 0, 512)
+	one := make([]byte, 1)
 	for {
-		line, err := reader.ReadString('\n')
-		if err != nil {
-			return []byte{}, fmt.Errorf("error reading headers: %w", err)
+		if _, err := io.ReadFull(conn, one); err != nil {
+			return nil, fmt.Errorf("error reading headers: %w", err)
 		}
-		result = append(result, []byte(line)...)
-		if line == "\r\n" {
-			break
+		result = append(result, one[0])
+		if len(result) > maxHeaderBytes {
+			return nil, errors.New("headers exceed 64 KiB")
+		}
+		// An empty line ends the headers: "\n\n", "\r\n\r\n", or a mix.
+		if n := len(result); n >= 2 && (string(result[n-2:]) == "\n\n" || (n >= 3 && string(result[n-3:]) == "\n\r\n")) {
+			return result, nil
 		}
 	}
-	return result, nil
 }

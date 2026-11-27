@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"errors"
 	"log"
 	"sync"
 	"time"
@@ -98,6 +99,9 @@ func (p *PostgresAuthManager) GetDomain(domain string) (*Domain, error) {
 	data, err := p.getCached(key, func() (interface{}, error) {
 		result := &db.Domain{}
 		tx := p.db.Where("name = ?", domain).First(result)
+		if errors.Is(tx.Error, gorm.ErrRecordNotFound) {
+			return nil, ErrDomainNotFound
+		}
 		if tx.Error != nil {
 			return nil, tx.Error
 		}

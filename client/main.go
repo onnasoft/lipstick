@@ -58,26 +58,35 @@ func main() {
 	fmt.Println("Desconectando...")
 }
 
+const (
+	minRetryDelay = 3 * time.Second
+	maxRetryDelay = 60 * time.Second
+)
+
+// startClient keeps one control connection to the server for proxyTarget. After
+// a failure it waits, doubling the wait up to maxRetryDelay. A connection that
+// was established resets the wait.
 func startClient(proxyTarget string) {
 	fmt.Println("Connecting to", serverURL)
-	retryDelay := 3 * time.Second
 	headers := http.Header{}
 	headers.Set("authorization", configuration.APISecret)
 
+	retryDelay := minRetryDelay
 	for {
 		conn, err := httpmanager.Connect(serverURL, headers)
 		if err != nil {
-			log.Printf("Error connecting to %s: %v\n", serverURL, err)
+			log.Printf("Error connecting to %s: %v (retrying in %s)\n", serverURL, err, retryDelay)
 			time.Sleep(retryDelay)
+			retryDelay = min(retryDelay*2, maxRetryDelay)
 			continue
 		}
-		helper.ReadUntilHeadersEnd(conn)
+		retryDelay = minRetryDelay
 
 		fmt.Println("Connected to server at", serverURL)
 		go checkConnection(conn)
 		handleTickets(conn, proxyTarget)
 		fmt.Println("Disconnected from server at", serverURL)
-		time.Sleep(retryDelay)
+		time.Sleep(minRetryDelay)
 	}
 }
 

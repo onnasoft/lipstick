@@ -2,6 +2,7 @@ package admin
 
 import (
 	"crypto/subtle"
+	"errors"
 	"net/http"
 	"time"
 
@@ -69,6 +70,16 @@ func (r *router) authorized(c *gin.Context) bool {
 	return false
 }
 
+// writeLookupError answers a failed domain lookup: 404 when the domain does not
+// exist, 500 for anything else.
+func writeLookupError(c *gin.Context, err error) {
+	if errors.Is(err, auth.ErrDomainNotFound) {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Domain not found"})
+		return
+	}
+	c.JSON(http.StatusInternalServerError, gin.H{"error": "Unable to get domain"})
+}
+
 func (r *router) getDomains(c *gin.Context) {
 	if !r.authorized(c) {
 		return
@@ -95,7 +106,7 @@ func (r *router) getDomain(c *gin.Context) {
 	domainName := c.Param("domainName")
 	domain, err := r.admin.authManager.GetDomain(domainName)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "unable to get domain"})
+		writeLookupError(c, err)
 		return
 	}
 
@@ -107,7 +118,9 @@ func (r *router) addDomain(c *gin.Context) {
 		return
 	}
 
-	domain := &auth.Domain{}
+	// Multiple connections are allowed unless the request says otherwise. The
+	// default is set before binding, so an omitted field keeps it.
+	domain := &auth.Domain{AllowMultipleConnections: true}
 	if err := c.BindJSON(domain); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -135,15 +148,26 @@ func (r *router) updateDomain(c *gin.Context) {
 	domainName := c.Param("domainName")
 	record, err := r.admin.authManager.GetDomain(domainName)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Unable to get domain"})
+		writeLookupError(c, err)
 		return
 	}
 
-	if _, ok := domain["apiKey"]; ok {
-		record.ApiKey = domain["apiKey"].(string)
+	// Checked assertions: a wrong JSON type is a 400, not a panic.
+	if raw, ok := domain["apiKey"]; ok {
+		key, isString := raw.(string)
+		if !isString || key == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "apiKey must be a non-empty string"})
+			return
+		}
+		record.ApiKey = key
 	}
-	if _, ok := domain["allowMultipleConnections"]; ok {
-		record.AllowMultipleConnections = domain["allowMultipleConnections"].(bool)
+	if raw, ok := domain["allowMultipleConnections"]; ok {
+		allow, isBool := raw.(bool)
+		if !isBool {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "allowMultipleConnections must be true or false"})
+			return
+		}
+		record.AllowMultipleConnections = allow
 	}
 
 	if err := r.admin.authManager.UpdateDomain(record); err != nil {
@@ -164,7 +188,7 @@ func (r *router) deleteDomain(c *gin.Context) {
 	domainName := c.Param("domainName")
 	record, err := r.admin.authManager.GetDomain(domainName)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Unable to get domain"})
+		writeLookupError(c, err)
 		return
 	}
 

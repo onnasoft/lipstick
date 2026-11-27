@@ -259,11 +259,16 @@ Lipstick exposes local ports to the internet through a reverse tunnel. The main 
 - **Where:** `server/db/models.go`, `server/auth/postgres.go` (`AddDomain`)
 - **What:** The model has `default:true`. GORM omits zero values for fields with a default tag, so `false` is replaced by the database default.
 - **Fix:** Use a pointer type, or set the field explicitly with `Select` or `FirstOrCreate` options.
+- **Status (completed):** the `default:true` tag was removed from the model, so GORM always writes the value, including `false`. The admin `POST` sets `allowMultipleConnections` to `true` before reading the JSON, so an omitted field keeps the default.
+- **Verified:** live, a domain created with `false` read back as `false` (before the fix it read back as `true`). `TestCreateDomainMultipleConnectionsDefaults` covers the omitted and the explicit case.
+- **Note:** existing rows and the column default in the database are unchanged. `AutoMigrate` does not drop defaults.
 
 ### 22. Admin update handler panics and returns wrong status codes
 - **Where:** `server/admin/routes.go` (`updateDomain`)
 - **What:** `domain["apiKey"].(string)` and `domain["allowMultipleConnections"].(bool)` are unchecked type assertions, so a wrong JSON type panics. A missing domain returns 500 instead of 404.
 - **Fix:** Use checked assertions, and return 400 and 404 where they apply.
+- **Status (completed):** `auth.ErrDomainNotFound` is returned for a missing domain. The admin API answers 404 for it and 500 for other errors. `PATCH` checks the JSON types and answers 400 on a wrong type or an empty key, instead of panicking.
+- **Verified:** live, `PATCH` on a missing domain returned 404, and a string for `allowMultipleConnections` returned 400. Unit tests cover the same cases.
 
 ### 23. Install script fails silently
 - **Where:** `server/install.sh`
@@ -272,16 +277,22 @@ Lipstick exposes local ports to the internet through a reverse tunnel. The main 
   - It builds to the fixed path `/tmp/lipstick-6415415`, which is vulnerable to symlink attacks when run as root.
   - It checks `$USER` instead of `id -u`.
 - **Fix:** Fail loudly on copy errors, build to a `mktemp` path, and check `id -u`.
+- **Status (completed):** `install.sh` runs with `set -eu`, checks `id -u`, builds into a `mktemp` directory, and refuses to run without `config.yml`. Nothing is hidden with `&>/dev/null`. It creates a `lipstick` system user, installs the configuration as `0640 root:lipstick`, and enables the service.
+- **Verified:** `sh -n` passes. I did not run the script, because it installs a system service.
 
 ### 24. systemd unit has an invalid directive and runs as root
 - **Where:** `server/lipstick.service`
 - **What:** `ReadOnlyDirectories=` is not a valid directive (the correct one is `ReadOnlyPaths=`). The service runs as `User=root`. `PIDFile` points to a file that is never written.
 - **Fix:** Create a dedicated service user, use `ReadOnlyPaths=`, and remove `PIDFile` or write the PID file.
+- **Status (completed):** the unit runs as `User=lipstick`. `ReadOnlyDirectories=` is replaced by `ProtectSystem=strict` and `ReadOnlyPaths=`. `PIDFile` is removed, since nothing wrote it. The configuration is read-only, and only `/etc/lipstick/certs` is writable.
+- **Verified:** `systemd-analyze verify` reports only that `/usr/bin/lipstick` does not exist yet, which is expected before installation.
 
 ### 25. Docker image runs as root
 - **Where:** `Dockerfile`
 - **What:** The image runs as root, does not declare `EXPOSE`, and copies binaries from `bin/`, which `build.sh` creates.
 - **Fix:** Add a non-root user, `EXPOSE` the ports, and build inside a multi-stage Dockerfile.
+- **Status (completed):** the Dockerfile is multi-stage. The build stage compiles only the server. The runtime is `gcr.io/distroless/static-debian12:nonroot`, with no shell, and it runs as `nonroot`. It exposes 5050 and 5051. A `.dockerignore` keeps `config.yml`, `client_key.txt`, the certificates and `.git` out of the image.
+- **Verified:** the image builds (39.9 MB). Its user is `nonroot:nonroot`, and without a configuration it prints the error and stops. I did not run a tunnel through the container.
 
 ### 26. README and code disagree on defaults
 - **Where:** `README.md`
@@ -290,32 +301,41 @@ Lipstick exposes local ports to the internet through a reverse tunnel. The main 
   - Client target: `127.0.0.1:8082` vs `tcp://127.0.0.1:12000`.
   - The documented `-k` default is `super_secret_key`, which is a weak default that users may copy.
 - **Fix:** Make the README match the code, and remove the example secret.
+- **Status (completed):** `README.md` was rewritten to match the code. The flags, the ports and the defaults are the real ones. The environment-variable tables were removed, because the code does not read those variables (only `DEBUG`). The example secret `super_secret_key` was removed.
 
 ### 27. Client configuration loads at package init
 - **Where:** `client/config/config.go`, `client/main.go`
 - **What:** `flag.Parse()` runs during package initialization, and `main.go` assigns `configuration, _ = config.GetConfig()` at package level, ignoring the error. This makes the package hard to test.
 - **Fix:** Load configuration inside `main` and handle the error.
+- **Status (completed):** the client loads its configuration on demand, through `GetConfig` with a `flag.FlagSet`. Nothing is parsed at package initialization, and `main` handles the error.
+- **Verified:** the client configuration tests call the loader directly, and `go vet` is clean.
 
 ### 28. Header reader waits for `\r\n` only
 - **Where:** `helper/http.go` (`ReadUntilHeadersEnd`)
 - **What:** The loop checks `line == "\r\n"`. A request that ends headers with a bare `\n` is read until EOF, which can leave the goroutine blocked.
 - **Fix:** Accept `\n` as well as `\r\n`, and set a read deadline.
+- **Status (completed):** `ReadUntilHeadersEnd` reads one byte at a time, so it never reads past the headers and the body stays on the connection. It accepts `\n` and `\r\n`, limits the headers to 64 KiB, and uses a 10-second deadline that is cleared before returning.
+- **Verified:** `helper/http_test.go` covers both line endings, the body that remains on the connection, the limit, and truncated headers.
 
 ### 29. `go vet` warnings
 - **Where:** `client/main.go:127`, `client/main.go:135`, `server/manager/hub.go:188`
 - **What:** `fmt.Fprintf` is called with a non-constant format string (`helper.BadGatewayResponse`). If that string ever contains `%`, the output is corrupted.
 - **Fix:** Use `Write([]byte(...))` or `Fprint`.
+- **Status (completed):** `go vet ./...` reports nothing.
 
 ### 30. Dead code
 - **Where:** `server/manager/hub.go` (`handleIncomingClientConn2`), `helper/net.go` (`MonitorIdle`, `RemoteConn.used`), `helper/listener.go` (`ListenerConn`, `NewListenerConn`), `server/manager/ticket.go` (overflow check)
 - **What:** Unused functions. `MonitorIdle` also writes `used` without synchronization. The overflow check in `TickerManager.generate` can never be true.
 - **Fix:** Delete the unused code.
+- **Status (completed):** `handleIncomingClientConn2`, `MonitorIdle`, `ListenerConn`, `NewListenerConn`, and the overflow check in `TickerManager` were removed. A search for them finds nothing.
 
 ### 31. Client treats a rejected upgrade as connected
 - **Where:** `client/main.go` (`startClient`), `client/manager/http.go` (`Connect`)
 - **What:** `Connect` writes the upgrade request and returns without reading the response status. `startClient` then reads the headers, ignores the status, and logs `Connected to server`. With a wrong `APISecret`, the server answers 401 and the client still reports a successful connection, then waits for tickets that never arrive.
 - **Observed:** Reproduced locally with a wrong key: the server logged `Unauthorized tunnel client for domain:localhost`, and the client printed `Connected to server at http://localhost:5051`.
 - **Fix:** Parse the response status line and headers, and treat anything other than `101` or `200` as a failed connection. Retry with backoff and log the status code.
+- **Status (completed):** `Connect` reads the response status line and accepts only `200`. Any other status, such as `401` for a wrong key, is an error that includes the line. `startClient` retries with a wait that doubles from 3 s up to 60 s, and resets after a successful connection.
+- **Verified:** `client/manager/connect_test.go` covers a refused handshake and an accepted one, with tickets still readable after the headers. Live, a wrong key printed `server refused the connection: HTTP/1.1 401 Unauthorized` and waited 3, 6 and 12 seconds.
 
 ---
 
