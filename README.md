@@ -439,6 +439,15 @@ Hay dos caminos UDP, y el equivalente de cada uno en TCP es el siguiente.
 | Destino local plano | Destino local plano | `udp_target` en el cliente |
 | Destino local con TLS verificado | Destino local con DTLS verificado | `udp_target_tls: true` en el cliente |
 
+### Passthrough TLS por dominio
+
+Un dominio con `passthrough` activo (`PATCH /domains/:name` con `{"passthrough": true}`) no termina su TLS en el servidor. El proxy lee el SNI del primer registro y reenvía los bytes tal cual al cliente, que los entrega al servicio local. El servicio tiene que presentar un certificado válido para el dominio.
+
+- El cliente anuncia passthrough solo si su servicio local presenta un certificado válido para el dominio, comprobado con TLS verificado al conectar (`passthrough: true` en su configuración).
+- Si no hay una sesión que lo anuncie, el dominio se atiende como siempre: el servidor termina el TLS con su certificado.
+- El tráfico passthrough no aparece en el registro de peticiones, porque el servidor no lo lee. Sí cuenta en el tráfico diario.
+- Medido: con passthrough activo, el visitante ve el certificado del servicio y recibe `200`; con passthrough apagado, ve el del servidor y recibe `200`. El mismo `proxy_pass` en `https://` sirve para los dos modos.
+
 ### Proxy DTLS
 
 Con `proxy.udp: true`, el servidor abre un socket UDP en `proxy.address`. El primer datagrama de cada origen es el ClientHello de DTLS, y su SNI elige el dominio. Luego ese origen es una conexión DTLS, cifrada con el certificado del servidor. Sus datagramas descifrados llegan al cliente del dominio igual que un puerto de intranet UDP.

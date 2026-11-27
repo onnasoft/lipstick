@@ -475,6 +475,19 @@ Lipstick exposes local ports to the internet through a reverse tunnel. The main 
 - **Verified:** the SNI reader is tested with valid ClientHellos and with every truncation of one. Live: a DTLS visitor (openssl) reached the local service and got its answer, for a plain local target and for a DTLS local target; an unknown SNI and a non-DTLS datagram got no answer; a local service with a certificate the CA does not sign was refused, and the client log said so.
 - **Not verified:** more than one domain sharing the port (only `localhost` was configured); visitors from several sources at once; handshake cost under load; cluster routing for DTLS.
 
+### 48. Passthrough stayed on after it was turned off (bug)
+- **Where:** `server/auth/manager.go` (`MakeAuthManager`)
+- **What:** the admin API and the proxy each created their own auth manager, and each keeps its own domain cache. Turning passthrough off through the API updated the admin's cache, but the proxy kept reading its old value until the cache expired, so visitors still got the service's certificate. The admin API showed `false` the whole time.
+- **Fix:** one auth manager per process, shared by the admin API and the proxy. A domain update now takes effect for both at once.
+- **Verified:** live, with the same `proxy_pass` in `https://` for both modes. Passthrough on: visitor sees the service certificate, 200. Passthrough off: visitor sees the server's certificate, 200, and the visit appears in the request log. The switch works in both directions.
+- **Also seen:** a 502 right after a domain change is the hub being dropped while the client reconnects (`Hub not found`). It lasts about 3 seconds. Changing a domain disconnects its client by design; the 502 is within that window.
+
+### 49. Passthrough TLS per domain (feature)
+- **Where:** `server/manager/manager.go` (`RoutePassthrough`), `server/manager/mux.go` (`takePassthrough`, `LIPSTICK-PASS`), `helper/sni_listener.go`, `helper/clienthello.go`, `client/passthrough.go`, `client/mux.go` (`LIPSTICK-PASS` as plain TCP).
+- **What:** a domain with `passthrough` on forwards its TLS without ending it. The proxy reads the SNI of the first record and sends the bytes to a client session that announced passthrough. That client's service presents a certificate for the domain; the client checks it at each connection with verified TLS before announcing.
+- **Trade-offs (accepted):** no HTTP request log and no panel data for those domains; the server's certificate does not cover them.
+- **Not verified:** more than one domain on passthrough; clients on different machines.
+
 ## Recommended order
 
 1. Items 1, 2, 3, and 4: authentication, unpredictable tickets, TLS verification, and admin API hardening.
