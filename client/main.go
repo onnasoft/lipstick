@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"crypto/tls"
 	"fmt"
 	"io"
 	"log"
@@ -16,8 +15,8 @@ import (
 	"github.com/OnnaSoft/lipstick/client/config"
 	"github.com/OnnaSoft/lipstick/client/handlers"
 	"github.com/OnnaSoft/lipstick/client/manager"
+	"github.com/OnnaSoft/lipstick/client/tlsconf"
 	"github.com/OnnaSoft/lipstick/helper"
-	"github.com/gorilla/websocket"
 )
 
 var httpmanager = manager.NewHTTPManager()
@@ -25,6 +24,14 @@ var configuration, _ = config.GetConfig()
 var serverURL = configuration.ServerURL
 
 func main() {
+	if err := tlsconf.Configure(configuration.CAFile, configuration.InsecureSkipVerify); err != nil {
+		fmt.Fprintln(os.Stderr, "Error de TLS:", err)
+		os.Exit(1)
+	}
+	if tlsconf.Insecure() {
+		fmt.Println("ADVERTENCIA: no se verifica el certificado del servidor. Tu clave puede ser robada. Usa -insecure solo en desarrollo.")
+	}
+
 	interruptChannel := make(chan os.Signal, 1)
 	signal.Notify(interruptChannel, os.Interrupt)
 
@@ -45,18 +52,10 @@ func startClient(proxyTarget string) {
 	headers := http.Header{}
 	headers.Set("authorization", configuration.APISecret)
 
-	env := os.Getenv("ENV")
-	if env == "development" {
-		websocket.DefaultDialer.TLSClientConfig = &tls.Config{
-			InsecureSkipVerify: true,
-		}
-		fmt.Println("Warning: Allowing insecure connections in development mode")
-	}
-
 	for {
 		conn, err := httpmanager.Connect(serverURL, headers)
 		if err != nil {
-			log.Printf("Error creating WebSocket connection: %v\n", serverURL)
+			log.Printf("Error connecting to %s: %v\n", serverURL, err)
 			time.Sleep(retryDelay)
 			continue
 		}

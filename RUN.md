@@ -63,15 +63,26 @@ En otra terminal, desde la raíz del repo:
 go run ./client \
   -s https://localhost:5051 \
   -p 127.0.0.1:8082 \
-  -k "$(cat client_key.txt)"
+  -k "$(cat client_key.txt)" \
+  -ca server/certs/server.crt
 ```
+
+`-ca` le dice al cliente qué certificado del servidor confiar. Sin él, el cliente rechaza el certificado autofirmado y muestra el error `server certificate could not be verified`. Si el servidor usa un certificado firmado por una CA pública, no necesitas `-ca`.
 
 Si prefieres un binario, compílalo una vez y ejecútalo con los mismos flags:
 
 ```bash
 go build -o lipstick-client ./client
-./lipstick-client -s https://localhost:5051 -p 127.0.0.1:8082 -k "$(cat client_key.txt)"
+./lipstick-client -s https://localhost:5051 -p 127.0.0.1:8082 -k "$(cat client_key.txt)" -ca server/certs/server.crt
 ```
+
+Para no escribir `-ca` cada vez, puedes poner en un YAML del cliente:
+
+```yaml
+ca_file: /ruta/absoluta/a/lipstick/server/certs/server.crt
+```
+
+Úsalo con `-c ruta/al/config.yml`. No uses `-insecure` salvo en desarrollo: desactiva la verificación y tu clave puede ser robada.
 
 Salida esperada:
 
@@ -91,6 +102,8 @@ Los flags:
 | `-s` | URL del manager del servidor. Debe usar `https://` porque el servidor tiene TLS | `https://localhost:5051` |
 | `-p` | Servicio local que quieres exponer, `host:puerto`. Puedes pasar varios separados por espacio | `127.0.0.1:8082` |
 | `-k` | Clave del dominio, la que creaste con la admin API | contenido de `client_key.txt` |
+| `-ca` | Archivo PEM del certificado del servidor, para confiar en un certificado autofirmado | `server/certs/server.crt` |
+| `-insecure` | Desactiva la verificación del certificado del servidor. Solo para desarrollo | (omitir) |
 
 El nombre del dominio sale de la URL de `-s`. Con `localhost:5051` el dominio es `localhost`.
 

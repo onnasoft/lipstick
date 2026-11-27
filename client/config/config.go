@@ -14,10 +14,12 @@ import (
 )
 
 type Config struct {
-	APISecret string   `yaml:"api_secret"` // API secret for authentication
-	ServerURL string   `yaml:"server_url"` // URL of the server manager
-	ProxyPass []string `yaml:"proxy_pass"` // List of proxy targets
-	Workers   int      `yaml:"workers"`    // Number of worker routines
+	APISecret          string   `yaml:"api_secret"`           // API secret for authentication
+	ServerURL          string   `yaml:"server_url"`           // URL of the server manager
+	ProxyPass          []string `yaml:"proxy_pass"`           // List of proxy targets
+	Workers            int      `yaml:"workers"`              // Number of worker routines
+	CAFile             string   `yaml:"ca_file"`              // PEM file with the server CA or certificate to trust
+	InsecureSkipVerify bool     `yaml:"insecure_skip_verify"` // Development only: do not verify the server certificate
 }
 
 var config *Config
@@ -30,6 +32,8 @@ func loadConfig() {
 		proxyPass  string
 		apiSecret  string
 		workers    int
+		caFile     string
+		insecure   bool
 	)
 
 	// Default configuration
@@ -47,6 +51,8 @@ func loadConfig() {
 	flag.StringVar(&serverURL, "s", "http://localhost:5051", "URL for the server manager WebSocket")
 	flag.StringVar(&proxyPass, "p", "tcp://127.0.0.1:12000", "Proxy targets separated by spaces")
 	flag.StringVar(&apiSecret, "k", "", "API secret for authenticating nodes")
+	flag.StringVar(&caFile, "ca", "", "PEM file with the server CA or certificate to trust (for self-signed servers)")
+	flag.BoolVar(&insecure, "insecure", false, "Skip verification of the server certificate. Development only: the API key can be stolen")
 	flag.Parse()
 
 	// Load YAML config file
@@ -67,6 +73,8 @@ func loadConfig() {
 	}
 	result.APISecret = helper.SetValue(apiSecret, result.APISecret).(string)
 	result.Workers = helper.SetValue(workers, result.Workers).(int)
+	result.CAFile = helper.SetValue(caFile, result.CAFile).(string)
+	result.InsecureSkipVerify = insecure || result.InsecureSkipVerify
 
 	// Store in global config
 	config = &result

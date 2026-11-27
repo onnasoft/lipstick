@@ -54,7 +54,7 @@ Servidor: https://localhost:5050 (visitantes), https://localhost:5051 (clientes)
 
 Para conectar un cliente, en otra terminal:
   cd $ROOT
-  go run ./client -s https://localhost:5051 -p 127.0.0.1:8082 -k "$CLIENT_KEY"
+  go run ./client -s https://localhost:5051 -p 127.0.0.1:8082 -k "$CLIENT_KEY" -ca "$SERVER_DIR/certs/server.crt"
 
 Clave del cliente (de client_key.txt): $CLIENT_KEY
 Detalles en RUN.md.

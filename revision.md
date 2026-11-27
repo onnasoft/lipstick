@@ -40,6 +40,9 @@ Lipstick exposes local ports to the internet through a reverse tunnel. The main 
 - **What:** `InsecureSkipVerify: true` is set unconditionally. The `ENV=development` check in `client/main.go` only changes `websocket.DefaultDialer`, which is not used.
 - **Impact:** A man-in-the-middle can impersonate the server and capture `APISecret`.
 - **Fix:** Verify certificates by default. Make the insecure option explicit and only for development.
+- **Status:** Fixed for the connection to the server. `client/tlsconf` verifies the server certificate by default. `-ca <file>` (or `ca_file` in the YAML) trusts a self-signed certificate, such as `server/certs/server.crt`. `-insecure` (or `insecure_skip_verify`) disables verification and prints a warning at startup. The `ENV=development` block was removed because it did nothing useful. A verification failure now says which flag to use. The `handlers/` connections to the user's local service still skip verification on purpose, see the remaining item below.
+- **Verified:** Without `-ca`, the client refused the server certificate and printed the fix. With `-ca server/certs/server.crt`, it connected and 8 of 8 visitor requests returned the backend response. Unit tests in `client/tlsconf/tlsconf_test.go` cover the default, CA, insecure and bad-CA cases.
+- **Remaining:** `client/handlers/http.go` and `client/handlers/tcp.go` still set `InsecureSkipVerify: true` when forwarding to a local `https://` or TLS target. This is on purpose for now: those targets do not receive the API key, and verifying them could break local services that use self-signed certificates. Decide whether to make it configurable.
 
 ### 4. Admin API uses plain HTTP and a weak check
 - **Where:** `server/admin/admin.go` (`engine.Run(addr)`), `server/admin/routes.go` (`isAuthorized`)

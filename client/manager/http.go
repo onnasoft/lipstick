@@ -6,6 +6,8 @@ import (
 	"net"
 	"net/http"
 	"strings"
+
+	"github.com/OnnaSoft/lipstick/client/tlsconf"
 )
 
 type HTTPManager struct {
@@ -56,12 +58,10 @@ func (m *HTTPManager) Connect(url string, headers http.Header) (*CustomConn, err
 	if req.URL.Scheme == "http" || req.URL.Scheme == "ws" {
 		conn, err = net.Dial("tcp", host)
 	} else {
-		conn, err = tls.Dial("tcp", host, &tls.Config{
-			InsecureSkipVerify: true,
-		})
+		conn, err = tls.Dial("tcp", host, tlsconf.Config(""))
 	}
 	if err != nil {
-		return nil, fmt.Errorf("error connecting to host: %w", err)
+		return nil, fmt.Errorf("error connecting to host: %w", tlsconf.Explain(err))
 	}
 
 	if err := req.Write(conn); err != nil {
@@ -99,13 +99,10 @@ func (m *HTTPManager) ConnectByAddress(url string, headers http.Header) (*Custom
 	if req.URL.Scheme == "http" || req.URL.Scheme == "ws" {
 		conn, err = net.Dial("tcp", host)
 	} else {
-		conn, err = tls.Dial("tcp", host, &tls.Config{
-			InsecureSkipVerify: true,
-			ServerName:         strings.Split(host, ":")[0],
-		})
+		conn, err = tls.Dial("tcp", host, tlsconf.Config(""))
 	}
 	if err != nil {
-		return nil, fmt.Errorf("error connecting to host: %w", err)
+		return nil, fmt.Errorf("error connecting to host: %w", tlsconf.Explain(err))
 	}
 
 	if err := req.Write(conn); err != nil {
