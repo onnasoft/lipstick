@@ -85,6 +85,7 @@ func startClient(proxyTarget string) {
 		headers.Set("X-Lipstick-Intranet-UDP-Port", strconv.Itoa(configuration.IntranetUDPPort))
 	}
 	udpTarget = configuration.UDPTarget
+	udpTargetTLS = configuration.UDPTargetTLS
 
 	retryDelay := minRetryDelay
 	for {

@@ -21,6 +21,9 @@ require (
 	github.com/kr/text v0.2.0 // indirect
 	github.com/nats-io/nkeys v0.4.7 // indirect
 	github.com/nats-io/nuid v1.0.1 // indirect
+	github.com/pion/dtls/v3 v3.1.16 // indirect
+	github.com/pion/logging v0.2.4 // indirect
+	github.com/pion/transport/v5 v5.0.0 // indirect
 	github.com/rogpeppe/go-internal v1.13.1 // indirect
 	golang.org/x/sync v0.20.0 // indirect
 )

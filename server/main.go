@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"strconv"
 
 	"net/http"
 	_ "net/http/pprof"
@@ -48,6 +49,14 @@ func main() {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "No se puede escuchar el proxy en %s: %v (revisa proxy.address)\n", conf.Proxy.Address, err)
 		os.Exit(1)
+	}
+	var dtlsProxy net.PacketConn
+	if conf.Proxy.UDP {
+		dtlsProxy, err = net.ListenPacket("udp", conf.Proxy.Address)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "No se puede escuchar DTLS en %s: %v (revisa proxy.address)\n", conf.Proxy.Address, err)
+			os.Exit(1)
+		}
 	}
 
 	interrupt := make(chan os.Signal, 1)
@@ -93,6 +102,12 @@ func main() {
 	go manager.Listen()
 	go admin.Listen()
 	go proxy.ListenAndServe()
+	if dtlsProxy != nil {
+		_, portText, _ := net.SplitHostPort(conf.Proxy.Address)
+		dtlsPort, _ := strconv.Atoi(portText)
+		go manager.ServeDTLSProxy(dtlsProxy, tlsConfig, dtlsPort)
+		logger.Default.Info("Listening DTLS proxy on", conf.Proxy.Address)
+	}
 	<-interrupt
 	fmt.Println("Desconectando...")
 	manager.Close()

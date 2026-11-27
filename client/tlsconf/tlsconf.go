@@ -71,3 +71,11 @@ func Explain(err error) error {
 	}
 	return err
 }
+
+// Roots returns the certificate pool to trust for DTLS, the same as for TLS. It
+// is nil when the system roots are used.
+func Roots() *x509.CertPool {
+	mu.RLock()
+	defer mu.RUnlock()
+	return roots
+}

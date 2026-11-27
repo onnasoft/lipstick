@@ -32,6 +32,9 @@ type Config struct {
 	IntranetUDPPort int `yaml:"intranet_udp_port"`
 	// UDPTarget is the local UDP service, host:port, for datagrams from the server.
 	UDPTarget string `yaml:"udp_target"`
+	// UDPTargetTLS makes the connection to udp_target DTLS, verified like an https
+	// target: the service must present a certificate its name matches.
+	UDPTargetTLS bool `yaml:"udp_target_tls"`
 }
 
 const (
@@ -159,6 +162,9 @@ func (c *Config) Validate() error {
 		if _, _, err := net.SplitHostPort(c.UDPTarget); err != nil {
 			errs = append(errs, fmt.Errorf("udp_target %q must be host:port", c.UDPTarget))
 		}
+	}
+	if c.UDPTargetTLS && c.UDPTarget == "" {
+		errs = append(errs, errors.New("udp_target_tls needs udp_target"))
 	}
 	if c.IntranetUDPPort > 0 && c.UDPTarget == "" {
 		errs = append(errs, errors.New("intranet_udp_port needs udp_target: the local UDP service the datagrams go to"))

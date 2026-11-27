@@ -28,7 +28,7 @@ func TestServeUDPFlowRelaysToLocalService(t *testing.T) {
 
 	serverSide, clientSide := net.Pipe()
 	defer serverSide.Close()
-	go serveUDPFlow(clientSide, echo.LocalAddr().String())
+	go serveUDPFlow(clientSide, echo.LocalAddr().String(), false)
 
 	if err := helper.WriteFrame(serverSide, []byte("dns?")); err != nil {
 		t.Fatal(err)
@@ -45,7 +45,7 @@ func TestServeUDPFlowWithoutTargetCloses(t *testing.T) {
 	serverSide, clientSide := net.Pipe()
 	defer serverSide.Close()
 	done := make(chan struct{})
-	go func() { serveUDPFlow(clientSide, ""); close(done) }()
+	go func() { serveUDPFlow(clientSide, "", false); close(done) }()
 	select {
 	case <-done:
 	case <-time.After(3 * time.Second):

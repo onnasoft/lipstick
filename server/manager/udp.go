@@ -25,8 +25,7 @@ const (
 
 // udpFlow is one source address on a UDP intranet port.
 type udpFlow struct {
-	src    *net.UDPAddr
-	pc     net.PacketConn
+	reply  func(p []byte) // sends a datagram back to the source
 	stream net.Conn
 	queue  chan []byte // datagrams from the source, waiting to be framed to the client
 	done   chan struct{}
@@ -90,25 +89,24 @@ func (f *udpFlow) readLoop() {
 			f.stop()
 			return
 		}
-		f.pc.WriteTo(p, f.src)
+		f.reply(p)
 	}
 }
 
-// newUDPFlow opens the stream for a new source. It returns nil when no client
-// session of the domain can take it.
-func (m *Manager) newUDPFlow(pc net.PacketConn, domain string, src *net.UDPAddr) *udpFlow {
+// newUDPFlow opens the stream for a new source on a domain's client session. port
+// is the server port the source came in on. reply sends datagrams back to the
+// source. It returns nil when no client session of the domain can take the flow.
+func (m *Manager) newUDPFlow(domain string, port int, reply func(p []byte)) *udpFlow {
 	hub, ok := m.GetHub(domain)
 	if !ok {
 		return nil
 	}
-	port := pc.LocalAddr().(*net.UDPAddr).Port
 	stream, ok := hub.openStream("LIPSTICK-UDP", port)
 	if !ok {
 		return nil
 	}
 	f := &udpFlow{
-		src:    src,
-		pc:     pc,
+		reply:  reply,
 		stream: stream,
 		queue:  make(chan []byte, udpFlowQueue),
 		done:   make(chan struct{}),
@@ -191,7 +189,8 @@ func (m *Manager) serveIntranetUDP(pc net.PacketConn, domain string, allowed []*
 			if full {
 				continue
 			}
-			f = m.newUDPFlow(pc, domain, src)
+			port := pc.LocalAddr().(*net.UDPAddr).Port
+			f = m.newUDPFlow(domain, port, func(p []byte) { pc.WriteTo(p, src) })
 			if f == nil {
 				continue // no client session right now: the datagram is dropped, as UDP allows
 			}

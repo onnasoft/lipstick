@@ -58,7 +58,7 @@ Si ningún cliente atiende en 30 segundos, el visitante recibe `502`. Cada hub a
 
 - **Hacia afuera (visitantes y clientes):** siempre TLS. No hay modo sin cifrado.
 - **Hacia tu servicio local:** `host:puerto` (TCP plano, pensado para `127.0.0.1`) o `https://host:puerto` (TLS verificado). El túnel en sí siempre va cifrado.
-- **UDP solo en puertos de intranet.** El tráfico UDP de un visitante no cruza el túnel por el proxy. Solo los puertos de intranet reservados por el cliente lo llevan, sin TLS, como los TCP. Ver [Puertos UDP de intranet](#puertos-udp-de-intranet).
+- **UDP en dos formas.** Un proxy DTLS (`proxy.udp: true`) recibe visitantes cifrados con el certificado del servidor, igual que el proxy TLS, y el SNI elige el dominio. Los puertos UDP de intranet llevan datagramas sin cifrar, como los TCP de intranet. Ver [UDP](#udp).
 
 - **Multiplexación.** El cliente abre 8 conexiones TLS autenticadas, y cada una lleva una sesión yamux. Cada visitante es un stream dentro de una sesión, así que no hace falta una conexión TLS nueva por visitante. Un visitante sin sesión disponible usa el camino del ticket, y nada deja de funcionar. Las sesiones se reconectan solas si el servidor se reinicia.
 
@@ -428,33 +428,49 @@ Coste: medido en una misma máquina, un visitante reenviado cuesta casi lo mismo
 
 Pendiente: no se ha probado con servidores en máquinas distintas, ni con caídas de un servidor en mitad de una carga.
 
-## Puertos UDP de intranet
+## UDP
+
+Hay dos caminos UDP, y el equivalente de cada uno en TCP es el siguiente.
+
+| TCP | UDP | Dónde se configura |
+|---|---|---|
+| Proxy `:5050` con TLS, el SNI elige el dominio | Proxy DTLS en el mismo puerto, el SNI elige el dominio | `proxy.udp: true` en el servidor |
+| Puerto de intranet TCP, sin TLS, un dominio por puerto | Puerto de intranet UDP, sin DTLS, un dominio por puerto | `intranet_udp_port` en el cliente |
+| Destino local plano | Destino local plano | `udp_target` en el cliente |
+| Destino local con TLS verificado | Destino local con DTLS verificado | `udp_target_tls: true` en el cliente |
+
+### Proxy DTLS
+
+Con `proxy.udp: true`, el servidor abre un socket UDP en `proxy.address`. El primer datagrama de cada origen es el ClientHello de DTLS, y su SNI elige el dominio. Luego ese origen es una conexión DTLS, cifrada con el certificado del servidor. Sus datagramas descifrados llegan al cliente del dominio igual que un puerto de intranet UDP.
+
+- Varios dominios pueden compartir el mismo puerto, porque el SNI los separa.
+- Un SNI que no corresponde a ningún dominio con cliente conectado se descarta, y también los datagramas que no son DTLS.
+- Un origen en silencio durante 60 segundos se cierra.
+
+### Destino local con DTLS
+
+Con `udp_target_tls: true`, el cliente abre el destino local por DTLS. El certificado del servicio local debe estar firmado por la CA de `ca_file`, y su nombre debe coincidir con el host de `udp_target`. Si no, el flujo se rechaza, y el log dice por qué.
+
+### Puertos UDP de intranet
 
 Un cliente puede pedir un puerto UDP además de un puerto TCP, con las mismas reglas: el servidor decide el rango, el dominio y las redes permitidas, y el puerto no tiene TLS.
 
-- Cada origen que envía al puerto (IP y puerto de origen) recibe su propio flujo. Los datagramas viajan enmarcados con una longitud de dos bytes sobre una sesión del cliente, así que sus límites se conservan.
-- El cliente reenvía cada flujo a su servicio UDP local, `udp_target`, y devuelve las respuestas al origen que las pidió.
-- Un flujo sin tráfico durante 60 segundos se cierra. El siguiente datagrama de ese origen abre uno nuevo.
-- Un datagrama de un origen fuera de las redes permitidas se descarta y queda registrado.
-- Si ningún cliente atiende el dominio en ese momento, el datagrama se descarta, como ocurre en UDP.
+- Cada origen (IP y puerto) recibe su propio flujo. Los datagramas viajan enmarcados con una longitud de dos bytes sobre una sesión del cliente, así que sus límites se conservan.
+- Un flujo sin tráfico durante 60 segundos se cierra.
+- Un origen fuera de las redes permitidas se descarta y queda registrado.
 
-Configuración del cliente:
-
-```yaml
-intranet_udp_port: 5109          # puerto UDP que reserva el servidor
-udp_target: "127.0.0.1:9109"     # servicio UDP local
-```
-
-Medido en una misma máquina, con el servicio UDP de eco: 200 de 200 datagramas de hasta 1 199 bytes volvieron íntegros, y 2 000 datagramas de un origen permitido volvieron íntegros en 0.14 segundos. Un origen fuera de la política no obtuvo respuesta.
+Medido en una misma máquina, con un servicio de eco: 200 de 200 datagramas de hasta 1 199 bytes volvieron íntegros, y 2 000 datagramas en bloque volvieron íntegros en 0.14 segundos.
 
 DNS real, con dnsmasq como servidor, a través de un puerto UDP de intranet y de un puerto TCP de intranet:
 
-- Consultas A y TXT por UDP: correctas. 300 de 300 consultas seguidas contestadas, con p50 de 0.07 ms en la misma máquina.
+- Consultas A y TXT por UDP: 300 de 300 consultas seguidas contestadas, con una mediana de 0.07 ms.
 - Respuesta de unos 800 bytes por UDP con EDNS: 100 de 100 completas.
-- Respuesta mayor que el límite de UDP (1 544 bytes): llega truncada por UDP (bit TC) y completa por el puerto TCP. Es el flujo que DNS espera.
+- Respuesta mayor que el límite de UDP (1 544 bytes): llega truncada por UDP (bit TC) y completa por el puerto TCP, como DNS espera.
 - Un origen fuera de la red permitida no recibe respuesta.
 
-Pendiente: RTP o BACnet reales, la expiración de flujos en mitad de una carga, y el comportamiento con pérdida de paquetes en la red entre servidor y cliente.
+Probado con `openssl s_client -dtls1_2` contra el proxy DTLS: el visitante recibe `echo:` más el texto enviado, tanto con destino local plano como con destino DTLS. Con un servicio local cuyo certificado no está firmado por la CA, el visitante no recibe respuesta y el log dice `certificate signed by unknown authority`.
+
+Pendiente: el proxy DTLS no enruta entre servidores del cluster; un visitante DTLS solo llega a un servidor con cliente para su dominio. Tampoco se ha probado RTP o BACnet reales, ni la expiración de flujos bajo carga sostenida, ni el comportamiento con pérdida de paquetes en la red.
 
 ## Puertos sin TLS para la intranet
 

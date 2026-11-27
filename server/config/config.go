@@ -19,6 +19,10 @@ import (
 
 type ProxyConfig struct {
 	Address string `yaml:"address"`
+	// UDP also opens a DTLS proxy on the same address and port number. Visitors
+	// speak DTLS with the server's certificate, and the SNI picks the domain, as
+	// the TLS proxy does. Off by default.
+	UDP bool `yaml:"udp"`
 }
 
 type ManagerConfig struct {

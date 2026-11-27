@@ -468,6 +468,13 @@ Lipstick exposes local ports to the internet through a reverse tunnel. The main 
 - **Note:** dnsmasq's default EDNS limit is 1 232 bytes, so larger answers are truncated over UDP by the server, as the DNS protocol expects. That is dnsmasq's policy, not a tunnel limit.
 - **Not verified:** DNS over a link that drops packets; resolvers that query the reserved port from many source ports at once.
 
+### 47. DTLS for UDP: proxy and verified local target (feature)
+- **Where:** `server/manager/dtls_proxy.go`, `server/manager/dtls_sni.go`, `server/main.go` (`proxy.udp`), `client/mux.go` (`dialUDPTarget`), `client/config/config.go` (`udp_target_tls`), `client/tlsconf/tlsconf.go` (`Roots`), `server/manager/udp.go` (flows take a reply function). Library: `github.com/pion/dtls/v3`.
+- **What:** the UDP counterpart of the TLS proxy. One UDP socket on `proxy.address` receives every visitor. The first datagram of each source is read for its SNI, which picks the domain. That source then becomes its own DTLS connection, terminated with the server's certificate, and its datagrams go to the domain's client as an intranet UDP flow. On the client, `udp_target_tls` connects to the local service over DTLS, verified against `ca_file` and the target's host name, and the handshake runs at connection time so a refusal is logged.
+- **Design choice:** the server terminates DTLS, so it can route by SNI and it sees the plaintext, as the TLS proxy does. An option that passes DTLS through without terminating it is not built.
+- **Verified:** the SNI reader is tested with valid ClientHellos and with every truncation of one. Live: a DTLS visitor (openssl) reached the local service and got its answer, for a plain local target and for a DTLS local target; an unknown SNI and a non-DTLS datagram got no answer; a local service with a certificate the CA does not sign was refused, and the client log said so.
+- **Not verified:** more than one domain sharing the port (only `localhost` was configured); visitors from several sources at once; handshake cost under load; cluster routing for DTLS.
+
 ## Recommended order
 
 1. Items 1, 2, 3, and 4: authentication, unpredictable tickets, TLS verification, and admin API hardening.

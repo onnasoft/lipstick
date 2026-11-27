@@ -14,8 +14,10 @@ import (
 	"time"
 
 	"github.com/OnnaSoft/lipstick/client/handlers"
+	"github.com/OnnaSoft/lipstick/client/tlsconf"
 	"github.com/OnnaSoft/lipstick/helper"
 	"github.com/hashicorp/yamux"
+	"github.com/pion/dtls/v3"
 )
 
 // The client keeps muxSessions authenticated TLS connections to the server, and
@@ -115,16 +117,19 @@ func serveMuxStream(stream *yamux.Stream, carrier net.Conn, proxyTarget string) 
 	pending, _ := reader.Peek(reader.Buffered())
 	wrapped := helper.NewConnWithBuffer(netStream, append([]byte(nil), pending...))
 	if kind == "LIPSTICK-UDP" {
-		serveUDPFlow(wrapped, udpTarget)
+		serveUDPFlow(wrapped, udpTarget, udpTargetTLS)
 		return
 	}
 	protocol, targetAddress := helper.ParseTargetEndpoint(proxyTarget)
 	serveVisitor(wrapped, protocol, targetAddress, port, currentReport())
 }
 
-// udpTarget is the local UDP service for datagrams from the server. It is set once
-// from the configuration at startup.
-var udpTarget string
+// udpTarget is the local UDP service for datagrams from the server, and udpTargetTLS
+// says whether it speaks DTLS. Both are set once from the configuration at startup.
+var (
+	udpTarget    string
+	udpTargetTLS bool
+)
 
 // udpFlowIdle matches the server: a flow with no datagrams for this long is closed.
 const udpFlowIdle = 60 * time.Second
@@ -132,16 +137,11 @@ const udpFlowIdle = 60 * time.Second
 // serveUDPFlow carries the datagrams of one source between the server stream and
 // the local UDP service. Each flow has its own UDP socket, so replies from the
 // service come back to the flow that asked.
-func serveUDPFlow(conn net.Conn, target string) {
+func serveUDPFlow(conn net.Conn, target string, useTLS bool) {
 	if target == "" {
 		return
 	}
-	raddr, err := net.ResolveUDPAddr("udp", target)
-	if err != nil {
-		log.Printf("udp: bad target %q: %v", target, err)
-		return
-	}
-	sock, err := net.DialUDP("udp", nil, raddr)
+	sock, err := dialUDPTarget(target, useTLS)
 	if err != nil {
 		log.Printf("udp: cannot reach %s: %v", target, err)
 		return
@@ -172,6 +172,38 @@ func serveUDPFlow(conn net.Conn, target string) {
 			return
 		}
 	}
+}
+
+// dialUDPTarget connects to the local UDP service: plain UDP, or DTLS verified
+// against the configured CA and the target's host name.
+func dialUDPTarget(target string, useTLS bool) (net.Conn, error) {
+	if !useTLS {
+		raddr, err := net.ResolveUDPAddr("udp", target)
+		if err != nil {
+			return nil, err
+		}
+		return net.DialUDP("udp", nil, raddr)
+	}
+	host, _, err := net.SplitHostPort(target)
+	if err != nil {
+		return nil, err
+	}
+	raddr, err := net.ResolveUDPAddr("udp", target)
+	if err != nil {
+		return nil, err
+	}
+	conn, err := dtls.DialWithOptions("udp", raddr,
+		dtls.WithRootCAs(tlsconf.Roots()),
+		dtls.WithServerName(host))
+	if err != nil {
+		return nil, err
+	}
+	// The handshake runs now, so a certificate the CA does not sign is reported here.
+	if err := conn.Handshake(); err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("DTLS to %s failed: %w", target, err)
+	}
+	return conn, nil
 }
 
 // dialMux opens one authenticated connection for a mux session, with a fresh
