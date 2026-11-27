@@ -101,7 +101,7 @@ func (m *Manager) newUDPFlow(domain string, port int, reply func(p []byte)) *udp
 	if !ok {
 		return nil
 	}
-	stream, ok := hub.openStream("LIPSTICK-UDP", port)
+	stream, ok := hub.openStream("LIPSTICK-UDP", port, false)
 	if !ok {
 		return nil
 	}

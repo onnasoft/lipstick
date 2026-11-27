@@ -47,6 +47,7 @@ type domainView struct {
 	ID                       uint   `json:"id"`
 	Name                     string `json:"name"`
 	AllowMultipleConnections bool   `json:"allowMultipleConnections"`
+	Passthrough              bool   `json:"passthrough"`
 }
 
 func toDomainView(d *auth.Domain) domainView {
@@ -54,6 +55,7 @@ func toDomainView(d *auth.Domain) domainView {
 		ID:                       d.ID,
 		Name:                     d.Name,
 		AllowMultipleConnections: d.AllowMultipleConnections,
+		Passthrough:              d.Passthrough,
 	}
 }
 
@@ -173,6 +175,14 @@ func (r *router) updateDomain(c *gin.Context) {
 			return
 		}
 		record.AllowMultipleConnections = allow
+	}
+	if raw, ok := domain["passthrough"]; ok {
+		pass, isBool := raw.(bool)
+		if !isBool {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "passthrough must be true or false"})
+			return
+		}
+		record.Passthrough = pass
 	}
 
 	if err := r.admin.authManager.UpdateDomain(record); err != nil {

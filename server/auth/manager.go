@@ -10,6 +10,7 @@ type Domain struct {
 	Name                     string `json:"name"`
 	ApiKey                   string `json:"apiKey"`
 	AllowMultipleConnections bool   `json:"allowMultipleConnections"`
+	Passthrough              bool   `json:"passthrough"`
 }
 
 type AuthManager interface {

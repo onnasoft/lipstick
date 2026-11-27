@@ -35,6 +35,10 @@ type Config struct {
 	// UDPTargetTLS makes the connection to udp_target DTLS, verified like an https
 	// target: the service must present a certificate its name matches.
 	UDPTargetTLS bool `yaml:"udp_target_tls"`
+	// Passthrough lets the server forward visitors' TLS to proxy_pass without ending
+	// it, for domains that have passthrough on. It is offered only when proxy_pass
+	// presents a valid certificate for the domain, checked at every connection.
+	Passthrough bool `yaml:"passthrough"`
 }
 
 const (

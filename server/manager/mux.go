@@ -27,8 +27,9 @@ const (
 
 // muxSession is one yamux session and the connection that carries it.
 type muxSession struct {
-	session *yamux.Session
-	carrier net.Conn
+	session     *yamux.Session
+	carrier     net.Conn
+	passthrough bool // the client's service ends TLS itself, so the session can take passthrough visitors
 }
 
 func muxConfig() *yamux.Config {
@@ -102,7 +103,11 @@ func (manager *Manager) handleMux(conn net.Conn, req *http.Request) {
 		conn.Close()
 		return
 	}
-	ms := &muxSession{session: session, carrier: conn}
+	ms := &muxSession{
+		session:     session,
+		carrier:     conn,
+		passthrough: req.Header.Get(helper.PassthroughHeader) == "1",
+	}
 	if !hub.addMux(ms) {
 		session.Close()
 		return
@@ -145,7 +150,7 @@ func (hub *NetworkHub) removeMux(ms *muxSession) {
 // over it. The first line gives the client the server port the visitor came in
 // on. It returns false when no session can take the visitor.
 func (hub *NetworkHub) takeMux(visitor *helper.RemoteConn, port int) bool {
-	conn, ok := hub.openStream("LIPSTICK-PORT", port)
+	conn, ok := hub.openStream("LIPSTICK-PORT", port, false)
 	if !ok {
 		return false
 	}
@@ -155,7 +160,7 @@ func (hub *NetworkHub) takeMux(visitor *helper.RemoteConn, port int) bool {
 
 // openStream opens a stream on a live session and writes its first line, "kind port".
 // It returns false when no session can take it.
-func (hub *NetworkHub) openStream(kind string, port int) (net.Conn, bool) {
+func (hub *NetworkHub) openStream(kind string, port int, needPassthrough bool) (net.Conn, bool) {
 	hub.muxMu.Lock()
 	sessions := append([]*muxSession(nil), hub.muxes...)
 	hub.muxNext++
@@ -164,7 +169,7 @@ func (hub *NetworkHub) openStream(kind string, port int) (net.Conn, bool) {
 
 	for i := range sessions {
 		ms := sessions[(start+i)%len(sessions)]
-		if ms.session.IsClosed() {
+		if ms.session.IsClosed() || (needPassthrough && !ms.passthrough) {
 			continue
 		}
 		stream, err := ms.session.OpenStream()
@@ -181,6 +186,18 @@ func (hub *NetworkHub) openStream(kind string, port int) (net.Conn, bool) {
 		return helper.NewStreamConn(stream, ms.carrier), true
 	}
 	return nil, false
+}
+
+// takePassthrough gives the visitor to a session whose client ends TLS itself. The
+// visitor's TLS is forwarded without being read. It returns false when no such
+// session is connected.
+func (hub *NetworkHub) takePassthrough(visitor *helper.RemoteConn, port int) bool {
+	conn, ok := hub.openStream("LIPSTICK-PASS", port, true)
+	if !ok {
+		return false
+	}
+	go hub.syncConnections(visitor, conn)
+	return true
 }
 
 // closeMuxes closes every session. Their visitors see the connection end.

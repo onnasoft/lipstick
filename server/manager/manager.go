@@ -290,3 +290,20 @@ func (manager *Manager) HandleTCPConn(conn net.Conn) {
 		rejectVisitor(remoteConn)
 	}
 }
+
+// RoutePassthrough takes a TLS connection of a domain with passthrough on, and
+// forwards it to a client whose service ends TLS itself. The server does not read
+// the TLS. It returns false when the domain or such a client is not available, and
+// the connection is then ended here as usual. prefix holds the bytes already read.
+func (manager *Manager) RoutePassthrough(domain string, conn net.Conn, prefix []byte) bool {
+	record, err := manager.authManager.GetDomain(domain)
+	if err != nil || !record.Passthrough {
+		return false
+	}
+	hub, ok := manager.GetHub(domain)
+	if !ok {
+		return false
+	}
+	visitor := &helper.RemoteConn{Conn: helper.NewConnWithBuffer(conn, prefix), Domain: domain}
+	return hub.takePassthrough(visitor, localPort(conn))
+}

@@ -89,6 +89,7 @@ func startClient(proxyTarget string) {
 
 	retryDelay := minRetryDelay
 	for {
+		passthroughOK.Store(configuration.Passthrough && probePassthrough(proxyTarget, serverURL))
 		conn, err := httpmanager.Connect(serverURL, headers)
 		if err != nil {
 			log.Printf("Error connecting to %s: %v (retrying in %s)\n", serverURL, err, retryDelay)

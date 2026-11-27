@@ -45,11 +45,13 @@ func main() {
 		os.Exit(1)
 	}
 
-	proxy, err := helper.NewListenerManagerTCP(conf.Proxy.Address, tlsConfig)
+	rawProxy, err := net.Listen("tcp", conf.Proxy.Address)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "No se puede escuchar el proxy en %s: %v (revisa proxy.address)\n", conf.Proxy.Address, err)
 		os.Exit(1)
 	}
+	sniProxy := helper.NewSNIListener(rawProxy, tlsConfig)
+	proxy := helper.NewListenerManager(sniProxy)
 	var dtlsProxy net.PacketConn
 	if conf.Proxy.UDP {
 		dtlsProxy, err = net.ListenPacket("udp", conf.Proxy.Address)
@@ -70,6 +72,7 @@ func main() {
 
 	requestStore := manager.NewGormRequestStore(conn)
 	manager := manager.SetupManager(tlsConfig)
+	sniProxy.SetRoute(manager.RoutePassthrough)
 	manager.StartRequestPersistence(requestStore)
 	if conf.Cluster != nil {
 		if err := manager.StartCluster(*conf.Cluster, tlsConfig); err != nil {

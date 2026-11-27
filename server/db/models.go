@@ -7,6 +7,9 @@ type Domain struct {
 	Name                     string `gorm:"unique;not null"`
 	ApiKey                   string `gorm:"not null"`
 	AllowMultipleConnections bool   `gorm:"not null"`
+	// Passthrough makes the proxy forward this domain's TLS without ending it. The
+	// service behind the client must hold a certificate for the domain.
+	Passthrough bool `gorm:"not null;default:false"`
 }
 
 type DailyConsumption struct {

@@ -121,6 +121,12 @@ func serveMuxStream(stream *yamux.Stream, carrier net.Conn, proxyTarget string) 
 		return
 	}
 	protocol, targetAddress := helper.ParseTargetEndpoint(proxyTarget)
+	if kind == "LIPSTICK-PASS" {
+		// The visitor's TLS is passed on as it is: the service ends it, so the
+		// connection to the service is plain TCP, whatever the scheme of proxy_pass.
+		handlers.HandleTCP(wrapped, targetAddress, "http")
+		return
+	}
 	serveVisitor(wrapped, protocol, targetAddress, port, currentReport())
 }
 
@@ -216,6 +222,9 @@ func dialMux() (net.Conn, error) {
 	headers := http.Header{}
 	headers.Set(helper.MuxNonceHeader, nonce)
 	headers.Set(helper.ProofHeader, helper.MuxProof(configuration.APISecret, nonce))
+	if passthroughOK.Load() {
+		headers.Set(helper.PassthroughHeader, "1")
+	}
 	conn, err := httpmanager.ConnectByAddress(serverURL+"/mux", headers)
 	if err != nil {
 		return nil, err
@@ -238,7 +247,7 @@ func muxClientConfig() *yamux.Config {
 func parseAssignment(line string) (string, int, error) {
 	line = strings.TrimRight(line, "\r\n")
 	kind, rest, ok := strings.Cut(line, " ")
-	if !ok || (kind != "LIPSTICK-PORT" && kind != "LIPSTICK-UDP") {
+	if !ok || (kind != "LIPSTICK-PORT" && kind != "LIPSTICK-UDP" && kind != "LIPSTICK-PASS") {
 		return "", 0, fmt.Errorf("unexpected line on mux stream: %q", line)
 	}
 	n, err := strconv.Atoi(rest)

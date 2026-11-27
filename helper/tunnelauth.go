@@ -14,6 +14,10 @@ import (
 // that knows the domain's key. The key itself is never sent on that connection.
 const ProofHeader = "X-Lipstick-Proof"
 
+// PassthroughHeader is sent on a mux connection by a client whose service ends TLS
+// itself, with a certificate for the domain. Its value is "1".
+const PassthroughHeader = "X-Lipstick-Passthrough"
+
 // MuxNonceHeader carries the nonce of a mux connection. It starts with the
 // client's time, so the server can refuse old nonces.
 const MuxNonceHeader = "X-Lipstick-Mux-Nonce"

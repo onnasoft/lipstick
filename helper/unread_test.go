@@ -12,10 +12,9 @@ func TestUnreadKeepsBodyThatArrivedWithHeaders(t *testing.T) {
 	request := "POST /echo HTTP/1.1\r\nHost: localhost\r\nContent-Length: 3\r\n\r\nabc"
 	raw, peer := net.Pipe()
 	defer peer.Close()
-	go func() {
-		peer.Write([]byte(request))
-		peer.Close()
-	}()
+	// The peer stays open until the test ends. Closing it right after the write
+	// races with the reader's deadline calls and made this test fail at random.
+	go peer.Write([]byte(request))
 
 	buf := make([]byte, 1024)
 	n, _ := raw.Read(buf) // one read: headers and body together
@@ -27,8 +26,9 @@ func TestUnreadKeepsBodyThatArrivedWithHeaders(t *testing.T) {
 	}
 	conn.Unread(head)
 
-	got, err := io.ReadAll(conn)
-	if err != nil {
+	// Read exactly the request: the peer stays open, so there is no EOF to wait for.
+	got := make([]byte, len(request))
+	if _, err := io.ReadFull(conn, got); err != nil {
 		t.Fatal(err)
 	}
 	if string(got) != request {
