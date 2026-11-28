@@ -932,6 +932,122 @@ const docTemplate = `{
                 }
             }
         },
+        "/domains/{domainName}/disable": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Turns the domain off: its client is disconnected and refused, and its visitors get 503. Settings, visitor users and traffic history are kept; enable the domain to bring it back.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "domains"
+                ],
+                "summary": "Disable a domain",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Domain name",
+                        "name": "domainName",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/admin.statusResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Missing, expired or invalid session token. Error: 'Unauthorized'",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "The domain does not exist. Error: 'Domain not found'",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "The domain could not be changed. Error: 'Unable to update domain'",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "The change was not made: the audit log is not available",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/domains/{domainName}/enable": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Turns a disabled domain back on: its client may connect again, and its visitors are served.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "domains"
+                ],
+                "summary": "Enable a domain",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Domain name",
+                        "name": "domainName",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/admin.statusResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Missing, expired or invalid session token. Error: 'Unauthorized'",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "The domain does not exist. Error: 'Domain not found'",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "The domain could not be changed. Error: 'Unable to update domain'",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "The change was not made: the audit log is not available",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/domains/{domainName}/traffic": {
             "get": {
                 "security": [
@@ -1590,6 +1706,58 @@ const docTemplate = `{
                 }
             }
         },
+        "/metrics": {
+            "get": {
+                "description": "The server's numbers in the Prometheus text format: connected clients, sessions, pending visitors, traffic per domain, responses by status class, refusals by reason, backend timeouts, tunnels opened, and process resources. Public, so a scraper needs no session; the listener should stay on a private address.",
+                "produces": [
+                    "text/plain"
+                ],
+                "tags": [
+                    "health"
+                ],
+                "summary": "Prometheus metrics",
+                "responses": {
+                    "200": {
+                        "description": "Prometheus text exposition",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "503": {
+                        "description": "Metrics are not configured on this server",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/ready": {
+            "get": {
+                "description": "Whether this server should take new traffic. 200 when it is listening, not shutting down, and every dependency answers. 503 lists the conditions that are not met, by name. Public, like /health; a load balancer should use this one, /health reports state for people.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "health"
+                ],
+                "summary": "Readiness",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/admin.readyResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Not ready: the reasons name what is not met",
+                        "schema": {
+                            "$ref": "#/definitions/admin.readyResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/requests": {
             "get": {
                 "security": [
@@ -1930,6 +2098,9 @@ const docTemplate = `{
                 "bandwidthBytesPerSecond": {
                     "type": "integer"
                 },
+                "disabled": {
+                    "type": "boolean"
+                },
                 "id": {
                     "type": "integer"
                 },
@@ -2016,6 +2187,24 @@ const docTemplate = `{
                 "password": {
                     "type": "string",
                     "example": "a-password-of-12-or-more"
+                }
+            }
+        },
+        "admin.readyResponse": {
+            "type": "object",
+            "properties": {
+                "reasons": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "example": [
+                        "draining"
+                    ]
+                },
+                "status": {
+                    "type": "string",
+                    "example": "ready"
                 }
             }
         },

@@ -112,6 +112,8 @@ definitions:
         type: boolean
       bandwidthBytesPerSecond:
         type: integer
+      disabled:
+        type: boolean
       id:
         type: integer
       monthlyQuotaBytes:
@@ -170,6 +172,18 @@ definitions:
     properties:
       password:
         example: a-password-of-12-or-more
+        type: string
+    type: object
+  admin.readyResponse:
+    properties:
+      reasons:
+        example:
+        - draining
+        items:
+          type: string
+        type: array
+      status:
+        example: ready
         type: string
     type: object
   admin.roleBody:
@@ -976,6 +990,85 @@ paths:
       summary: Change a domain
       tags:
       - domains
+  /domains/{domainName}/disable:
+    post:
+      description: 'Turns the domain off: its client is disconnected and refused,
+        and its visitors get 503. Settings, visitor users and traffic history are
+        kept; enable the domain to bring it back.'
+      parameters:
+      - description: Domain name
+        in: path
+        name: domainName
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/admin.statusResponse'
+        "401":
+          description: 'Missing, expired or invalid session token. Error: ''Unauthorized'''
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
+        "404":
+          description: 'The domain does not exist. Error: ''Domain not found'''
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
+        "500":
+          description: 'The domain could not be changed. Error: ''Unable to update
+            domain'''
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
+        "503":
+          description: 'The change was not made: the audit log is not available'
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
+      security:
+      - BearerAuth: []
+      summary: Disable a domain
+      tags:
+      - domains
+  /domains/{domainName}/enable:
+    post:
+      description: 'Turns a disabled domain back on: its client may connect again,
+        and its visitors are served.'
+      parameters:
+      - description: Domain name
+        in: path
+        name: domainName
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/admin.statusResponse'
+        "401":
+          description: 'Missing, expired or invalid session token. Error: ''Unauthorized'''
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
+        "404":
+          description: 'The domain does not exist. Error: ''Domain not found'''
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
+        "500":
+          description: 'The domain could not be changed. Error: ''Unable to update
+            domain'''
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
+        "503":
+          description: 'The change was not made: the audit log is not available'
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
+      security:
+      - BearerAuth: []
+      summary: Enable a domain
+      tags:
+      - domains
   /domains/{domainName}/traffic:
     get:
       description: Bytes transferred per day between two dates, inclusive.
@@ -1428,6 +1521,47 @@ paths:
       summary: Log out
       tags:
       - session
+  /metrics:
+    get:
+      description: 'The server''s numbers in the Prometheus text format: connected
+        clients, sessions, pending visitors, traffic per domain, responses by status
+        class, refusals by reason, backend timeouts, tunnels opened, and process resources.
+        Public, so a scraper needs no session; the listener should stay on a private
+        address.'
+      produces:
+      - text/plain
+      responses:
+        "200":
+          description: Prometheus text exposition
+          schema:
+            type: string
+        "503":
+          description: Metrics are not configured on this server
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
+      summary: Prometheus metrics
+      tags:
+      - health
+  /ready:
+    get:
+      description: Whether this server should take new traffic. 200 when it is listening,
+        not shutting down, and every dependency answers. 503 lists the conditions
+        that are not met, by name. Public, like /health; a load balancer should use
+        this one, /health reports state for people.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/admin.readyResponse'
+        "503":
+          description: 'Not ready: the reasons name what is not met'
+          schema:
+            $ref: '#/definitions/admin.readyResponse'
+      summary: Readiness
+      tags:
+      - health
   /requests:
     get:
       description: 'Finished HTTP requests, newest first, read from the database (about

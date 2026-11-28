@@ -508,6 +508,15 @@ curl -sk -X POST https://127.0.0.1:5052/domains \
   --data '{"name":"robot-42.example.com","apiKey":"<clave-larga-aleatoria>","allowMultipleConnections":false}'
 ```
 
+### Ciclo de vida de un dominio
+
+- **Crear:** `POST /domains` con `name` (un nombre de host en minúsculas, como `robot.example.com`) y, opcionalmente, `apiKey`. Si omites la clave, el servidor genera una y la devuelve una sola vez en la respuesta: guárdala, no vuelve a mostrarse. Una clave dada debe tener al menos 32 caracteres. Un nombre repetido responde 409.
+- **Configurar:** `PATCH /domains/{name}` cambia la clave, las conexiones múltiples, el passthrough, las redes permitidas, el ancho de banda y la cuota.
+- **Desactivar y activar:** `POST /domains/{name}/disable` y `POST /domains/{name}/enable`. Al desactivar, el cliente se desconecta y queda rechazado (403) hasta que actives el dominio; sus visitantes reciben 503. La configuración, los usuarios de visitante y el historial de tráfico se conservan. Desde el panel, el botón de la página del dominio hace lo mismo, con confirmación.
+- **Borrar:** `DELETE /domains/{name}` desconecta al cliente y borra el dominio con sus usuarios y tokens de visitante, para que sus secretos no sobrevivan. El historial de tráfico se conserva como registro de lo que sirvió.
+
+Todas estas acciones quedan en el registro de auditoría.
+
 ## Autenticación de visitantes
 
 Un dominio puede exigir credenciales a sus visitantes: **usuarios con firma HMAC** o **tokens de API con permisos**. Es opcional, y solo se activa si el cliente lo pide.

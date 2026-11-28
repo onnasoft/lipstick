@@ -127,7 +127,7 @@
         rows: d.domains,
         columns: [
           { label: t("Domain"), render: function (r) { return h("a", { class: "cell-strong", href: "#/domains/" + encodeURIComponent(r.name), text: r.name }); } },
-          { label: t("Status"), render: function (r) { return LP.domainStatus(index[r.name]); } },
+          { label: t("Status"), render: function (r) { return r.disabled ? LP.badge(t("disabled"), "danger") : LP.domainStatus(index[r.name]); } },
           { label: t("Clients"), num: true, render: function (r) { return String(index[r.name] ? index[r.name].clients : 0); } },
           { label: t("Sessions"), num: true, render: function (r) { return String(index[r.name] ? index[r.name].activeSessions : 0); } },
           { label: t("Intranet ports"), render: function (r) { return (index[r.name] && index[r.name].intranetPorts || []).join(", ") || "—"; } },
@@ -137,6 +137,31 @@
       }));
     });
   }
+
+  // toggleButton turns a domain off or on. Turning it off asks first: its client is
+  // disconnected and its visitors get 503 until it is enabled again.
+  function toggleButton(dom, reload) {
+    var off = !dom.disabled;
+    var button = h("button", { class: "btn" + (off ? "" : " btn-primary"), type: "button", text: off ? t("Disable domain") : t("Enable domain") });
+    button.addEventListener("click", function () {
+      var go = function () {
+        LP.api("POST", "/domains/" + encodeURIComponent(dom.name) + (off ? "/disable" : "/enable")).then(function (res) {
+          if (res.ok) { LP.notify("ok", off ? t("Domain disabled") : t("Domain enabled"), dom.name); reload(); }
+          else { LP.notify("error", t("Could not change the domain"), LP.errorText(res)); }
+        });
+      };
+      if (!off) { go(); return; }
+      LP.confirm({
+        title: t("Disable the domain?"),
+        text: t("Its client is disconnected and its visitors get 503 until it is enabled again. Settings and history are kept."),
+        confirmLabel: t("Disable"),
+        danger: true
+      }).then(function (ok) { if (ok) { go(); } });
+    });
+    return button;
+  }
+
+
 
   function renderDetail(root, name) {
     LP.load(root, function () {
@@ -161,8 +186,9 @@
           h("h1", { class: "font-mono", text: dom.name })
         ]),
         h("div", { class: "toolbar-group" }, [
-          LP.domainStatus(st),
-          h("a", { class: "btn", href: "#/visitors/" + encodeURIComponent(dom.name), text: t("Visitor users") })
+          dom.disabled ? LP.badge(t("disabled"), "danger") : LP.domainStatus(st),
+          h("a", { class: "btn", href: "#/visitors/" + encodeURIComponent(dom.name), text: t("Visitor users") }),
+          toggleButton(dom, reload)
         ])
       ]));
 

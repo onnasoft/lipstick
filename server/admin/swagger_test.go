@@ -52,9 +52,12 @@ func TestSwaggerDocumentDescribesTheAPI(t *testing.T) {
 			}
 		}
 	}
-	// Everything except the health check, the login endpoints and the panel's own
-	// files needs a session, so the reference must say so on every operation.
-	public := map[string]bool{"/health": true, "/login": true, "/web/login": true, "/": true}
+	// Everything except the public paths (the server's own list, sessions.go) and the panel's
+	// page needs a session, so the reference must say so on every operation.
+	public := map[string]bool{"/": true}
+	for path := range publicPaths {
+		public[path] = true
+	}
 	for path, ops := range spec.Paths {
 		if public[path] {
 			continue

@@ -12,6 +12,16 @@
   var DICT = {
     es: {
     "Audit log": "Registro de auditoría",
+    "Could not change the domain": "No se pudo cambiar el dominio",
+    "Disable": "Desactivar",
+    "Disable domain": "Desactivar dominio",
+    "Disable the domain?": "¿Desactivar el dominio?",
+    "disabled": "desactivado",
+    "Domain disabled": "Dominio desactivado",
+    "Domain enabled": "Dominio activado",
+    "Enable": "Activar",
+    "Enable domain": "Activar dominio",
+    "Its client is disconnected and its visitors get 503 until it is enabled again. Settings and history are kept.": "Su cliente se desconecta y sus visitantes reciben 503 hasta que vuelvas a activarlo. Se conservan la configuración y el historial.",
     "Who changed what, and when. Changes and login attempts. Values of keys, secrets and passwords are never recorded.": "Quién cambió qué, y cuándo. Cambios e intentos de entrada. Nunca se registran valores de claves, secretos ni contraseñas.",
     "Search by user, action or object…": "Buscar por usuario, acción u objeto…",
     "Nothing has been recorded yet.": "Todavía no hay nada registrado.",

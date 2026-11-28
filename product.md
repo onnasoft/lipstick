@@ -196,10 +196,10 @@ The current dashboard provides monitoring functionality but should evolve into a
 
 ### Required improvements
 
-- [ ] Domain creation.
-- [ ] Domain deletion.
-- [ ] Domain configuration.
-- [ ] Domain activation and deactivation.
+- [x] Domain creation. (name validated; a key is generated and returned once when omitted; a given key needs at least 32 characters; a repeated name answers 409; see revision.md, item 81)
+- [x] Domain deletion. (also deletes the domain's visitor users and tokens, and disconnects its client; traffic history is kept)
+- [x] Domain configuration. (PATCH changes the key, connections, passthrough, networks, restriction, bandwidth and quota)
+- [x] Domain activation and deactivation. (`POST /domains/{name}/disable` and `/enable`, audited; the client is refused and visitors get 503 while disabled; the panel's domain page has the button, not yet checked in a browser)
 - [ ] Client credential generation.
 - [ ] Client credential rotation.
 - [ ] Client disconnection.

@@ -733,6 +733,14 @@ Lipstick exposes local ports to the internet through a reverse tunnel. The main 
 - **Verified:** readiness tests (ready, draining, a down dependency without its error text, public path); the full suite with `-race`; live, `/ready` answers 200 and `lipstick_ready` is 1 on the production server.
 - **Not verified:** the rules were not checked with promtool. Building it failed: the Go module path for the Prometheus release does not resolve here. The YAML parses; the PromQL is unchecked. Run `promtool check rules examples/prometheus/lipstick-alerts.yml` before relying on them.
 
+### 81. Domain creation, deletion, configuration, activation (feature)
+- **Activation:** `POST /domains/{name}/disable` and `/enable`, audited. A disabled domain: its client is disconnected and refused at the upgrade and the mux handshake (403, counted as `domain_disabled`), and its visitors get 503 (counted in `lipstick_visitor_refusals_total{reason="domain_disabled"}`). The flag is `disabled` in the domain view and a column in the database (default false, so existing domains stay on).
+- **Creation:** names are checked as lowercase host names; a missing key is generated (32 random bytes, hex) and returned once; a given key needs at least 32 characters, now also enforced on PATCH; a repeated name answers 409. The Swagger spec was regenerated.
+- **Deletion:** a domain's visitor users and tokens are deleted in the same transaction as the domain, so their secrets do not survive. Traffic history is kept on purpose.
+- **Configuration:** PATCH already covered the fields; nothing changed there except the key length.
+- **Panel:** the domain page has a disable and enable button with a confirmation. Its strings are translated and the translation test passes. The button was not clicked in a browser.
+- **Verified:** tests for the store (deletion removes only the domain's secrets; disabling), the admin API (validation, generated key, duplicate, audited disable and enable), the manager (a disabled domain gets 503 and its client is refused, then serves again after enabling); the full suite with `-race`. Live, on a throwaway database: a domain created without a key, a client connected with the returned key, the disable gave 503 and 403, the enable gave 200 again, and the delete removed the visitor user and returned 404. Production was restarted; the migration added the `disabled` column with the default false.
+
 ## Recommended order
 
 1. Items 1, 2, 3, and 4: authentication, unpredictable tickets, TLS verification, and admin API hardening.
