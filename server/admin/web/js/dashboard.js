@@ -3,14 +3,15 @@
   "use strict";
   var LP = window.LP;
   var h = LP.h;
+  var t = LP.t;
 
   // Shared badges, used by several screens.
   LP.domainStatus = function (stats) {
-    if (!stats) { return LP.badge("sin cliente", ""); }
-    if (stats.status === "active") { return LP.badge("activo", "ok"); }
-    if (stats.status === "idle") { return LP.badge("inactivo", "warn"); }
-    if (stats.status === "unresponsive") { return LP.badge("sin respuesta", "danger"); }
-    return LP.badge(stats.status || "desconocido", "");
+    if (!stats) { return LP.badge(t("no client"), ""); }
+    if (stats.status === "active") { return LP.badge(t("active"), "ok"); }
+    if (stats.status === "idle") { return LP.badge(t("idle"), "warn"); }
+    if (stats.status === "unresponsive") { return LP.badge(t("unresponsive"), "danger"); }
+    return LP.badge(stats.status || t("unknown"), "");
   };
 
   LP.httpBadge = function (code) {
@@ -60,9 +61,9 @@
         return LP.api("GET", "/domains/" + encodeURIComponent(d.name) + "/traffic?from=" + today + "&to=" + today);
       })).then(function (traffic) {
         var perDomain = {};
-        traffic.forEach(function (t, i) {
+        traffic.forEach(function (tr, i) {
           var name = domains.data[i].name;
-          perDomain[name] = t.ok ? (t.data.consumptions || []).reduce(function (s, c) { return s + (c.BytesUsed || 0); }, 0) : 0;
+          perDomain[name] = tr.ok ? (tr.data.consumptions || []).reduce(function (s, c) { return s + (c.BytesUsed || 0); }, 0) : 0;
         });
         return {
           domains: domains.data,
@@ -90,21 +91,21 @@
 
       root.appendChild(h("div", { class: "page-head" }, [
         h("div", null, [
-          h("h1", { text: "Panel" }),
-          h("p", { text: "Estado de Lipstick en este momento." })
+          h("h1", { text: t("Dashboard") }),
+          h("p", { text: t("The state of Lipstick right now.") })
         ]),
         d.healthOk
-          ? LP.badge("Servidor operativo · " + d.latency + " ms", "ok")
-          : LP.badge("Servidor con problemas", "danger")
+          ? LP.badge(t("Server healthy · {ms} ms", { ms: d.latency }), "ok")
+          : LP.badge(t("Server has problems"), "danger")
       ]));
 
       root.appendChild(h("div", { class: "grid-metrics" }, [
-        metric("Dominios publicados", LP.fmt.num(published), online + " con cliente activo"),
-        metric("Clientes conectados", LP.fmt.num(clients), "en vivo"),
-        metric("Sesiones activas", LP.fmt.num(sessions), "conexiones de túnel abiertas"),
-        metric("Visitantes pendientes", LP.fmt.num(pending), "esperando a un cliente"),
-        metric("Tráfico de hoy", LP.fmt.bytes(todayTotal), "según el registro diario"),
-        metric("Tráfico desde el arranque", LP.fmt.bytes(total), "suma de los servidores del cluster")
+        metric(t("Published domains"), LP.fmt.num(published), t("{count} with an active client", { count: online })),
+        metric(t("Connected clients"), LP.fmt.num(clients), t("live")),
+        metric(t("Active sessions"), LP.fmt.num(sessions), t("open tunnel connections")),
+        metric(t("Waiting visitors"), LP.fmt.num(pending), t("waiting for a client")),
+        metric(t("Traffic today"), LP.fmt.bytes(todayTotal), t("from the daily record")),
+        metric(t("Traffic since start"), LP.fmt.bytes(total), t("sum of the cluster's servers"))
       ]));
 
       var perDomainBars = d.domains.map(function (dom) {
@@ -113,14 +114,14 @@
 
       var recent = LP.table({
         pageSize: 8,
-        emptyText: "Todavía no hay peticiones registradas.",
+        emptyText: t("No requests recorded yet."),
         columns: [
-          { label: "Hora", render: function (r) { return LP.fmt.time(r.time); } },
-          { label: "Dominio", key: "domain" },
-          { label: "Método", key: "method" },
-          { label: "Ruta", render: function (r) { return h("code", { class: "truncate block max-w-[260px]", text: r.path }); } },
-          { label: "Estado", render: function (r) { return LP.httpBadge(r.status); } },
-          { label: "Duración", num: true, render: function (r) { return LP.fmt.duration(r.durationMs); } }
+          { label: t("Time"), render: function (r) { return LP.fmt.time(r.time); } },
+          { label: t("Domain"), key: "domain" },
+          { label: t("Method"), key: "method" },
+          { label: t("Path"), render: function (r) { return h("code", { class: "truncate block max-w-[260px]", text: r.path }); } },
+          { label: t("Status"), render: function (r) { return LP.httpBadge(r.status); } },
+          { label: t("Duration"), num: true, render: function (r) { return LP.fmt.duration(r.durationMs); } }
         ],
         rows: d.requests
       });
@@ -128,16 +129,16 @@
       root.appendChild(h("div", { class: "grid-2" }, [
         h("div", null, [
           h("div", { class: "card" }, [
-            h("div", { class: "card-head" }, [h("h2", { text: "Tráfico de hoy por dominio" })]),
+            h("div", { class: "card-head" }, [h("h2", { text: t("Traffic today by domain") })]),
             perDomainBars.length
               ? LP.bars(perDomainBars)
-              : h("p", { class: "muted", text: "Ningún dominio ha transferido datos hoy." })
+              : h("p", { class: "muted", text: t("No domain has transferred data today.") })
           ])
         ]),
         h("div", { class: "card" }, [
-          h("div", { class: "card-head" }, [h("h2", { text: "Estado de los dominios" })]),
+          h("div", { class: "card-head" }, [h("h2", { text: t("Domain status") })]),
           d.domains.length === 0
-            ? h("p", { class: "muted", text: "Todavía no hay dominios. Créalo desde la sección Dominios." })
+            ? h("p", { class: "muted", text: t("No domains yet. Create one from the Domains section.") })
             : h("div", { class: "grid gap-2" }, d.domains.slice(0, 8).map(function (dom) {
                 return h("a", { class: "flex items-center justify-between gap-3 rounded-lg px-2 py-2 hover:bg-surface-2 hover:no-underline", href: "#/domains/" + encodeURIComponent(dom.name) }, [
                   h("span", { class: "truncate font-medium text-ink", text: dom.name }),
@@ -148,12 +149,12 @@
       ]));
 
       root.appendChild(h("div", { class: "section" }, [
-        h("h2", { text: "Actividad reciente" }),
-        h("p", { class: "muted mb-3 text-[13px]", text: "Últimas peticiones HTTP terminadas. Sin cabeceras ni cuerpos." }),
+        h("h2", { text: t("Recent activity") }),
+        h("p", { class: "muted mb-3 text-[13px]", text: t("Latest finished HTTP requests. No headers or bodies.") }),
         recent
       ]));
     });
   }
 
-  LP.screens.dashboard = { title: "Panel", render: render };
+  LP.screens.dashboard = { title: "Dashboard", render: render };
 })();

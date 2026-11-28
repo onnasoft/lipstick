@@ -165,7 +165,7 @@ func TestScriptsNeverParseDataAsHTML(t *testing.T) {
 // Every script and stylesheet a page names must be in the embedded tree. A typo here
 // would leave the screen blank with no visible error.
 func TestEveryAssetAPageNamesExists(t *testing.T) {
-	re := regexp.MustCompile(`/admin/(js|css)/([A-Za-z0-9._-]+)`)
+	re := regexp.MustCompile(`/admin/(js|css|img)/([A-Za-z0-9._-]+)`)
 	for _, page := range []string{"index.html", "login.html"} {
 		for _, m := range re.FindAllStringSubmatch(string(pageFile(page)), -1) {
 			if _, err := webFiles.ReadFile("web/" + m[1] + "/" + m[2]); err != nil {
@@ -188,5 +188,59 @@ func TestStaticRouteServesOnlyEmbeddedFiles(t *testing.T) {
 		if rec := request(a, http.MethodGet, bad, "", nil); rec.Code == http.StatusOK {
 			t.Errorf("%s served with 200", bad)
 		}
+	}
+}
+
+// Every string the panel shows must have a Spanish translation, or it would show in
+// English inside the Spanish panel. Keys are the English texts passed to t().
+func TestEveryTranslatableStringHasASpanishText(t *testing.T) {
+	entries, err := webFiles.ReadDir("web/js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	call := regexp.MustCompile(`\bt\(\s*"((?:[^"\\]|\\.)*)"`)
+	marked := regexp.MustCompile(`data-i18n(?:-aria)?="([^"]+)"`)
+	used := map[string]bool{}
+	for _, e := range entries {
+		for _, m := range call.FindAllStringSubmatch(string(pageFile("js/"+e.Name())), -1) {
+			used[m[1]] = true
+		}
+	}
+	for _, page := range []string{"index.html", "login.html"} {
+		for _, m := range marked.FindAllStringSubmatch(string(pageFile(page)), -1) {
+			used[m[1]] = true
+		}
+	}
+	// The dictionary is JSON inside i18n.js: each entry is "English": "Spanish".
+	dictSrc := string(pageFile("js/i18n.js"))
+	start := strings.Index(dictSrc, "es: {")
+	end := strings.Index(dictSrc[start:], "\n    }")
+	if start < 0 || end < 0 {
+		t.Fatal("no Spanish dictionary in i18n.js")
+	}
+	entry := regexp.MustCompile(`"((?:[^"\\]|\\.)*)":\s*"`)
+	translated := map[string]bool{}
+	for _, m := range entry.FindAllStringSubmatch(dictSrc[start:start+end], -1) {
+		translated[m[1]] = true
+	}
+	// The navigation group names are passed to t() from a table, not as literals.
+	used["Operations"], used["Account"] = true, true
+	for key := range used {
+		k := strings.ReplaceAll(key, `\"`, `"`)
+		if !translated[key] && !translated[k] {
+			t.Errorf("no Spanish text for %q", key)
+		}
+	}
+	if len(used) < 100 {
+		t.Fatalf("only %d strings found; the scan is broken", len(used))
+	}
+}
+
+// The logo is served as an image to everyone on the login page as well.
+func TestLogoIsServedAsPNGWithoutSession(t *testing.T) {
+	a := newTestAdmin(testKey)
+	rec := request(a, http.MethodGet, "/admin/img/logo.png", "", nil)
+	if rec.Code != http.StatusOK || rec.Header().Get("Content-Type") != "image/png" || rec.Body.Len() == 0 {
+		t.Fatalf("logo: %d %q", rec.Code, rec.Header().Get("Content-Type"))
 	}
 }

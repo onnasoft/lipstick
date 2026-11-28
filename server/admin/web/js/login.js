@@ -3,6 +3,8 @@
 // logins: a page on another site cannot add it.
 (function () {
   "use strict";
+  var LP = window.LP;
+  var t = LP.t;
   var form = document.getElementById("login-form");
   var message = document.getElementById("login-error");
   var submit = document.getElementById("login-submit");
@@ -11,7 +13,7 @@
     event.preventDefault();
     message.textContent = "";
     submit.disabled = true;
-    submit.textContent = "Entrando…";
+    submit.textContent = t("Signing in…");
     var body = JSON.stringify({ username: form.username.value, password: form.password.value });
     form.password.value = "";
     fetch("/web/login", {
@@ -23,18 +25,18 @@
       if (response.ok) { window.location.reload(); return; }
       return response.json().catch(function () { return {}; }).then(function (data) {
         message.textContent = response.status === 429
-          ? "Demasiados intentos. Espera unos minutos."
-          : (data.error || "No se pudo entrar.");
+          ? t("Too many attempts. Wait a few minutes.")
+          : (data.error || t("Could not sign in."));
         reset();
       });
     }, function () {
-      message.textContent = "No hay conexión con el servidor.";
+      message.textContent = t("No connection to the server.");
       reset();
     });
   });
 
   function reset() {
     submit.disabled = false;
-    submit.textContent = "Entrar";
+    submit.textContent = t("Sign in");
   }
 })();

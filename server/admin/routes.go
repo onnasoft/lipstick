@@ -35,6 +35,7 @@ func configureRouter(admin *Admin) {
 	r.GET("/health", router.health)
 	r.GET("/admin/js/*file", serveStatic("js"))
 	r.GET("/admin/css/*file", serveStatic("css"))
+	r.GET("/admin/img/*file", serveStatic("img"))
 	r.POST("/web/login", router.webLogin)
 	r.GET("/account", router.whoAmI)
 	r.POST("/account/password", router.changeOwnPassword)

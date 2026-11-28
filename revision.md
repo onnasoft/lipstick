@@ -618,6 +618,15 @@ Lipstick exposes local ports to the internet through a reverse tunnel. The main 
 - **Known limit:** a domain change disconnects the clients only of the server that received the change; clients on other servers reconnect on their own. A NATS broadcast of that event is the next step.
 - **Known limit:** `bytesSinceStart` is the sum of each server's own counter, so it drops when one server restarts.
 
+### 63. Light theme only, account menu, logo and language (change)
+- **Theme:** the dark theme is removed. The panel has one light theme; the colors remain CSS variables, so a later theme needs only new values.
+- **Logo:** `server/admin/web/img/logo.png`, resized to 256 px (38 KB), served publicly as an image. The sidebar logo links to the dashboard.
+- **Account menu:** the name and role at the top right open a menu with the account, the language choice and sign out. It closes with Escape or a click outside, and it is keyboard operable.
+- **Languages:** English (default) and Spanish. The code is written in English and passes every text through `t()`. The Spanish table is in `js/i18n.js`, keyed by the English text. A test fails when a string used by the panel has no Spanish text, and a deliberately added untranslated string was confirmed to fail it. The choice is kept in this browser.
+- **Not translated:** error messages that the server sends are shown as the server wrote them; most are in English. Translating them would need a message code in each response.
+- **Verified:** the admin package tests pass; the translation test; the logo served as `image/png` without a session.
+- **Not verified in a browser here:** the menu and the language switch were not clicked through.
+
 ## Recommended order
 
 1. Items 1, 2, 3, and 4: authentication, unpredictable tickets, TLS verification, and admin API hardening.

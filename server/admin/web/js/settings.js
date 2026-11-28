@@ -4,20 +4,17 @@
   "use strict";
   var LP = window.LP;
   var h = LP.h;
+  var t = LP.t;
 
-  function themeChoice() {
-    var current = document.documentElement.getAttribute("data-theme") || "light";
-    var options = [["light", "Claro"], ["dark", "Oscuro"]];
-    var group = h("div", { class: "flex gap-2", role: "radiogroup", "aria-label": "Tema" });
-    options.forEach(function (o) {
-      var active = o[0] === current;
-      var btn = h("button", { class: "btn " + (active ? "btn-primary" : ""), type: "button", "aria-pressed": active ? "true" : "false", text: o[1] });
-      btn.addEventListener("click", function () {
-        document.documentElement.setAttribute("data-theme", o[0]);
-        try { window.localStorage.setItem("lipstick-theme", o[0]); } catch (e) { /* not kept */ }
-        LP.screens.settings.render(document.getElementById("view"));
-      });
-      group.appendChild(btn);
+  function languageChoice() {
+    var group = h("div", { class: "flex gap-2", role: "radiogroup", "aria-label": t("Language") });
+    LP.languages.forEach(function (l) {
+      var active = l[0] === LP.lang;
+      group.appendChild(h("button", {
+        class: "btn " + (active ? "btn-primary" : ""), type: "button",
+        "aria-pressed": active ? "true" : "false", text: l[1],
+        on: { click: function () { LP.setLang(l[0]); } }
+      }));
     });
     return group;
   }
@@ -25,44 +22,44 @@
   function render(root) {
     LP.clear(root);
     root.appendChild(h("div", { class: "page-head" }, [
-      h("div", null, [h("h1", { text: "Configuración" }), h("p", { text: "Lo que puedes cambiar desde el panel, y lo que vive en el servidor." })])
+      h("div", null, [h("h1", { text: t("Settings") }), h("p", { text: t("What you can change from the panel, and what lives on the server.") })])
     ]));
 
     root.appendChild(h("div", { class: "grid-2" }, [
       h("div", { class: "card" }, [
-        h("div", { class: "card-head" }, [h("h2", { text: "Apariencia" })]),
-        h("p", { class: "muted mb-3 text-[13px]", text: "Tema de la interfaz. Se guarda solo en este navegador." }),
-        themeChoice()
+        h("div", { class: "card-head" }, [h("h2", { text: t("Language") })]),
+        h("p", { class: "muted mb-3 text-[13px]", text: t("The language of the panel. It is kept in this browser only.") }),
+        languageChoice()
       ]),
       h("div", { class: "card" }, [
-        h("div", { class: "card-head" }, [h("h2", { text: "Se administra desde el panel" })]),
+        h("div", { class: "card-head" }, [h("h2", { text: t("Managed from the panel") })]),
         h("ul", { class: "grid gap-2 text-[13.5px]" }, [
-          h("li", null, [h("a", { href: "#/domains", text: "Dominios" }), h("span", { class: "muted", text: " · clave, passthrough, redes permitidas y restricción de visitantes" })]),
-          h("li", null, [h("a", { href: "#/visitors", text: "Usuarios visitantes" }), h("span", { class: "muted", text: " · crear, rotar el secreto y borrar" })]),
-          h("li", null, [h("a", { href: "#/account", text: "Mi cuenta" }), h("span", { class: "muted", text: " · tu contraseña" })]),
+          h("li", null, [h("a", { href: "#/domains", text: t("Domains") }), h("span", { class: "muted", text: " · " + t("key, passthrough, allowed networks and visitor restriction") })]),
+          h("li", null, [h("a", { href: "#/visitors", text: t("Visitor users") }), h("span", { class: "muted", text: " · " + t("create, rotate the secret and delete") })]),
+          h("li", null, [h("a", { href: "#/account", text: t("My account") }), h("span", { class: "muted", text: " · " + t("your password") })]),
           LP.me && LP.me.role === "superuser"
-            ? h("li", null, [h("a", { href: "#/accounts", text: "Cuentas de administrador" }), h("span", { class: "muted", text: " · roles, bloqueos y contraseñas" })])
+            ? h("li", null, [h("a", { href: "#/accounts", text: t("Admin accounts") }), h("span", { class: "muted", text: " · " + t("roles, blocks and passwords") })])
             : null
         ])
       ])
     ]));
 
     root.appendChild(h("div", { class: "card mt-4" }, [
-      h("div", { class: "card-head" }, [h("h2", { text: "Requiere el archivo de configuración" })]),
-      h("p", { class: "muted mb-3 text-[13px]", text: "Estos valores se leen al arrancar el servidor. Cámbialos en config.yml y reinicia." }),
+      h("div", { class: "card-head" }, [h("h2", { text: t("Set in the configuration file") })]),
+      h("p", { class: "muted mb-3 text-[13px]", text: t("These values are read when the server starts. Change them in config.yml and restart.") }),
       h("dl", { class: "kv" }, [
-        h("dt", { text: "Puertos y direcciones" }), h("dd", { text: "proxy, manager, admin y los puertos de intranet" }),
-        h("dt", { text: "TLS" }), h("dd", { text: "certificado y clave del servidor" }),
-        h("dt", { text: "Base de datos" }), h("dd", { text: "conexión a PostgreSQL" }),
-        h("dt", { text: "NATS" }), h("dd", { text: "bus del cluster, si lo usas" })
+        h("dt", { text: t("Ports and addresses") }), h("dd", { text: t("proxy, manager, admin and the intranet ports") }),
+        h("dt", { text: "TLS" }), h("dd", { text: t("the server's certificate and key") }),
+        h("dt", { text: t("Database") }), h("dd", { text: t("the PostgreSQL connection") }),
+        h("dt", { text: "NATS" }), h("dd", { text: t("the cluster bus, if you use one") })
       ])
     ]));
 
     root.appendChild(h("div", { class: "card mt-4" }, [
-      h("div", { class: "card-head" }, [h("h2", { text: "Pendiente en el servidor" })]),
-      h("p", { class: "muted text-[13px]", text: "El panel todavía no puede: cerrar todas tus sesiones a la vez, mostrar la versión y el tiempo activo del servidor, ni consultar un registro de cambios de cuentas. Están listados en revision.md, punto 61." })
+      h("div", { class: "card-head" }, [h("h2", { text: t("Pending on the server") })]),
+      h("p", { class: "muted text-[13px]", text: t("The panel cannot yet: close all your sessions at once, show the server's version and uptime, or read a log of account changes. They are listed in revision.md, item 61.") })
     ]));
   }
 
-  LP.screens.settings = { title: "Configuración", render: render };
+  LP.screens.settings = { title: "Settings", render: render };
 })();

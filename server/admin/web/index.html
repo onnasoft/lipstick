@@ -1,40 +1,55 @@
 <!DOCTYPE html>
-<html lang="es" data-theme="light">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
-<title>Lipstick · Administración</title>
+<title>Lipstick · Admin</title>
 <link rel="stylesheet" href="/admin/css/app.css">
-<script src="/admin/js/theme.js"></script>
 </head>
 <body>
 <div class="app">
-  <aside class="sidebar" aria-label="Navegación principal">
-    <div class="brand">
-      <div class="brand-mark" aria-hidden="true">L</div>
-      <div class="brand-name">Lipstick</div>
-    </div>
-    <nav id="nav" aria-label="Secciones"></nav>
-    <div class="sidebar-foot">Panel de administración</div>
+  <aside class="sidebar" data-i18n-aria="Main navigation">
+    <a class="brand" id="brand" href="#/dashboard" data-i18n-aria="Lipstick, go to the dashboard">
+      <img class="brand-logo" src="/admin/img/logo.png" alt="" width="28" height="28">
+      <span class="brand-name">Lipstick</span>
+    </a>
+    <nav id="nav" data-i18n-aria="Sections"></nav>
+    <div class="sidebar-foot" data-i18n="Admin panel">Admin panel</div>
   </aside>
   <div class="main">
     <header class="topbar">
       <div class="crumb" id="crumb"></div>
       <div class="userbox">
-        <button class="btn btn-ghost icon-btn" id="theme-toggle" type="button" aria-label="Cambiar tema claro u oscuro">Tema</button>
-        <div class="avatar" id="avatar" aria-hidden="true">·</div>
-        <div>
-          <div class="cell-strong" id="me-name">…</div>
-          <div class="hint" id="me-role"></div>
+        <div class="menu-anchor">
+          <button class="user-button" id="user-button" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="user-menu">
+            <span class="avatar" id="avatar" aria-hidden="true">·</span>
+            <span class="user-text">
+              <span class="cell-strong" id="me-name">…</span>
+              <span class="hint" id="me-role"></span>
+            </span>
+            <span class="chevron" aria-hidden="true">▾</span>
+          </button>
+          <div class="menu" id="user-menu" role="menu" hidden>
+            <div class="menu-head">
+              <div class="cell-strong" id="menu-name"></div>
+              <div class="hint" id="menu-role"></div>
+            </div>
+            <button class="menu-item" type="button" role="menuitem" data-action="account" data-i18n="My account">My account</button>
+            <div class="menu-sep" role="separator"></div>
+            <div class="menu-group-title" data-i18n="Language">Language</div>
+            <div id="menu-languages" role="group" data-i18n-aria="Language"></div>
+            <div class="menu-sep" role="separator"></div>
+            <button class="menu-item menu-item-danger" id="logout" type="button" role="menuitem" data-i18n="Sign out">Sign out</button>
+          </div>
         </div>
-        <button class="btn btn-sm" id="logout" type="button">Cerrar sesión</button>
       </div>
     </header>
     <main class="view" id="view" tabindex="-1"></main>
   </div>
 </div>
 <div id="toasts" aria-live="polite"></div>
+<script src="/admin/js/i18n.js"></script>
 <script src="/admin/js/core.js"></script>
 <script src="/admin/js/dashboard.js"></script>
 <script src="/admin/js/domains.js"></script>

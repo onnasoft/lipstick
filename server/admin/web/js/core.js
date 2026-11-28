@@ -2,7 +2,8 @@
 // formatting. Screens are registered on LP.screens by the other files.
 (function () {
   "use strict";
-  var LP = (window.LP = {});
+  var LP = window.LP;
+  var t = LP.t;
   LP.screens = {};
   LP.me = null;
 
@@ -43,21 +44,22 @@
     return fetch(path, init).then(function (response) {
       if (response.status === 401 && path !== "/account") {
         window.location.reload();
-        return { ok: false, status: 401, data: { error: "La sesión terminó." } };
+        return { ok: false, status: 401, data: { error: t("Your session ended.") } };
       }
       return response.json().catch(function () { return {}; }).then(function (data) {
         return { ok: response.ok, status: response.status, data: data };
       });
     }, function () {
-      return { ok: false, status: 0, data: { error: "No hay conexión con el servidor." } };
+      return { ok: false, status: 0, data: { error: t("No connection to the server.") } };
     });
   };
 
-  // errorText turns a failed answer into a sentence for the user.
+  // errorText turns a failed answer into a sentence for the user. Messages from the
+  // server are shown as they are; statuses the server does not explain get a sentence here.
   LP.errorText = function (res, fallback) {
-    if (res && res.status === 403) { return "Tu rol no permite esta acción."; }
-    if (res && res.status === 429) { return "Demasiados intentos. Espera un momento."; }
-    return (res && res.data && res.data.error) || fallback || "La operación no se completó.";
+    if (res && res.status === 403) { return t("Your role does not allow this action."); }
+    if (res && res.status === 429) { return t("Too many attempts. Wait a moment."); }
+    return (res && res.data && res.data.error) || fallback || t("The operation did not complete.");
   };
 
   LP.fmt = {
@@ -68,14 +70,14 @@
       while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
       return (i === 0 ? n : n.toFixed(n < 10 ? 2 : 1)) + " " + units[i];
     },
-    num: function (n) { return (Number(n) || 0).toLocaleString("es"); },
+    num: function (n) { return (Number(n) || 0).toLocaleString(LP.locale()); },
     date: function (iso) {
       var d = new Date(iso);
-      return isNaN(d) ? "—" : d.toLocaleString("es", { dateStyle: "medium", timeStyle: "short" });
+      return isNaN(d) ? "—" : d.toLocaleString(LP.locale(), { dateStyle: "medium", timeStyle: "short" });
     },
     time: function (iso) {
       var d = new Date(iso);
-      return isNaN(d) ? "—" : d.toLocaleTimeString("es", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+      return isNaN(d) ? "—" : d.toLocaleTimeString(LP.locale(), { hour: "2-digit", minute: "2-digit", second: "2-digit" });
     },
     duration: function (ms) {
       ms = Number(ms) || 0;
@@ -129,14 +131,16 @@
       var typed = null, ok = null;
       var body = [h("p", { text: opts.text })];
       if (opts.typeToConfirm) {
-        typed = h("input", { class: "input", autocomplete: "off", "aria-label": "Confirmación" });
-        ok = h("button", { class: "btn btn-danger", type: "button", disabled: true, text: opts.confirmLabel || "Confirmar" });
+        typed = h("input", { class: "input", autocomplete: "off", "aria-label": t("Confirmation") });
+        ok = h("button", { class: "btn btn-danger", type: "button", disabled: true, text: opts.confirmLabel || t("Confirm") });
         typed.addEventListener("input", function () { ok.disabled = typed.value !== opts.typeToConfirm; });
-        body.push(h("label", { class: "label" }, [h("span", { text: "Escribe " + opts.typeToConfirm + " para confirmar" }), typed]));
+        body.push(h("label", { class: "label" }, [
+          h("span", { text: t("Type {word} to confirm", { word: opts.typeToConfirm }) }), typed
+        ]));
       } else {
-        ok = h("button", { class: "btn " + (opts.danger ? "btn-danger" : "btn-primary"), type: "button", text: opts.confirmLabel || "Confirmar" });
+        ok = h("button", { class: "btn " + (opts.danger ? "btn-danger" : "btn-primary"), type: "button", text: opts.confirmLabel || t("Confirm") });
       }
-      var cancel = h("button", { class: "btn", type: "button", text: "Cancelar" });
+      var cancel = h("button", { class: "btn", type: "button", text: t("Cancel") });
       var dialog = LP.dialog({
         title: opts.title,
         body: body,
@@ -157,15 +161,15 @@
     ]);
   };
   LP.loading = function () {
-    return h("div", { class: "card grid gap-3", role: "status", "aria-label": "Cargando" }, [
+    return h("div", { class: "card grid gap-3", role: "status", "aria-label": t("Loading") }, [
       h("div", { class: "skeleton w-1/3" }), h("div", { class: "skeleton" }), h("div", { class: "skeleton w-5/6" })
     ]);
   };
   LP.retryButton = function (onRetry) {
-    return h("button", { class: "btn", type: "button", text: "Reintentar", on: { click: onRetry } });
+    return h("button", { class: "btn", type: "button", text: t("Retry"), on: { click: onRetry } });
   };
 
-  // table builds a sortable-by-order table with search and pagination on the client.
+  // table builds a table with search and pagination on the client.
   // columns: [{label, render(row) -> node|string, num}]. text(row) feeds the search box.
   LP.table = function (opts) {
     var pageSize = opts.pageSize || 15;
@@ -173,8 +177,8 @@
     var page = 0, query = "";
     var tbody = h("tbody");
     var info = h("span");
-    var prev = h("button", { class: "btn btn-sm", type: "button", text: "Anterior" });
-    var next = h("button", { class: "btn btn-sm", type: "button", text: "Siguiente" });
+    var prev = h("button", { class: "btn btn-sm", type: "button", text: t("Previous") });
+    var next = h("button", { class: "btn btn-sm", type: "button", text: t("Next") });
     var filtered = [];
 
     function draw() {
@@ -185,7 +189,9 @@
       page = Math.min(page, pages - 1);
       LP.clear(tbody);
       if (filtered.length === 0) {
-        var emptyText = query ? "Ningún resultado para “" + query + "”." : (opts.emptyText || "No hay nada que mostrar todavía.");
+        var emptyText = query
+          ? t("No results for “{query}”.", { query: query })
+          : (opts.emptyText || t("Nothing to show yet."));
         tbody.appendChild(h("tr", null, [h("td", { class: "td", colspan: opts.columns.length, text: emptyText })]));
       }
       filtered.slice(page * pageSize, page * pageSize + pageSize).forEach(function (row) {
@@ -196,7 +202,9 @@
           ]);
         })));
       });
-      info.textContent = filtered.length + (filtered.length === 1 ? " resultado" : " resultados") + " · página " + (page + 1) + " de " + pages;
+      info.textContent = filtered.length === 1
+        ? t("1 result · page {page} of {pages}", { page: page + 1, pages: pages })
+        : t("{count} results · page {page} of {pages}", { count: filtered.length, page: page + 1, pages: pages });
       prev.disabled = page === 0;
       next.disabled = page >= pages - 1;
     }
@@ -207,8 +215,8 @@
     var toolbar = null;
     if (opts.text) {
       var search = h("input", {
-        class: "input search", type: "search", placeholder: opts.searchPlaceholder || "Buscar…",
-        "aria-label": "Buscar", autocomplete: "off"
+        class: "input search", type: "search", placeholder: opts.searchPlaceholder || t("Search…"),
+        "aria-label": t("Search"), autocomplete: "off"
       });
       search.addEventListener("input", function () { query = search.value.trim().toLowerCase(); page = 0; draw(); });
       toolbar = h("div", { class: "toolbar" }, [search, opts.toolbar || null]);
@@ -251,7 +259,7 @@
     return h("span", { class: "badge" + (kind ? " badge-" + kind : ""), text: text });
   };
 
-  // route sets the page title and the breadcrumb.
+  // setCrumb sets the page title and the breadcrumb.
   LP.setCrumb = function (section, title) {
     var crumb = document.getElementById("crumb");
     LP.clear(crumb);
@@ -260,7 +268,7 @@
     document.title = title + " · Lipstick";
   };
 
-  // screenBody runs a screen's load function and shows loading, error or the view.
+  // load runs a screen's data loader and shows loading, error or the rendered view.
   LP.load = function (root, loader, render) {
     LP.clear(root);
     root.appendChild(LP.loading());
@@ -269,7 +277,7 @@
       render(data);
     }, function () {
       LP.clear(root);
-      root.appendChild(LP.state("No se pudo cargar esta pantalla.", "Revisa tu conexión e inténtalo de nuevo.",
+      root.appendChild(LP.state(t("This screen could not be loaded."), t("Check your connection and try again."),
         LP.retryButton(function () { LP.load(root, loader, render); })));
     });
   };

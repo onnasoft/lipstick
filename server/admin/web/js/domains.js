@@ -3,6 +3,7 @@
   "use strict";
   var LP = window.LP;
   var h = LP.h;
+  var t = LP.t;
 
   // randomKey returns a 256-bit key, base64url, from the browser's secure generator.
   LP.randomKey = function () {
@@ -21,18 +22,23 @@
   // keyBox shows a key once, with a copy button. Nothing keeps it afterwards.
   LP.keyBox = function (label, key) {
     var code = h("code", { text: key });
-    var copy = h("button", { class: "btn btn-sm", type: "button", text: "Copiar" });
+    var copy = h("button", { class: "btn btn-sm", type: "button", text: t("Copy") });
     copy.addEventListener("click", function () {
       if (window.navigator.clipboard) {
-        window.navigator.clipboard.writeText(key).then(function () { copy.textContent = "Copiado"; });
+        window.navigator.clipboard.writeText(key).then(function () { copy.textContent = t("Copied"); });
       }
     });
     return h("div", { class: "secret-box", role: "status" }, [
       h("strong", { text: label }),
-      h("span", { class: "hint", text: "Cópiala ahora. No se volverá a mostrar." }),
+      h("span", { class: "hint", text: t("Copy it now. It will not be shown again.") }),
       h("div", { class: "secret-value" }, [code, copy])
     ]);
   };
+
+  function closeDialog() {
+    var dlg = document.querySelector("dialog.modal");
+    if (dlg) { dlg.close(); }
+  }
 
   function domainStatsIndex(stats) {
     var index = {};
@@ -42,34 +48,33 @@
 
   function openCreate(onDone) {
     var name = h("input", { class: "input", name: "name", required: true, autocomplete: "off", placeholder: "robot.example.com" });
-    var key = h("input", { class: "input font-mono", name: "apiKey", required: true, autocomplete: "off", placeholder: "clave del cliente" });
+    var key = h("input", { class: "input font-mono", name: "apiKey", required: true, autocomplete: "off", placeholder: t("client key") });
     var generated = false;
-    var generate = h("button", { class: "btn", type: "button", text: "Generar" });
+    var generate = h("button", { class: "btn", type: "button", text: t("Generate") });
     generate.addEventListener("click", function () { key.value = LP.randomKey(); generated = true; });
     var multi = h("input", { type: "checkbox", checked: true, name: "multi" });
     var pass = h("input", { type: "checkbox", name: "passthrough" });
     var cidrs = h("textarea", { class: "input", rows: 2, name: "cidrs", placeholder: "10.0.0.0/8, 192.168.1.7" });
     var status = h("div", { class: "msg", role: "status" });
-    var fName = LP.field("Dominio", name, "Nombre completo, sin http:// ni barra final.");
-    var fKey = LP.field("Clave del cliente", key, "La usa el cliente con -k. Genera una o pega la tuya.");
+    var fName = LP.field(t("Domain"), name, t("Full name, without http:// or a trailing slash."));
 
     var form = h("form", { class: "form" }, [
       fName.node,
       h("div", { class: "grid gap-1.5" }, [
-        h("span", { class: "text-[12.5px] font-medium text-ink-2", text: "Clave del cliente" }),
+        h("span", { class: "text-[12.5px] font-medium text-ink-2", text: t("Client key") }),
         h("div", { class: "flex gap-2" }, [key, generate]),
-        h("span", { class: "hint", text: "La usa el cliente con -k. Genera una o pega la tuya." })
+        h("span", { class: "hint", text: t("The client uses it with -k. Generate one or paste your own.") })
       ]),
-      h("label", { class: "checkbox" }, [multi, h("span", { text: "Permitir varias conexiones del cliente" })]),
-      h("label", { class: "checkbox" }, [pass, h("span", { text: "Passthrough TLS (el servicio termina su propio TLS)" })]),
-      LP.field("Redes permitidas", cidrs, "Vacío = cualquiera. Lista de redes CIDR o direcciones.").node,
+      h("label", { class: "checkbox" }, [multi, h("span", { text: t("Allow several connections from the client") })]),
+      h("label", { class: "checkbox" }, [pass, h("span", { text: t("TLS passthrough (the service terminates its own TLS)") })]),
+      LP.field(t("Allowed networks"), cidrs, t("Empty = anyone. A list of CIDR networks or addresses.")).node,
       status
     ]);
 
-    var submit = h("button", { class: "btn btn-primary", type: "submit", text: "Crear dominio" });
-    var cancel = h("button", { class: "btn", type: "button", text: "Cancelar" });
+    var submit = h("button", { class: "btn btn-primary", type: "submit", text: t("Create domain") });
+    var cancel = h("button", { class: "btn", type: "button", text: t("Cancel") });
     form.appendChild(h("div", { class: "modal-foot -mx-5 -mb-4 mt-2" }, [cancel, submit]));
-    var dialog = LP.dialog({ title: "Nuevo dominio", body: [form], actions: [] });
+    var dialog = LP.dialog({ title: t("New domain"), body: [form], actions: [] });
     cancel.addEventListener("click", function () { dialog.close(); });
 
     form.addEventListener("submit", function (event) {
@@ -83,14 +88,15 @@
         allowedCidrs: LP.listValue(cidrs.value)
       }).then(function (res) {
         submit.disabled = false;
-        if (!res.ok) { status.textContent = LP.errorText(res, "No se pudo crear el dominio."); status.className = "msg msg-error"; return; }
+        if (!res.ok) { status.textContent = LP.errorText(res, t("The domain could not be created.")); status.className = "msg msg-error"; return; }
         dialog.close();
-        LP.notify("ok", "Dominio creado", name.value.trim());
+        LP.notify("ok", t("Domain created"), name.value.trim());
         if (generated) {
           LP.dialog({
-            title: "Clave del cliente",
-            body: [LP.keyBox("Clave de " + name.value.trim(), key.value), h("p", { class: "muted", text: "Configúrala en el cliente con -k, en su archivo de configuración." })],
-            actions: [h("button", { class: "btn btn-primary", type: "button", text: "Listo", on: { click: function () { document.querySelector("dialog.modal").close(); } } })]
+            title: t("Client key"),
+            body: [LP.keyBox(t("Key of {domain}", { domain: name.value.trim() }), key.value),
+              h("p", { class: "muted", text: t("Set it in the client with -k, in its configuration file.") })],
+            actions: [h("button", { class: "btn btn-primary", type: "button", text: t("Done"), on: { click: closeDialog } })]
           });
         }
         onDone();
@@ -106,27 +112,27 @@
       });
     }, function (d) {
       var index = domainStatsIndex(d.stats);
-      var create = h("button", { class: "btn btn-primary", type: "button", text: "Nuevo dominio" });
+      var create = h("button", { class: "btn btn-primary", type: "button", text: t("New domain") });
       create.addEventListener("click", function () {
         openCreate(function () { window.location.reload(); });
       });
       root.appendChild(h("div", { class: "page-head" }, [
-        h("div", null, [h("h1", { text: "Dominios" }), h("p", { text: "Dominios publicados, sus clientes y su tráfico." })]),
+        h("div", null, [h("h1", { text: t("Domains") }), h("p", { text: t("Published domains, their clients and their traffic.") })]),
         create
       ]));
       root.appendChild(LP.table({
         text: function (r) { return r.name + " " + (index[r.name] ? index[r.name].status : ""); },
-        searchPlaceholder: "Buscar dominio…",
-        emptyText: "Todavía no hay dominios. Crea el primero con «Nuevo dominio».",
+        searchPlaceholder: t("Search domain…"),
+        emptyText: t("No domains yet. Create the first one with “New domain”."),
         rows: d.domains,
         columns: [
-          { label: "Dominio", render: function (r) { return h("a", { class: "cell-strong", href: "#/domains/" + encodeURIComponent(r.name), text: r.name }); } },
-          { label: "Estado", render: function (r) { return LP.domainStatus(index[r.name]); } },
-          { label: "Clientes", num: true, render: function (r) { return String(index[r.name] ? index[r.name].clients : 0); } },
-          { label: "Sesiones", num: true, render: function (r) { return String(index[r.name] ? index[r.name].activeSessions : 0); } },
-          { label: "Puertos de intranet", render: function (r) { return (index[r.name] && index[r.name].intranetPorts || []).join(", ") || "—"; } },
-          { label: "Tráfico desde el arranque", num: true, render: function (r) { return LP.fmt.bytes(index[r.name] ? index[r.name].bytesSinceStart : 0); } },
-          { label: "", render: function (r) { return h("div", { class: "actions" }, [h("a", { class: "btn btn-sm", href: "#/domains/" + encodeURIComponent(r.name), text: "Abrir" })]); } }
+          { label: t("Domain"), render: function (r) { return h("a", { class: "cell-strong", href: "#/domains/" + encodeURIComponent(r.name), text: r.name }); } },
+          { label: t("Status"), render: function (r) { return LP.domainStatus(index[r.name]); } },
+          { label: t("Clients"), num: true, render: function (r) { return String(index[r.name] ? index[r.name].clients : 0); } },
+          { label: t("Sessions"), num: true, render: function (r) { return String(index[r.name] ? index[r.name].activeSessions : 0); } },
+          { label: t("Intranet ports"), render: function (r) { return (index[r.name] && index[r.name].intranetPorts || []).join(", ") || "—"; } },
+          { label: t("Traffic since start"), num: true, render: function (r) { return LP.fmt.bytes(index[r.name] ? index[r.name].bytesSinceStart : 0); } },
+          { label: "", render: function (r) { return h("div", { class: "actions" }, [h("a", { class: "btn btn-sm", href: "#/domains/" + encodeURIComponent(r.name), text: t("Open") })]); } }
         ]
       }));
     });
@@ -151,20 +157,20 @@
 
       root.appendChild(h("div", { class: "page-head" }, [
         h("div", null, [
-          h("p", { class: "mb-1", text: "" }, [h("a", { href: "#/domains", text: "← Dominios" })]),
+          h("p", { class: "mb-1" }, [h("a", { href: "#/domains", text: t("← Domains") })]),
           h("h1", { class: "font-mono", text: dom.name })
         ]),
         h("div", { class: "toolbar-group" }, [
           LP.domainStatus(st),
-          h("a", { class: "btn", href: "#/visitors/" + encodeURIComponent(dom.name), text: "Usuarios visitantes" })
+          h("a", { class: "btn", href: "#/visitors/" + encodeURIComponent(dom.name), text: t("Visitor users") })
         ])
       ]));
 
       root.appendChild(h("div", { class: "grid-metrics" }, [
-        LP.metricCard("Clientes", String(st ? st.clients : 0), "conexiones del cliente"),
-        LP.metricCard("Sesiones activas", String(st ? st.activeSessions : 0), "túneles abiertos"),
-        LP.metricCard("Visitantes en espera", String(st ? st.pendingVisitors : 0), "pendientes"),
-        LP.metricCard("Tráfico desde el arranque", LP.fmt.bytes(st ? st.bytesSinceStart : 0), "se reinicia con el servidor")
+        LP.metricCard(t("Clients"), String(st ? st.clients : 0), t("client connections")),
+        LP.metricCard(t("Active sessions"), String(st ? st.activeSessions : 0), t("open tunnels")),
+        LP.metricCard(t("Waiting visitors"), String(st ? st.pendingVisitors : 0), t("pending")),
+        LP.metricCard(t("Traffic since start"), LP.fmt.bytes(st ? st.bytesSinceStart : 0), t("sum of the cluster's servers"))
       ]));
 
       var days = d.traffic.slice().sort(function (a, b) { return String(a.Date).localeCompare(String(b.Date)); });
@@ -173,17 +179,17 @@
       });
       root.appendChild(h("div", { class: "grid-2" }, [
         h("div", { class: "card" }, [
-          h("div", { class: "card-head" }, [h("h2", { text: "Tráfico de los últimos 30 días" })]),
-          dayItems.length ? LP.bars(dayItems) : h("p", { class: "muted", text: "Sin registros de tráfico en este periodo." })
+          h("div", { class: "card-head" }, [h("h2", { text: t("Traffic over the last 30 days") })]),
+          dayItems.length ? LP.bars(dayItems) : h("p", { class: "muted", text: t("No traffic recorded in this period.") })
         ]),
         h("div", { class: "card" }, [
-          h("div", { class: "card-head" }, [h("h2", { text: "Información" })]),
+          h("div", { class: "card-head" }, [h("h2", { text: t("Information") })]),
           h("dl", { class: "kv" }, [
-            h("dt", { text: "Varias conexiones" }), h("dd", { text: dom.allowMultipleConnections ? "Sí" : "No" }),
-            h("dt", { text: "Passthrough TLS" }), h("dd", { text: dom.passthrough ? "Sí" : "No" }),
-            h("dt", { text: "Visitantes" }), h("dd", null, [dom.authLatched ? LP.badge("restringido", "warn") : LP.badge("abierto", "ok")]),
-            h("dt", { text: "Redes permitidas" }), h("dd", { text: (dom.allowedCidrs || []).join(", ") || "cualquiera" }),
-            h("dt", { text: "Puertos de intranet" }), h("dd", { class: "mono", text: (st && st.intranetPorts || []).join(", ") || "—" })
+            h("dt", { text: t("Several connections") }), h("dd", { text: dom.allowMultipleConnections ? t("Yes") : t("No") }),
+            h("dt", { text: t("TLS passthrough") }), h("dd", { text: dom.passthrough ? t("Yes") : t("No") }),
+            h("dt", { text: t("Visitors") }), h("dd", null, [dom.authLatched ? LP.badge(t("restricted"), "warn") : LP.badge(t("open"), "ok")]),
+            h("dt", { text: t("Allowed networks") }), h("dd", { text: (dom.allowedCidrs || []).join(", ") || t("anyone") }),
+            h("dt", { text: t("Intranet ports") }), h("dd", { class: "mono", text: (st && st.intranetPorts || []).join(", ") || "—" })
           ])
         ])
       ]));
@@ -198,11 +204,11 @@
     var pass = h("input", { type: "checkbox", checked: dom.passthrough, disabled: dom.authLatched });
     var cidrs = h("textarea", { class: "input", rows: 2, text: (dom.allowedCidrs || []).join(", ") });
     var status = h("div", { class: "msg", role: "status" });
-    var save = h("button", { class: "btn btn-primary", type: "submit", text: "Guardar cambios" });
+    var save = h("button", { class: "btn btn-primary", type: "submit", text: t("Save changes") });
     var form = h("form", { class: "form" }, [
-      h("label", { class: "checkbox" }, [multi, h("span", { text: "Permitir varias conexiones del cliente" })]),
-      h("label", { class: "checkbox" }, [pass, h("span", { text: dom.authLatched ? "Passthrough TLS (no se puede activar con visitantes restringidos)" : "Passthrough TLS" })]),
-      LP.field("Redes permitidas", cidrs, "Vacío = cualquiera.").node,
+      h("label", { class: "checkbox" }, [multi, h("span", { text: t("Allow several connections from the client") })]),
+      h("label", { class: "checkbox" }, [pass, h("span", { text: dom.authLatched ? t("TLS passthrough (cannot be turned on while visitors are restricted)") : t("TLS passthrough") })]),
+      LP.field(t("Allowed networks"), cidrs, t("Empty = anyone.")).node,
       h("div", { class: "flex items-center justify-between gap-3" }, [status, save])
     ]);
     form.addEventListener("submit", function (event) {
@@ -213,94 +219,94 @@
       if (!dom.authLatched && pass.checked !== dom.passthrough) { body.passthrough = pass.checked; }
       var list = LP.listValue(cidrs.value);
       if (JSON.stringify(list) !== JSON.stringify(dom.allowedCidrs || [])) { body.allowedCidrs = list; }
-      if (Object.keys(body).length === 0) { status.textContent = "No hay cambios que guardar."; status.className = "msg"; return; }
+      if (Object.keys(body).length === 0) { status.textContent = t("Nothing to save."); status.className = "msg"; return; }
       save.disabled = true;
       LP.api("PATCH", "/domains/" + encodeURIComponent(dom.name), body).then(function (res) {
         save.disabled = false;
         if (!res.ok) { status.textContent = LP.errorText(res); status.className = "msg msg-error"; return; }
-        LP.notify("ok", "Configuración guardada", dom.name);
+        LP.notify("ok", t("Settings saved"), dom.name);
         reload();
       });
     });
 
     var restrict = null;
     if (dom.authLatched) {
-      restrict = h("button", { class: "btn", type: "button", text: "Quitar restricción de visitantes" });
+      restrict = h("button", { class: "btn", type: "button", text: t("Remove visitor restriction") });
       restrict.addEventListener("click", function () {
         LP.confirm({
-          title: "¿Quitar la restricción?",
-          text: "Los visitantes podrán entrar sin credenciales. Solo hazlo si ya no necesitas la protección.",
-          confirmLabel: "Quitar restricción",
+          title: t("Remove the restriction?"),
+          text: t("Visitors will be able to enter without credentials. Only do this if you no longer need the protection."),
+          confirmLabel: t("Remove restriction"),
           danger: true
         }).then(function (ok) {
           if (!ok) { return; }
           LP.api("PATCH", "/domains/" + encodeURIComponent(dom.name), { authLatched: false }).then(function (res) {
-            if (res.ok) { LP.notify("ok", "Restricción quitada", dom.name); reload(); }
-            else { LP.notify("error", "No se pudo quitar", LP.errorText(res)); }
+            if (res.ok) { LP.notify("ok", t("Restriction removed"), dom.name); reload(); }
+            else { LP.notify("error", t("Could not remove it"), LP.errorText(res)); }
           });
         });
       });
     }
 
     return h("div", { class: "card mt-4" }, [
-      h("div", { class: "card-head" }, [h("h2", { text: "Configuración del dominio" }), restrict]),
+      h("div", { class: "card-head" }, [h("h2", { text: t("Domain settings") }), restrict]),
       form,
       keyCard(dom, reload)
     ]);
   }
 
   function keyCard(dom, reload) {
-    var key = h("input", { class: "input font-mono", autocomplete: "off", placeholder: "nueva clave del cliente" });
-    var gen = h("button", { class: "btn", type: "button", text: "Generar" });
+    var key = h("input", { class: "input font-mono", autocomplete: "off", placeholder: t("new client key") });
+    var gen = h("button", { class: "btn", type: "button", text: t("Generate") });
     gen.addEventListener("click", function () { key.value = LP.randomKey(); });
-    var change = h("button", { class: "btn", type: "button", text: "Cambiar clave" });
+    var change = h("button", { class: "btn", type: "button", text: t("Change key") });
     change.addEventListener("click", function () {
-      if (key.value.length < 16) { LP.notify("error", "Clave demasiado corta", "Usa al menos 16 caracteres."); return; }
+      if (key.value.length < 16) { LP.notify("error", t("Key too short"), t("Use at least 16 characters.")); return; }
       LP.confirm({
-        title: "¿Cambiar la clave del cliente?",
-        text: "El cliente se desconectará y necesitará la nueva clave. Actualízala en su configuración antes de confirmar.",
-        confirmLabel: "Cambiar clave",
+        title: t("Change the client key?"),
+        text: t("The client will disconnect and need the new key. Update its configuration before you confirm."),
+        confirmLabel: t("Change key"),
         danger: true
       }).then(function (ok) {
         if (!ok) { return; }
         var value = key.value;
         LP.api("PATCH", "/domains/" + encodeURIComponent(dom.name), { apiKey: value }).then(function (res) {
-          if (!res.ok) { LP.notify("error", "No se pudo cambiar la clave", LP.errorText(res)); return; }
+          if (!res.ok) { LP.notify("error", t("Could not change the key"), LP.errorText(res)); return; }
           key.value = "";
           LP.dialog({
-            title: "Clave cambiada",
-            body: [LP.keyBox("Nueva clave de " + dom.name, value)],
-            actions: [h("button", { class: "btn btn-primary", type: "button", text: "Listo", on: { click: function () { document.querySelector("dialog.modal").close(); reload(); } } })]
+            title: t("Key changed"),
+            body: [LP.keyBox(t("New key of {domain}", { domain: dom.name }), value)],
+            actions: [h("button", { class: "btn btn-primary", type: "button", text: t("Done"), on: { click: function () { closeDialog(); reload(); } } })]
           });
         });
       });
     });
     return h("div", { class: "section mt-2 border-t border-line pt-4" }, [
-      h("h2", { class: "mb-1", text: "Clave del cliente" }),
-      h("p", { class: "muted mb-3 text-[13px]", text: "Cambiarla desconecta al cliente hasta que use la nueva." }),
+      h("h2", { class: "mb-1", text: t("Client key") }),
+      h("p", { class: "muted mb-3 text-[13px]", text: t("Changing it disconnects the client until it uses the new key.") }),
       h("div", { class: "flex flex-wrap gap-2" }, [key, gen, change])
     ]);
   }
 
   function dangerCard(dom) {
-    var remove = h("button", { class: "btn btn-danger", type: "button", text: "Borrar dominio" });
+    var remove = h("button", { class: "btn btn-danger", type: "button", text: t("Delete domain") });
     remove.addEventListener("click", function () {
       LP.confirm({
-        title: "¿Borrar " + dom.name + "?",
-        text: "Se desconectan sus clientes y se borran sus usuarios de visitante. No se puede deshacer.",
-        confirmLabel: "Borrar dominio",
+        title: t("Delete {domain}?", { domain: dom.name }),
+        text: t("Its clients are disconnected and its visitor users are removed. This cannot be undone."),
+        confirmLabel: t("Delete domain"),
         typeToConfirm: dom.name
       }).then(function (ok) {
         if (!ok) { return; }
         LP.api("DELETE", "/domains/" + encodeURIComponent(dom.name)).then(function (res) {
-          if (res.ok) { LP.notify("ok", "Dominio borrado", dom.name); window.location.hash = "#/domains"; }
-          else { LP.notify("error", "No se pudo borrar", LP.errorText(res)); }
+          if (res.ok) { LP.notify("ok", t("Domain deleted"), dom.name); window.location.hash = "#/domains"; }
+          else { LP.notify("error", t("Could not delete it"), LP.errorText(res)); }
         });
       });
     });
     return h("div", { class: "card mt-4 border-danger/40" }, [
       h("div", { class: "card-head" }, [
-        h("div", null, [h("h2", { text: "Zona de peligro" }), h("p", { class: "muted text-[13px]", text: "Borrar el dominio desconecta a sus clientes." })]),
+        h("div", null, [h("h2", { text: t("Danger zone") }), h("p", { class: "muted text-[13px]", text: t("Deleting a domain disconnects its clients.") })]),
         remove
       ])
     ]);
@@ -315,7 +321,7 @@
   };
 
   LP.screens.domains = {
-    title: "Dominios",
+    title: "Domains",
     render: function (root, params) {
       if (params[0]) { renderDetail(root, params[0]); } else { renderList(root); }
     }

@@ -468,6 +468,8 @@ El primer superusuario se crea siempre desde la consola. Los demás los crea un 
 
 **Desde el panel** (`https://127.0.0.1:5052/`, tras iniciar sesión) hay estas pantallas: *Panel* (estado del servidor), *Dominios* (listado, alta, detalle con tráfico de 30 días y configuración), *Tráfico y peticiones* (filtros por dominio, puerto, fechas, método y estado), *Usuarios visitantes* (crear, rotar el secreto y borrar), *Mi cuenta* (cambiar tu contraseña), *Cuentas de administrador* (solo superusuarios) y *Configuración*. Un secreto o una clave nueva se muestra una sola vez en un recuadro; cópialos en ese momento.
 
+El panel está en inglés por defecto y tiene español: el idioma se elige en el menú de tu usuario (arriba a la derecha) y se guarda en el navegador. Solo tiene tema claro.
+
 El estilo se compila con Tailwind. Para cambiarlo: `cd server/admin/frontend && npm install && npm run build`. El CSS compilado va en el repositorio, así que compilar el servidor no necesita Node.
 
 Los usuarios de visitante no tienen contraseña: tienen un secreto propio para firmar sus peticiones (ver [Autenticación de visitantes](#autenticación-de-visitantes)).

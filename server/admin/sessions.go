@@ -116,7 +116,7 @@ var publicPaths = map[string]bool{
 }
 
 // publicPrefixes are the files of the panel and its login page. They hold no data.
-var publicPrefixes = []string{"/admin/js/", "/admin/css/"}
+var publicPrefixes = []string{"/admin/js/", "/admin/css/", "/admin/img/"}
 
 func isPublicPath(p string) bool {
 	if publicPaths[p] {

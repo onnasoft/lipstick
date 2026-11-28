@@ -47,6 +47,8 @@ func contentTypeOf(name string) string {
 		return "application/javascript; charset=utf-8"
 	case ".html":
 		return "text/html; charset=utf-8"
+	case ".png":
+		return "image/png"
 	}
 	return "application/octet-stream"
 }
@@ -67,7 +69,9 @@ func serveStatic(dir string) gin.HandlerFunc {
 		}
 		c.Header("Content-Security-Policy", pageCSP)
 		c.Header("X-Content-Type-Options", "nosniff")
-		c.Header("Cache-Control", "max-age=3600")
+		// Revalidated on every use: after an upgrade the new panel must load at once,
+		// not an hour later from the browser's cache.
+		c.Header("Cache-Control", "no-cache")
 		c.Data(http.StatusOK, contentTypeOf(name), data)
 	}
 }

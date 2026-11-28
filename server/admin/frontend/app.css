@@ -1,10 +1,8 @@
 /* Source of the admin panel stylesheet. Built into ../web/css/app.css with `npm run build`.
-   Colors are CSS variables, so the light and dark themes switch with data-theme and
-   no class needs a dark twin. Components below keep the scripts short. */
+   The panel has one light theme. Colors are CSS variables, so a later theme needs only
+   a new set of values. Components below keep the scripts short. */
 
 @import "tailwindcss";
-
-@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
 @theme {
   --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
@@ -46,25 +44,6 @@
   color-scheme: light;
 }
 
-[data-theme="dark"] {
-  --c-canvas: #0e1015;
-  --c-surface: #161922;
-  --c-surface-2: #1d212c;
-  --c-line: #282d3a;
-  --c-ink: #eceef3;
-  --c-ink-2: #9aa3b5;
-  --c-accent: #8b8bf5;
-  --c-accent-ink: #0e1015;
-  --c-accent-soft: #23243a;
-  --c-ok: #4ade80;
-  --c-ok-soft: #14291d;
-  --c-warn: #f5b25b;
-  --c-warn-soft: #2d2415;
-  --c-danger: #f87171;
-  --c-danger-soft: #2e1717;
-  color-scheme: dark;
-}
-
 @layer base {
   html, body { height: 100%; }
   body { @apply bg-canvas text-ink font-sans text-sm antialiased; }
@@ -74,6 +53,8 @@
   code { @apply font-mono text-[12.5px]; }
   [hidden] { display: none !important; }
   :focus-visible { @apply outline-2 outline-accent outline-offset-2 rounded; }
+  /* The content area is focused by the router only so that screen readers start there; no ring. */
+  .view:focus { @apply outline-none; }
 }
 
 @layer components {
@@ -166,11 +147,8 @@
   }
   .sidebar .nav-group, .sidebar-foot { @apply max-[860px]:hidden; }
   .sidebar-foot { @apply mt-auto px-2 pt-2.5 text-xs text-ink-2; }
-  .brand { @apply flex items-center gap-2.5 px-2 pb-4 pt-1 max-[860px]:p-0; }
-  .brand-mark {
-    @apply grid size-7 place-items-center rounded-lg text-sm font-bold text-white;
-    background: linear-gradient(135deg, var(--c-accent), #c770f0);
-  }
+  .brand { @apply flex items-center gap-2.5 px-2 pb-4 pt-1 no-underline hover:no-underline max-[860px]:p-0; }
+  .brand-logo { @apply size-7 shrink-0 rounded-lg; }
   .brand-name { @apply text-[15px] font-semibold; }
   .main { @apply flex min-w-0 flex-col; }
   .topbar {
@@ -179,9 +157,28 @@
   .crumb { @apply text-[13px] text-ink-2 max-[860px]:hidden; }
   .crumb strong { @apply text-[15px] font-semibold text-ink; }
   .userbox { @apply flex items-center gap-2.5; }
+  .menu-anchor { @apply relative; }
+  .user-button {
+    @apply flex cursor-pointer items-center gap-2.5 rounded-lg border border-transparent px-2 py-1 text-left transition hover:border-line hover:bg-surface-2;
+  }
+  .user-text { @apply grid leading-tight; }
+  .chevron { @apply text-xs text-ink-2; }
   .avatar {
     @apply grid size-[30px] place-items-center rounded-full bg-accent-soft text-[13px] font-semibold uppercase text-accent;
   }
+  .menu {
+    @apply absolute right-0 top-[calc(100%+8px)] z-20 w-60 rounded-xl border border-line bg-surface p-1.5 shadow-xl;
+    animation: pop 0.14s ease-out;
+  }
+  .menu[hidden] { display: none; }
+  .menu-head { @apply mb-1 px-2.5 pb-2 pt-1.5 text-[13px]; }
+  .menu-item {
+    @apply flex w-full cursor-pointer items-center rounded-lg px-2.5 py-2 text-left text-[13.5px] text-ink transition hover:bg-surface-2;
+  }
+  .menu-item-active { @apply font-semibold text-accent; }
+  .menu-item-danger { @apply text-danger hover:bg-danger-soft; }
+  .menu-sep { @apply my-1 h-px bg-line; }
+  .menu-group-title { @apply px-2.5 pb-1 pt-1.5 text-[11px] font-semibold uppercase tracking-wider text-ink-2; }
   .view { @apply mx-auto w-full max-w-[1280px] p-6 max-[860px]:p-4; animation: fade 0.18s ease-out; }
 
   /* page pieces */
@@ -208,6 +205,7 @@
     @apply grid w-full max-w-[380px] gap-4 rounded-2xl border border-line bg-surface p-7 shadow-2xl;
   }
   .login-card .brand { @apply p-0; }
+  .login-card .brand-logo { @apply size-9; }
 }
 
 @keyframes pop {
