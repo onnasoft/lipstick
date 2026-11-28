@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/OnnaSoft/lipstick/server/auth"
 	"github.com/gin-gonic/gin"
 )
 
@@ -14,8 +15,14 @@ import (
 type adminStore interface {
 	Login(username, password string) (uint, error)
 	NewSession(userID uint) (string, time.Time, error)
-	Authenticate(token string) (string, error)
+	Authenticate(token string) (username, role string, err error)
 	Logout(token string) error
+	ChangeOwnPassword(username, current, next string) error
+	CreateAdminUser(username, password, role string) error
+	ResetAdminPassword(username, password string) error
+	SetAdminRole(username, role string) error
+	SetAdminDisabled(username string, disabled bool) error
+	ListAdminUsers() ([]auth.AdminInfo, error)
 }
 
 // Five wrong passwords lock an account for 15 minutes. A successful login clears the
@@ -103,12 +110,24 @@ func sessionFromRequest(req *http.Request) (token string, fromCookie bool) {
 // publicPaths need no session: the health check, the two login endpoints, and the
 // files the login page loads. Everything else is behind the session gate.
 var publicPaths = map[string]bool{
-	"/health":          true,
-	"/login":           true,
-	"/web/login":       true,
-	"/admin/panel.css": true,
-	"/admin/panel.js":  true,
-	"/admin/login.js":  true,
+	"/health":    true,
+	"/login":     true,
+	"/web/login": true,
+}
+
+// publicPrefixes are the files of the panel and its login page. They hold no data.
+var publicPrefixes = []string{"/admin/js/", "/admin/css/"}
+
+func isPublicPath(p string) bool {
+	if publicPaths[p] {
+		return true
+	}
+	for _, prefix := range publicPrefixes {
+		if strings.HasPrefix(p, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func unsafeMethod(method string) bool {
@@ -124,22 +143,22 @@ func unsafeMethod(method string) bool {
 // Changes made with the cookie must carry the CSRF header.
 func (r *router) sessionGate() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if publicPaths[c.Request.URL.Path] {
+		if isPublicPath(c.Request.URL.Path) {
 			c.Next()
 			return
 		}
 		token, fromCookie := sessionFromRequest(c.Request)
-		user := ""
+		user, role := "", ""
 		if token != "" && r.admin.store != nil {
-			if name, err := r.admin.store.Authenticate(token); err == nil {
-				user = name
+			if name, userRole, err := r.admin.store.Authenticate(token); err == nil {
+				user, role = name, userRole
 			}
 		}
 		if user == "" {
 			if c.Request.URL.Path == "/" && c.Request.Method == http.MethodGet {
 				c.Header("Content-Security-Policy", pageCSP)
 				c.Header("Cache-Control", "no-store")
-				c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(loginHTML))
+				c.Data(http.StatusOK, "text/html; charset=utf-8", pageFile("login.html"))
 				c.Abort()
 				return
 			}
@@ -152,6 +171,7 @@ func (r *router) sessionGate() gin.HandlerFunc {
 			return
 		}
 		c.Set("adminUser", user)
+		c.Set("adminRole", role)
 		c.Next()
 	}
 }

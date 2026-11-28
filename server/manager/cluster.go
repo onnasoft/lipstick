@@ -107,6 +107,9 @@ type natsBus struct {
 
 func (b natsBus) Publish(topic string, data []byte) error { return b.mgr.Publish(topic, data) }
 
+// Connected reports whether the bus is reachable right now. It is used by /health.
+func (b natsBus) Connected() bool { return b.mgr.Connected() }
+
 func (b natsBus) SubscribeBroadcast(topic string, cb func(data []byte)) error {
 	_, err := b.mgr.SubscribeBroadcast(topic, func(msg *nats.Msg) { cb(msg.Data) })
 	return err

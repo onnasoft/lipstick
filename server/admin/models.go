@@ -86,3 +86,10 @@ type webLoginResponse struct {
 	Username  string    `json:"username" example:"jtorres"`
 	ExpiresAt time.Time `json:"expiresAt"`
 }
+
+// healthResponse reports the server and each dependency it checks. A dependency is
+// "ok" or "down"; the reason is only in the server's log.
+type healthResponse struct {
+	Status string            `json:"status" example:"ok"`
+	Checks map[string]string `json:"checks"`
+}

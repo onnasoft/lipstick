@@ -8,3 +8,6 @@ certs/
 *.key
 
 client_key.txt
+
+# Admin panel build tools
+server/admin/frontend/node_modules/

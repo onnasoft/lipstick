@@ -68,7 +68,7 @@ const console12 = "correct-horse-battery"
 func TestConsoleCreatesAnAdminWithTwoMatchingPasswords(t *testing.T) {
 	f := newFakeConsole()
 	code, out, _ := runConsole(f, typed(console12, console12), "create", "-username", "jtorres")
-	if code != 0 || f.users["jtorres"] != auth.RoleAdmin {
+	if code != 0 || f.users["jtorres"] != auth.RoleSuperuser {
 		t.Fatalf("create: code %d users %v", code, f.users)
 	}
 	if !strings.Contains(out, "created admin account") {
@@ -107,7 +107,7 @@ func TestConsoleNeedsUsernameAndKnownCommand(t *testing.T) {
 
 func TestConsoleResetsPasswordAndTogglesAccess(t *testing.T) {
 	f := newFakeConsole()
-	f.users["jtorres"] = auth.RoleAdmin
+	f.users["jtorres"] = auth.RoleSuperuser
 	if code, _, _ := runConsole(f, typed(console12, console12), "reset-password", "-username", "jtorres"); code != 0 || f.reset["jtorres"] != console12 {
 		t.Fatalf("reset: %d %v", code, f.reset)
 	}

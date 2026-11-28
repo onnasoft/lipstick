@@ -27,7 +27,7 @@ func newTestAdminStore(t *testing.T) (*AdminStore, *gorm.DB) {
 
 func TestAdminLoginAndSession(t *testing.T) {
 	s, _ := newTestAdminStore(t)
-	if err := s.CreateAdminUser("jtorres", strongPassword, RoleAdmin); err != nil {
+	if err := s.CreateAdminUser("jtorres", strongPassword, RoleSuperuser); err != nil {
 		t.Fatal(err)
 	}
 	id, err := s.Login("jtorres", strongPassword)
@@ -41,23 +41,23 @@ func TestAdminLoginAndSession(t *testing.T) {
 	if until := time.Until(expires); until < AdminSessionTTL-time.Minute || until > AdminSessionTTL {
 		t.Fatalf("session lifetime %v, want about %v", until, AdminSessionTTL)
 	}
-	if user, err := s.Authenticate(token); err != nil || user != "jtorres" {
+	if user, role, err := s.Authenticate(token); err != nil || user != "jtorres" || role != RoleSuperuser {
 		t.Fatalf("session did not authenticate: %q %v", user, err)
 	}
-	if _, err := s.Authenticate(token + "x"); err == nil {
+	if _, _, err := s.Authenticate(token + "x"); err == nil {
 		t.Fatal("altered token accepted")
 	}
 	if err := s.Logout(token); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Authenticate(token); err == nil {
+	if _, _, err := s.Authenticate(token); err == nil {
 		t.Fatal("token still works after logout")
 	}
 }
 
 func TestAdminLoginRefusesWrongPasswordAndUnknownUser(t *testing.T) {
 	s, _ := newTestAdminStore(t)
-	s.CreateAdminUser("jtorres", strongPassword, RoleAdmin)
+	s.CreateAdminUser("jtorres", strongPassword, RoleSuperuser)
 	if _, err := s.Login("jtorres", "wrong-password-here"); err != ErrBadLogin {
 		t.Fatalf("wrong password: %v", err)
 	}
@@ -69,13 +69,14 @@ func TestAdminLoginRefusesWrongPasswordAndUnknownUser(t *testing.T) {
 // A disabled account cannot log in, and its live sessions stop working at once.
 func TestDisablingEndsSessionsAndBlocksLogin(t *testing.T) {
 	s, _ := newTestAdminStore(t)
-	s.CreateAdminUser("jtorres", strongPassword, RoleAdmin)
+	s.CreateAdminUser("jtorres", strongPassword, RoleSuperuser)
+	s.CreateAdminUser("segundo", strongPassword, RoleSuperuser) // a second one may be disabled
 	id, _ := s.Login("jtorres", strongPassword)
 	token, _, _ := s.NewSession(id)
 	if err := s.SetAdminDisabled("jtorres", true); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Authenticate(token); err == nil {
+	if _, _, err := s.Authenticate(token); err == nil {
 		t.Fatal("session survived disabling")
 	}
 	if _, err := s.Login("jtorres", strongPassword); err != ErrBadLogin {
@@ -90,13 +91,13 @@ func TestDisablingEndsSessionsAndBlocksLogin(t *testing.T) {
 // Resetting the password ends every session of that account.
 func TestPasswordResetEndsSessions(t *testing.T) {
 	s, _ := newTestAdminStore(t)
-	s.CreateAdminUser("jtorres", strongPassword, RoleAdmin)
+	s.CreateAdminUser("jtorres", strongPassword, RoleSuperuser)
 	id, _ := s.Login("jtorres", strongPassword)
 	token, _, _ := s.NewSession(id)
 	if err := s.ResetAdminPassword("jtorres", "a-brand-new-password"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Authenticate(token); err == nil {
+	if _, _, err := s.Authenticate(token); err == nil {
 		t.Fatal("session survived a password reset")
 	}
 	if _, err := s.Login("jtorres", strongPassword); err != ErrBadLogin {
@@ -109,11 +110,11 @@ func TestPasswordResetEndsSessions(t *testing.T) {
 
 func TestExpiredSessionIsRefused(t *testing.T) {
 	s, conn := newTestAdminStore(t)
-	s.CreateAdminUser("jtorres", strongPassword, RoleAdmin)
+	s.CreateAdminUser("jtorres", strongPassword, RoleSuperuser)
 	id, _ := s.Login("jtorres", strongPassword)
 	token, _, _ := s.NewSession(id)
 	conn.Model(&db.AdminSession{}).Where("user_id = ?", id).Update("expires_at", time.Now().Add(-time.Second))
-	if _, err := s.Authenticate(token); err == nil {
+	if _, _, err := s.Authenticate(token); err == nil {
 		t.Fatal("expired session accepted")
 	}
 }
@@ -121,7 +122,7 @@ func TestExpiredSessionIsRefused(t *testing.T) {
 // The database holds hashes only: neither the password nor the token is stored.
 func TestSecretsAreNotStoredInClear(t *testing.T) {
 	s, conn := newTestAdminStore(t)
-	s.CreateAdminUser("jtorres", strongPassword, RoleAdmin)
+	s.CreateAdminUser("jtorres", strongPassword, RoleSuperuser)
 	id, _ := s.Login("jtorres", strongPassword)
 	token, _, _ := s.NewSession(id)
 	var user db.AdminUser
@@ -135,21 +136,62 @@ func TestSecretsAreNotStoredInClear(t *testing.T) {
 
 func TestCreateRefusesBadInput(t *testing.T) {
 	s, _ := newTestAdminStore(t)
-	if err := s.CreateAdminUser("bad name", strongPassword, RoleAdmin); err != ErrInvalidUsername {
+	if err := s.CreateAdminUser("bad name", strongPassword, RoleSuperuser); err != ErrInvalidUsername {
 		t.Fatalf("username: %v", err)
 	}
-	if err := s.CreateAdminUser("jtorres", "short", RoleAdmin); err != ErrPasswordTooShort {
+	if err := s.CreateAdminUser("jtorres", "short", RoleSuperuser); err != ErrPasswordTooShort {
 		t.Fatalf("short password: %v", err)
 	}
 	if err := s.CreateAdminUser("jtorres", strongPassword, "root"); err != ErrInvalidRole {
 		t.Fatalf("role: %v", err)
 	}
 	s.CreateAdminUser("jtorres", strongPassword, RoleOperator)
-	if err := s.CreateAdminUser("jtorres", strongPassword, RoleAdmin); err != ErrAdminUserExists {
+	if err := s.CreateAdminUser("jtorres", strongPassword, RoleSuperuser); err != ErrAdminUserExists {
 		t.Fatalf("duplicate: %v", err)
 	}
 	users, _ := s.ListAdminUsers()
 	if len(users) != 1 || users[0].Role != RoleOperator || users[0].Username != "jtorres" {
 		t.Fatalf("list %+v", users)
+	}
+}
+
+func TestLastActiveSuperuserCannotBeDisabledOrDemoted(t *testing.T) {
+	s, _ := newTestAdminStore(t)
+	s.CreateAdminUser("jtorres", strongPassword, RoleSuperuser)
+	s.CreateAdminUser("operador", strongPassword, RoleOperator)
+	if err := s.SetAdminDisabled("jtorres", true); err != ErrLastSuperuser {
+		t.Fatalf("disabling the only superuser: %v", err)
+	}
+	if err := s.SetAdminRole("jtorres", RoleOperator); err != ErrLastSuperuser {
+		t.Fatalf("demoting the only superuser: %v", err)
+	}
+	s.CreateAdminUser("segundo", strongPassword, RoleSuperuser)
+	if err := s.SetAdminRole("jtorres", RoleOperator); err != nil {
+		t.Fatalf("demoting with another superuser present: %v", err)
+	}
+	if err := s.SetAdminRole("operador", "root"); err != ErrInvalidRole {
+		t.Fatalf("invalid role: %v", err)
+	}
+}
+
+func TestChangeOwnPasswordNeedsTheCurrentOne(t *testing.T) {
+	s, _ := newTestAdminStore(t)
+	s.CreateAdminUser("jtorres", strongPassword, RoleSuperuser)
+	id, _ := s.Login("jtorres", strongPassword)
+	token, _, _ := s.NewSession(id)
+	if err := s.ChangeOwnPassword("jtorres", "wrong-current-one", "a-brand-new-password"); err != ErrWrongPassword {
+		t.Fatalf("wrong current password: %v", err)
+	}
+	if _, _, err := s.Authenticate(token); err != nil {
+		t.Fatal("a refused change must not end the session")
+	}
+	if err := s.ChangeOwnPassword("jtorres", strongPassword, "a-brand-new-password"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.Authenticate(token); err == nil {
+		t.Fatal("session survived a password change")
+	}
+	if _, err := s.Login("jtorres", "a-brand-new-password"); err != nil {
+		t.Fatalf("new password refused: %v", err)
 	}
 }

@@ -3,6 +3,7 @@ package admin
 import (
 	"crypto/tls"
 	"log"
+	"sort"
 
 	"github.com/OnnaSoft/lipstick/logger"
 	"github.com/OnnaSoft/lipstick/server/auth"
@@ -18,7 +19,8 @@ type Admin struct {
 	logins      loginLimiter
 	tlsConfig   *tls.Config
 	onChanged   func(domain string)
-	stats       func() []manager.DomainStats
+	stats       func() ([]manager.DomainStats, error)
+	health      []healthCheck
 	requests    func(q manager.RequestQuery) ([]manager.RequestRecord, error)
 }
 
@@ -27,8 +29,9 @@ func (a *Admin) SetRequestSource(fn func(q manager.RequestQuery) ([]manager.Requ
 	a.requests = fn
 }
 
-// SetStatsSource sets the function that returns the live state of every domain.
-func (a *Admin) SetStatsSource(fn func() []manager.DomainStats) {
+// SetStatsSource sets the function that returns the state of every domain in the
+// cluster. It reads the shared database, so every server gives the same answer.
+func (a *Admin) SetStatsSource(fn func() ([]manager.DomainStats, error)) {
 	a.stats = fn
 }
 
@@ -75,4 +78,19 @@ func (a *Admin) Listen() {
 	if err := a.engine.RunListener(listener); err != nil {
 		log.Fatalf("admin API stopped serving: %v", err)
 	}
+}
+
+// healthCheck is one dependency /health looks at: the database, the cluster bus.
+type healthCheck struct {
+	name  string
+	check func() error
+}
+
+// SetHealthChecks replaces the dependencies /health checks. Each check should be quick.
+func (a *Admin) SetHealthChecks(checks map[string]func() error) {
+	a.health = nil
+	for name, fn := range checks {
+		a.health = append(a.health, healthCheck{name: name, check: fn})
+	}
+	sort.Slice(a.health, func(i, j int) bool { return a.health[i].name < a.health[j].name })
 }

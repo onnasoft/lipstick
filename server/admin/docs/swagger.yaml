@@ -1,5 +1,40 @@
 basePath: /
 definitions:
+  admin.accountInfo:
+    properties:
+      role:
+        example: superuser
+        type: string
+      username:
+        example: jtorres
+        type: string
+    type: object
+  admin.accountView:
+    properties:
+      createdAt:
+        type: string
+      disabled:
+        example: false
+        type: boolean
+      role:
+        example: operator
+        type: string
+      username:
+        example: operador
+        type: string
+    type: object
+  admin.createAccountBody:
+    properties:
+      password:
+        example: a-password-of-12-or-more
+        type: string
+      role:
+        example: operator
+        type: string
+      username:
+        example: operador
+        type: string
+    type: object
   admin.dailyConsumption:
     properties:
       BytesUsed:
@@ -82,6 +117,16 @@ definitions:
         example: message describing what went wrong
         type: string
     type: object
+  admin.healthResponse:
+    properties:
+      checks:
+        additionalProperties:
+          type: string
+        type: object
+      status:
+        example: ok
+        type: string
+    type: object
   admin.loginBody:
     properties:
       password:
@@ -100,6 +145,27 @@ definitions:
         type: string
       username:
         example: jtorres
+        type: string
+    type: object
+  admin.ownPasswordBody:
+    properties:
+      currentPassword:
+        example: the-password-you-have-now
+        type: string
+      newPassword:
+        example: a-password-of-12-or-more
+        type: string
+    type: object
+  admin.passwordBody:
+    properties:
+      password:
+        example: a-password-of-12-or-more
+        type: string
+    type: object
+  admin.roleBody:
+    properties:
+      role:
+        example: operator
         type: string
     type: object
   admin.statusResponse:
@@ -264,7 +330,6 @@ paths:
   /:
     get:
       description: HTML panel that reads /stats, /requests and the daily traffic.
-        Needs no key.
       produces:
       - text/html
       responses:
@@ -275,10 +340,331 @@ paths:
       summary: Admin panel
       tags:
       - system
+  /account:
+    get:
+      description: The account and role of the session making the request.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/admin.accountInfo'
+        "401":
+          description: 'Missing, expired or invalid session. Error: ''Unauthorized'''
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
+      security:
+      - BearerAuth: []
+      summary: Who am I
+      tags:
+      - accounts
+  /account/password:
+    post:
+      consumes:
+      - application/json
+      description: Changes the password of the session's own account after checking
+        the current one. Every session of the account ends, so the user logs in again
+        with the new password.
+      parameters:
+      - description: Current and new password
+        in: body
+        name: change
+        required: true
+        schema:
+          $ref: '#/definitions/admin.ownPasswordBody'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/admin.statusResponse'
+        "400":
+          description: The new password is shorter than 12 characters, or the body
+            is not JSON
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
+        "401":
+          description: 'Missing, expired or invalid session. Error: ''Unauthorized'''
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
+        "403":
+          description: 'The current password is wrong. Error: ''the current password
+            is wrong'''
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
+        "500":
+          description: The password could not be changed
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
+      security:
+      - BearerAuth: []
+      summary: Change my password
+      tags:
+      - accounts
+  /admin-users:
+    get:
+      description: Every account with its role and status. Superusers only.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/admin.accountView'
+            type: array
+        "401":
+          description: 'Missing, expired or invalid session. Error: ''Unauthorized'''
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
+        "403":
+          description: Only a superuser can do this
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
+        "500":
+          description: The accounts could not be listed
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
+      security:
+      - BearerAuth: []
+      summary: List admin accounts
+      tags:
+      - accounts
+    post:
+      consumes:
+      - application/json
+      description: 'Creates an account with a role: superuser (manages accounts) or
+        operator (manages domains and visitor users). Superusers only. The password
+        is at least 12 characters.'
+      parameters:
+      - description: Account to create
+        in: body
+        name: account
+        required: true
+        schema:
+          $ref: '#/definitions/admin.createAccountBody'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/admin.statusResponse'
+        "400":
+          description: Bad username, short password, role not superuser or operator,
+            or malformed JSON
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
+        "401":
+          description: 'Missing, expired or invalid session. Error: ''Unauthorized'''
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
+        "403":
+          description: Only a superuser can do this
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
+        "409":
+          description: An account with that name already exists
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
+        "500":
+          description: The account could not be created
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
+      security:
+      - BearerAuth: []
+      summary: Create an admin account
+      tags:
+      - accounts
+  /admin-users/{username}/disable:
+    post:
+      description: Blocks the account and ends its sessions. You cannot disable your
+        own account, and the last active superuser cannot be disabled. Superusers
+        only.
+      parameters:
+      - description: Account name
+        in: path
+        name: username
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/admin.statusResponse'
+        "401":
+          description: 'Missing, expired or invalid session. Error: ''Unauthorized'''
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
+        "403":
+          description: Only a superuser can do this
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
+        "404":
+          description: 'The account does not exist. Error: ''admin user not found'''
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
+        "409":
+          description: Your own account, or the last active superuser
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
+        "500":
+          description: The account could not be changed
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
+      security:
+      - BearerAuth: []
+      summary: Disable an account
+      tags:
+      - accounts
+  /admin-users/{username}/enable:
+    post:
+      description: Allows a disabled account to log in again. Superusers only.
+      parameters:
+      - description: Account name
+        in: path
+        name: username
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/admin.statusResponse'
+        "401":
+          description: 'Missing, expired or invalid session. Error: ''Unauthorized'''
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
+        "403":
+          description: Only a superuser can do this
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
+        "404":
+          description: 'The account does not exist. Error: ''admin user not found'''
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
+        "500":
+          description: The account could not be changed
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
+      security:
+      - BearerAuth: []
+      summary: Enable an account
+      tags:
+      - accounts
+  /admin-users/{username}/password:
+    post:
+      consumes:
+      - application/json
+      description: Sets a new password for an account and ends all its sessions. Superusers
+        only.
+      parameters:
+      - description: Account name
+        in: path
+        name: username
+        required: true
+        type: string
+      - description: New password
+        in: body
+        name: password
+        required: true
+        schema:
+          $ref: '#/definitions/admin.passwordBody'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/admin.statusResponse'
+        "400":
+          description: Short password or malformed JSON
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
+        "401":
+          description: 'Missing, expired or invalid session. Error: ''Unauthorized'''
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
+        "403":
+          description: Only a superuser can do this
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
+        "404":
+          description: 'The account does not exist. Error: ''admin user not found'''
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
+        "500":
+          description: The password could not be changed
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
+      security:
+      - BearerAuth: []
+      summary: Reset an account's password
+      tags:
+      - accounts
+  /admin-users/{username}/role:
+    post:
+      consumes:
+      - application/json
+      description: Sets superuser or operator. The last active superuser cannot be
+        demoted. Superusers only.
+      parameters:
+      - description: Account name
+        in: path
+        name: username
+        required: true
+        type: string
+      - description: New role
+        in: body
+        name: role
+        required: true
+        schema:
+          $ref: '#/definitions/admin.roleBody'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/admin.statusResponse'
+        "400":
+          description: Role is not superuser or operator, or malformed JSON
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
+        "401":
+          description: 'Missing, expired or invalid session. Error: ''Unauthorized'''
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
+        "403":
+          description: Only a superuser can do this
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
+        "404":
+          description: 'The account does not exist. Error: ''admin user not found'''
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
+        "409":
+          description: At least one active superuser must remain
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
+        "500":
+          description: The role could not be changed
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
+      security:
+      - BearerAuth: []
+      summary: Change an account's role
+      tags:
+      - accounts
   /domains:
     get:
       description: Every domain with its policies. Client keys are never returned.
-        Needs no key.
       produces:
       - application/json
       responses:
@@ -371,7 +757,6 @@ paths:
       - domains
     get:
       description: One domain with its policies. The client key is never returned.
-        Needs no key.
       parameters:
       - description: Domain name
         in: path
@@ -457,8 +842,7 @@ paths:
       - domains
   /domains/{domainName}/traffic:
     get:
-      description: Bytes transferred per day between two dates, inclusive. Needs no
-        key.
+      description: Bytes transferred per day between two dates, inclusive.
       parameters:
       - description: Domain name
         in: path
@@ -790,14 +1174,20 @@ paths:
       - visitor-auth
   /health:
     get:
-      description: Reports that the admin API is up. Needs no key.
+      description: Checks the database and, in a cluster, NATS. 200 when every check
+        passes; 503 when one fails, naming the failed check without the error text.
+        Needs no session.
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/admin.statusResponse'
+            $ref: '#/definitions/admin.healthResponse'
+        "503":
+          description: 'At least one check failed: its value is down'
+          schema:
+            $ref: '#/definitions/admin.healthResponse'
       summary: Health check
       tags:
       - system
@@ -876,11 +1266,11 @@ paths:
       - session
   /requests:
     get:
-      description: 'Finished HTTP requests, newest first: domain, port the visitor
-        came in on, method, path without query, status, duration and response size.
-        Headers and bodies are never stored. Without from or to, the newest requests
-        come from memory; with a time range they come from the database (kept 7 days).
-        Needs no key.'
+      description: 'Finished HTTP requests, newest first, read from the database (about
+        two seconds of delay): domain, port the visitor came in on, method, path without
+        query, status, duration and response size. Headers and bodies are never stored.
+        Without from or to, the newest requests come from memory; with a time range
+        they come from the database (kept 7 days).'
       parameters:
       - description: Only this domain
         in: query
@@ -919,9 +1309,9 @@ paths:
             ''to must be RFC 3339 or YYYY-MM-DD'', or a range error'
           schema:
             $ref: '#/definitions/admin.errorResponse'
-        "500":
-          description: 'The request log could not be read. Error: ''could not read
-            the request log'''
+        "503":
+          description: 'The request history is not available: the database does not
+            answer'
           schema:
             $ref: '#/definitions/admin.errorResponse'
       security:
@@ -932,7 +1322,9 @@ paths:
   /stats:
     get:
       description: Clients, active sessions, pending visitors, bytes since start,
-        and intranet ports for each domain with a hub. Needs no key.
+        and intranet ports for each domain, added up over every server of the cluster
+        that reported in the last 20 seconds. Read from the database, so any server
+        answers the same.
       produces:
       - application/json
       responses:
@@ -942,6 +1334,10 @@ paths:
             items:
               $ref: '#/definitions/manager.DomainStats'
             type: array
+        "503":
+          description: The database that holds the cluster state does not answer
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
       security:
       - BearerAuth: []
       summary: Live state of every domain

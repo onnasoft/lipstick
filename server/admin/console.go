@@ -24,7 +24,7 @@ type consoleStore interface {
 const consoleUsage = `Usage: lipstick-server admin <command> [flags]
 
 Commands:
-  create          -username NAME [-role admin|operator]   create an admin account
+  create          -username NAME [-role superuser|operator] create an admin account
   reset-password  -username NAME                         set a new password and end its sessions
   disable         -username NAME                         block the account and end its sessions
   enable          -username NAME                         allow the account again
@@ -45,7 +45,7 @@ func RunConsole(store consoleStore, args []string, readPassword func(prompt stri
 	fs := flag.NewFlagSet("admin "+command, flag.ContinueOnError)
 	fs.SetOutput(errOut)
 	username := fs.String("username", "", "account name")
-	role := fs.String("role", auth.RoleAdmin, "admin or operator (create only)")
+	role := fs.String("role", auth.RoleSuperuser, "superuser or operator (create only)")
 	if err := fs.Parse(rest); err != nil {
 		return 2
 	}

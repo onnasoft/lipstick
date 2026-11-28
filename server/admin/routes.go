@@ -33,10 +33,17 @@ func configureRouter(admin *Admin) {
 	r.Use(router.sessionGate())
 
 	r.GET("/health", router.health)
-	r.GET("/admin/panel.css", serveAsset("panel.css", "text/css; charset=utf-8"))
-	r.GET("/admin/panel.js", serveAsset("panel.js", "application/javascript; charset=utf-8"))
-	r.GET("/admin/login.js", serveAsset("login.js", "application/javascript; charset=utf-8"))
+	r.GET("/admin/js/*file", serveStatic("js"))
+	r.GET("/admin/css/*file", serveStatic("css"))
 	r.POST("/web/login", router.webLogin)
+	r.GET("/account", router.whoAmI)
+	r.POST("/account/password", router.changeOwnPassword)
+	r.GET("/admin-users", router.listAccounts)
+	r.POST("/admin-users", router.createAccount)
+	r.POST("/admin-users/:username/password", router.resetAccountPassword)
+	r.POST("/admin-users/:username/role", router.changeAccountRole)
+	r.POST("/admin-users/:username/disable", router.disableAccount)
+	r.POST("/admin-users/:username/enable", router.enableAccount)
 	r.GET("/stats", router.getStats)
 	r.GET("/", router.ui)
 	r.GET("/ui", func(c *gin.Context) { c.Redirect(http.StatusFound, "/") })
@@ -100,9 +107,9 @@ func writeLookupError(c *gin.Context, err error) {
 	c.JSON(http.StatusInternalServerError, errorResponse{Error: "Unable to get domain"})
 }
 
-// getDomains is read-only and needs no key; see the note on authorized.
+// getDomains is read-only. It needs a session like every route except health and login.
 // @Summary List domains
-// @Description Every domain with its policies. Client keys are never returned. Needs no key.
+// @Description Every domain with its policies. Client keys are never returned.
 // @Tags domains
 // @Security BearerAuth
 // @Produce json
@@ -124,9 +131,9 @@ func (r *router) getDomains(c *gin.Context) {
 	c.JSON(http.StatusOK, views)
 }
 
-// getDomain is read-only and needs no key; see the note on authorized.
+// getDomain is read-only. It needs a session like every route except health and login.
 // @Summary Get one domain
-// @Description One domain with its policies. The client key is never returned. Needs no key.
+// @Description One domain with its policies. The client key is never returned.
 // @Tags domains
 // @Security BearerAuth
 // @Produce json
@@ -334,20 +341,50 @@ func (r *router) deleteDomain(c *gin.Context) {
 }
 
 // @Summary Health check
-// @Description Reports that the admin API is up. Needs no key.
+// @Description Checks the database and, in a cluster, NATS. 200 when every check passes; 503 when one fails, naming the failed check without the error text. Needs no session.
 // @Tags system
 // @Produce json
-// @Success 200 {object} statusResponse
+// @Success 200 {object} healthResponse
+// @Failure 503 {object} healthResponse "At least one check failed: its value is down"
 // @Router /health [get]
 func (r *router) health(c *gin.Context) {
-	c.JSON(http.StatusOK, statusResponse{Status: "ok"})
+	checks := make(map[string]string, len(r.admin.health))
+	ok := true
+	for _, h := range r.admin.health {
+		if err := runCheck(h.check); err != nil {
+			checks[h.name] = "down"
+			ok = false
+			logger.Default.Error("health: ", h.name, " is down:", err)
+			continue
+		}
+		checks[h.name] = "ok"
+	}
+	// The answer names the dependency but not the error: the port is public to the
+	// machine's network, and error texts can reveal addresses or credentials.
+	if !ok {
+		c.JSON(http.StatusServiceUnavailable, healthResponse{Status: "degraded", Checks: checks})
+		return
+	}
+	c.JSON(http.StatusOK, healthResponse{Status: "ok", Checks: checks})
+}
+
+// runCheck runs one check with a deadline, so a hung dependency cannot hang /health.
+func runCheck(fn func() error) error {
+	done := make(chan error, 1)
+	go func() { done <- fn() }()
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(2 * time.Second):
+		return errors.New("no answer within 2 seconds")
+	}
 }
 
 // getTraffic returns the daily usage of one domain between two dates, both in
 // YYYY-MM-DD format. It is in the admin API because it reveals per-domain usage.
-// getTraffic is read-only and needs no key; see the note on authorized.
+// getTraffic is read-only. It needs a session like every route except health and login.
 // @Summary Daily traffic of a domain
-// @Description Bytes transferred per day between two dates, inclusive. Needs no key.
+// @Description Bytes transferred per day between two dates, inclusive.
 // @Tags domains
 // @Security BearerAuth
 // @Produce json
@@ -406,26 +443,32 @@ func (r *router) getTraffic(c *gin.Context) {
 
 // getStats returns the live state of every domain: clients, sessions, pending
 // visitors, bytes since start, and intranet ports.
-// getStats is read-only and needs no key; see the note on authorized.
+// getStats is read-only. It needs a session like every route except health and login.
 // @Summary Live state of every domain
-// @Description Clients, active sessions, pending visitors, bytes since start, and intranet ports for each domain with a hub. Needs no key.
+// @Description Clients, active sessions, pending visitors, bytes since start, and intranet ports for each domain, added up over every server of the cluster that reported in the last 20 seconds. Read from the database, so any server answers the same.
 // @Tags domains
 // @Security BearerAuth
 // @Produce json
 // @Success 200 {array} manager.DomainStats
+// @Failure 503 {object} errorResponse "The database that holds the cluster state does not answer"
 // @Router /stats [get]
 func (r *router) getStats(c *gin.Context) {
 	if r.admin.stats == nil {
 		c.JSON(http.StatusOK, []manager.DomainStats{})
 		return
 	}
-	c.JSON(http.StatusOK, r.admin.stats())
+	stats, err := r.admin.stats()
+	if err != nil {
+		c.JSON(http.StatusServiceUnavailable, errorResponse{Error: "the state of the cluster is not available right now"})
+		return
+	}
+	c.JSON(http.StatusOK, stats)
 }
 
 // ui serves the panel. The page holds no data: it reads the public read-only
 // endpoints, so nothing sensitive is in the HTML itself.
 // @Summary Admin panel
-// @Description HTML panel that reads /stats, /requests and the daily traffic. Needs no key.
+// @Description HTML panel that reads /stats, /requests and the daily traffic.
 // @Tags system
 // @Produce html
 // @Success 200 {string} string "HTML page"
@@ -436,7 +479,7 @@ func (r *router) ui(c *gin.Context) {
 	c.Header("X-Frame-Options", "DENY")
 	c.Header("Referrer-Policy", "no-referrer")
 	c.Header("Cache-Control", "no-store")
-	c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(panelHTML))
+	c.Data(http.StatusOK, "text/html; charset=utf-8", pageFile("index.html"))
 }
 
 // getRequests returns finished requests, newest first. Filters: domain, port
@@ -444,9 +487,9 @@ func (r *router) ui(c *gin.Context) {
 // time range with from and to (RFC 3339 or YYYY-MM-DD; a date in "to" includes
 // that whole day). Without a time range the newest requests come from memory.
 // limit defaults to 100 and is capped at 500.
-// getRequests is read-only and needs no key; see the note on authorized.
+// getRequests is read-only. It needs a session like every route except health and login.
 // @Summary Recent HTTP requests
-// @Description Finished HTTP requests, newest first: domain, port the visitor came in on, method, path without query, status, duration and response size. Headers and bodies are never stored. Without from or to, the newest requests come from memory; with a time range they come from the database (kept 7 days). Needs no key.
+// @Description Finished HTTP requests, newest first, read from the database (about two seconds of delay): domain, port the visitor came in on, method, path without query, status, duration and response size. Headers and bodies are never stored. Without from or to, the newest requests come from memory; with a time range they come from the database (kept 7 days).
 // @Tags requests
 // @Security BearerAuth
 // @Produce json
@@ -457,7 +500,7 @@ func (r *router) ui(c *gin.Context) {
 // @Param to query string false "End of the range: RFC 3339 or YYYY-MM-DD (a date includes the whole day)"
 // @Success 200 {array} manager.RequestRecord
 // @Failure 400 {object} errorResponse "Invalid parameter. Error: 'port must be between 1 and 65535', 'limit must be a positive number', 'from must be RFC 3339 or YYYY-MM-DD', 'to must be RFC 3339 or YYYY-MM-DD', or a range error"
-// @Failure 500 {object} errorResponse "The request log could not be read. Error: 'could not read the request log'"
+// @Failure 503 {object} errorResponse "The request history is not available: the database does not answer"
 // @Router /requests [get]
 func (r *router) getRequests(c *gin.Context) {
 	q := manager.RequestQuery{Domain: c.Query("domain"), Limit: 100}
@@ -494,12 +537,8 @@ func (r *router) getRequests(c *gin.Context) {
 		return
 	}
 	list, err := r.admin.requests(q)
-	if errors.Is(err, manager.ErrHistoryUnavailable) {
-		c.JSON(http.StatusBadRequest, errorResponse{Error: err.Error()})
-		return
-	}
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, errorResponse{Error: "could not read the request log"})
+	if errors.Is(err, manager.ErrHistoryUnavailable) || err != nil {
+		c.JSON(http.StatusServiceUnavailable, errorResponse{Error: "the request log is not available right now"})
 		return
 	}
 	c.JSON(http.StatusOK, list)

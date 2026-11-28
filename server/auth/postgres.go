@@ -40,8 +40,10 @@ func NewPostgresAuthManager() AuthManager {
 // must already be migrated. Production uses PostgreSQL; the tests use SQLite.
 func NewAuthManagerWithDB(conn *gorm.DB) AuthManager {
 	return &PostgresAuthManager{
-		db:       conn,
-		cacheTTL: 5 * time.Minute,
+		db: conn,
+		// Short on purpose: a change made on one server of a cluster reaches the others
+		// within this time. Visitor requests read the database at most this often.
+		cacheTTL: 5 * time.Second,
 	}
 }
 

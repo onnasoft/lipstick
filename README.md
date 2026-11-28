@@ -445,7 +445,7 @@ Los flags reemplazan el valor del archivo cuando los escribes, y se validan igua
 No hay clave de admin. Las cuentas se crean **en la máquina del servidor**, desde la consola, con una contraseña que escribes en la terminal (no se ve al escribir):
 
 ```bash
-lipstick-server admin create -username jtorres          # rol admin (por defecto)
+lipstick-server admin create -username jtorres          # rol superuser (por defecto)
 lipstick-server admin create -username operador -role operator
 lipstick-server admin list
 lipstick-server admin reset-password -username jtorres  # cambia la contraseña y cierra sus sesiones
@@ -457,7 +457,20 @@ Las contraseñas tienen al menos 12 caracteres. Los comandos no abren ningún pu
 
 Para entrar a la API, `POST /login` con usuario y contraseña devuelve un token. Cada cambio lleva `Authorization: Bearer <token>`. El token caduca a las 12 horas, `POST /logout` lo cierra, y cinco contraseñas incorrectas bloquean la cuenta 15 minutos (respuesta `429` con `Retry-After`).
 
-**Roles.** `admin` y `operator` se guardan en la cuenta. Hoy ambos tienen el mismo acceso a la API de cambios; la separación de permisos más fina está pendiente.
+**Roles.**
+
+| Rol | Puede |
+|-----|-------|
+| `superuser` | Todo. Además gestiona las cuentas de administrador: crear, cambiar rol, bloquear, activar y poner nueva contraseña a otra cuenta. |
+| `operator` | Dominios, usuarios de visitante y sus secretos. No gestiona otras cuentas. Puede cambiar su propia contraseña. |
+
+El primer superusuario se crea siempre desde la consola. Los demás los crea un superusuario desde el panel o la API. No puedes bloquear tu propia cuenta, y nunca puede quedar sin un superusuario activo.
+
+**Desde el panel** (`https://127.0.0.1:5052/`, tras iniciar sesión) hay estas pantallas: *Panel* (estado del servidor), *Dominios* (listado, alta, detalle con tráfico de 30 días y configuración), *Tráfico y peticiones* (filtros por dominio, puerto, fechas, método y estado), *Usuarios visitantes* (crear, rotar el secreto y borrar), *Mi cuenta* (cambiar tu contraseña), *Cuentas de administrador* (solo superusuarios) y *Configuración*. Un secreto o una clave nueva se muestra una sola vez en un recuadro; cópialos en ese momento.
+
+El estilo se compila con Tailwind. Para cambiarlo: `cd server/admin/frontend && npm install && npm run build`. El CSS compilado va en el repositorio, así que compilar el servidor no necesita Node.
+
+Los usuarios de visitante no tienen contraseña: tienen un secreto propio para firmar sus peticiones (ver [Autenticación de visitantes](#autenticación-de-visitantes)).
 
 ### Admin API
 
@@ -599,6 +612,17 @@ swag init -g swagger.go -d server/admin --output server/admin/docs --outputTypes
 ```
 
 La prueba `server/admin/swagger_test.go` comprueba que la especificación declara la clave en las rutas que cambian datos y no la declara en las de lectura.
+
+## Estado compartido en un cluster
+
+Todo lo que el panel muestra del estado sale de la base de datos, así que cualquier servidor del cluster responde lo mismo:
+
+- **`/stats`**: cada servidor publica cada 5 segundos el estado de sus dominios en la tabla `node_statuses`. Al leer, se suman los servidores que han reportado en los últimos 20 segundos. Un servidor que se para desaparece de los totales en ese tiempo, y al cerrarse limpia sus filas.
+- **`/requests`** (y la actividad reciente del panel): salen de la base. Las peticiones tardan unos 2 segundos en llegar a la tabla.
+- **`/domains/{d}/traffic`**: ya salía de la base.
+- **Cambios de dominio** (restricción, redes, passthrough): otro servidor del cluster los ve en un máximo de 5 segundos, por la caché de dominios. Una clave de cliente cambiada se aplica en el siguiente intento de conexión.
+
+**`/health`** comprueba la base de datos y, si hay cluster, NATS. Responde `200` con `"status":"ok"` cuando todo responde; si algo falla, `503` con `"status":"degraded"` y el nombre de la comprobación caída. No muestra el texto del error, porque el puerto puede ser visible desde la red de la máquina.
 
 ## Cluster (varios servidores)
 

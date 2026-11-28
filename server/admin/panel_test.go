@@ -11,8 +11,8 @@ import (
 
 func statsAdmin() *Admin {
 	a := newTestAdmin(testKey)
-	a.SetStatsSource(func() []manager.DomainStats {
-		return []manager.DomainStats{{Domain: "robot-42.example.com", Status: "active", Clients: 1, ActiveSessions: 3, IntranetPorts: []string{"5105/tcp"}}}
+	a.SetStatsSource(func() ([]manager.DomainStats, error) {
+		return []manager.DomainStats{{Domain: "robot-42.example.com", Status: "active", Clients: 1, ActiveSessions: 3, IntranetPorts: []string{"5105/tcp"}}}, nil
 	})
 	return a
 }

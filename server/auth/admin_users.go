@@ -24,8 +24,10 @@ import (
 const (
 	AdminSessionTTL = 12 * time.Hour
 	MinPasswordLen  = 12
-	RoleAdmin       = "admin"
-	RoleOperator    = "operator"
+	// A superuser manages admin accounts too. An operator manages domains and visitor
+	// users, and changes only its own password.
+	RoleSuperuser = "superuser"
+	RoleOperator  = "operator"
 )
 
 var (
@@ -34,7 +36,9 @@ var (
 	ErrBadLogin          = errors.New("invalid username or password")
 	ErrSessionInvalid    = errors.New("session is not valid")
 	ErrPasswordTooShort  = errors.New("password must be at least 12 characters")
-	ErrInvalidRole       = errors.New("role must be admin or operator")
+	ErrInvalidRole       = errors.New("role must be superuser or operator")
+	ErrWrongPassword     = errors.New("the current password is wrong")
+	ErrLastSuperuser     = errors.New("at least one active superuser must remain")
 )
 
 // AdminInfo describes an admin user without its password.
@@ -123,7 +127,7 @@ func (s *AdminStore) CreateAdminUser(username, password, role string) error {
 	if !helper.ValidVisitorUsername(username) {
 		return ErrInvalidUsername
 	}
-	if role != RoleAdmin && role != RoleOperator {
+	if !validRole(role) {
 		return ErrInvalidRole
 	}
 	if err := checkNewPassword(password); err != nil {
@@ -159,11 +163,65 @@ func (s *AdminStore) ResetAdminPassword(username, password string) error {
 	return s.revokeSessions(u.ID)
 }
 
-// SetAdminDisabled enables or disables an account. Disabling ends its sessions.
+func validRole(role string) bool {
+	return role == RoleSuperuser || role == RoleOperator
+}
+
+// ChangeOwnPassword lets an account change its password after proving the current
+// one. Every session of the account ends, so the new password is needed everywhere.
+func (s *AdminStore) ChangeOwnPassword(username, current, next string) error {
+	if err := checkNewPassword(next); err != nil {
+		return err
+	}
+	u, err := s.findUser(username)
+	if err != nil {
+		return err
+	}
+	if !verifyPassword(u.PasswordHash, current) {
+		return ErrWrongPassword
+	}
+	return s.ResetAdminPassword(username, next)
+}
+
+// SetAdminRole changes the role of an account. The last active superuser cannot be
+// demoted.
+func (s *AdminStore) SetAdminRole(username, role string) error {
+	if !validRole(role) {
+		return ErrInvalidRole
+	}
+	u, err := s.findUser(username)
+	if err != nil {
+		return err
+	}
+	if u.Role == RoleSuperuser && role != RoleSuperuser && !u.Disabled {
+		if err := s.guardLastSuperuser(); err != nil {
+			return err
+		}
+	}
+	return s.db.Model(&db.AdminUser{}).Where("id = ?", u.ID).Update("role", role).Error
+}
+
+// guardLastSuperuser refuses a change that would leave no active superuser.
+func (s *AdminStore) guardLastSuperuser() error {
+	var active int64
+	s.db.Model(&db.AdminUser{}).Where("role = ? AND disabled = ?", RoleSuperuser, false).Count(&active)
+	if active <= 1 {
+		return ErrLastSuperuser
+	}
+	return nil
+}
+
+// SetAdminDisabled enables or disables an account. Disabling ends its sessions. The
+// last active superuser cannot be disabled.
 func (s *AdminStore) SetAdminDisabled(username string, disabled bool) error {
 	u, err := s.findUser(username)
 	if err != nil {
 		return err
+	}
+	if disabled && !u.Disabled && u.Role == RoleSuperuser {
+		if err := s.guardLastSuperuser(); err != nil {
+			return err
+		}
 	}
 	if err := s.db.Model(&db.AdminUser{}).Where("id = ?", u.ID).Update("disabled", disabled).Error; err != nil {
 		return err
@@ -212,22 +270,22 @@ func (s *AdminStore) NewSession(userID uint) (string, time.Time, error) {
 	return token, expires, nil
 }
 
-// Authenticate returns the account of a live session: not expired, not revoked, and
-// the account not disabled.
-func (s *AdminStore) Authenticate(token string) (string, error) {
+// Authenticate returns the account and role of a live session: not expired, not
+// revoked, and the account not disabled.
+func (s *AdminStore) Authenticate(token string) (string, string, error) {
 	if token == "" {
-		return "", ErrSessionInvalid
+		return "", "", ErrSessionInvalid
 	}
 	var rec db.AdminSession
 	err := s.db.Where("token_hash = ? AND revoked_at IS NULL AND expires_at > ?", HashToken(token), time.Now()).First(&rec).Error
 	if err != nil {
-		return "", ErrSessionInvalid
+		return "", "", ErrSessionInvalid
 	}
 	var u db.AdminUser
 	if err := s.db.First(&u, rec.UserID).Error; err != nil || u.Disabled {
-		return "", ErrSessionInvalid
+		return "", "", ErrSessionInvalid
 	}
-	return u.Username, nil
+	return u.Username, u.Role, nil
 }
 
 // Logout ends a session. It is not an error if the session is already gone.

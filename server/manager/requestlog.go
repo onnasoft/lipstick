@@ -112,16 +112,12 @@ func (l *RequestLog) Recent(q RequestQuery) []RequestRecord {
 // which keeps history across restarts. Without one it reads the in-memory ring,
 // which is always current, including requests not yet written.
 func (m *Manager) RecentRequests(q RequestQuery) ([]RequestRecord, error) {
-	if !q.From.IsZero() || !q.To.IsZero() {
-		if m.persist == nil {
-			return nil, ErrHistoryUnavailable
-		}
-		return m.persist.store.Query(q)
+	// The database is the source for every query, so every server answers the same.
+	// Requests that finished less than a couple of seconds ago may not be in it yet.
+	if m.persist == nil {
+		return nil, ErrHistoryUnavailable
 	}
-	if m.reqlog == nil {
-		return []RequestRecord{}, nil
-	}
-	return m.reqlog.Recent(q), nil
+	return m.persist.store.Query(q)
 }
 
 // ErrHistoryUnavailable means a time range was asked for but no database is

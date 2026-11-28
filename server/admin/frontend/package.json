@@ -1,0 +1,13 @@
+{
+  "name": "lipstick-admin-frontend",
+  "private": true,
+  "description": "Builds the admin panel stylesheet (Tailwind CSS) into server/admin/web/css/app.css",
+  "scripts": {
+    "build": "tailwindcss -i ./app.css -o ../web/css/app.css --minify",
+    "watch": "tailwindcss -i ./app.css -o ../web/css/app.css --watch"
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "^4.3.5",
+    "tailwindcss": "^4.3.5"
+  }
+}

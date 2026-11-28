@@ -70,12 +70,16 @@ func Migrate(conf config.DatabaseConfig) {
 		log.Fatal(err)
 	}
 
-	if err := connection.AutoMigrate(&Domain{}, &DailyConsumption{}, &RequestLogEntry{}, &VisitorUser{}, &VisitorToken{}, &AdminUser{}, &AdminSession{}); err != nil {
+	if err := connection.AutoMigrate(&Domain{}, &DailyConsumption{}, &RequestLogEntry{}, &VisitorUser{}, &VisitorToken{}, &AdminUser{}, &AdminSession{}, &NodeStatus{}); err != nil {
 		log.Fatal(err.Error())
 	}
 	// Visitor users used to hold a password hash. That scheme is gone: the column is
 	// dropped, and users created before this change have no secret, so they cannot
 	// sign requests until they are created again.
+	// The first role name was "admin". It is now "superuser".
+	if err := connection.Model(&AdminUser{}).Where("role = ?", "admin").Update("role", "superuser").Error; err != nil {
+		log.Fatal(err.Error())
+	}
 	if connection.Migrator().HasColumn(&VisitorUser{}, "password_hash") {
 		if err := connection.Migrator().DropColumn(&VisitorUser{}, "password_hash"); err != nil {
 			log.Fatal(err.Error())

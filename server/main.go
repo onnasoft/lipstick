@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -8,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"time"
 
 	"net/http"
 	_ "net/http/pprof"
@@ -98,6 +100,8 @@ func main() {
 		}
 	}
 	requestStore := manager.NewGormRequestStore(conn)
+	// Read before the variable named manager shadows the package.
+	clusterStatus := func() ([]manager.DomainStats, error) { return manager.ReadClusterStatus(conn, time.Now()) }
 	manager := manager.SetupManager(tlsConfig)
 	sniProxy.SetRoute(manager.RoutePassthrough)
 	manager.StartRequestPersistence(requestStore)
@@ -108,8 +112,30 @@ func main() {
 	}
 	admin := admin.SetupAdmin(conf.Admin.Address, auth.MakeAdminStore(), tlsConfig)
 	admin.SetDomainChangedHook(manager.DropHub)
-	admin.SetStatsSource(manager.Snapshot)
+	// The state of every server goes to the database, and the admin reads it back from
+	// there, so any server of a cluster answers with the same numbers.
+	hostname, _ := os.Hostname()
+	manager.StartNodeStatus(conn, hostname+"/"+conf.Manager.Address)
+	admin.SetStatsSource(clusterStatus)
 	admin.SetRequestSource(manager.RecentRequests)
+	checks := map[string]func() error{
+		"database": func() error {
+			sqlDB, err := conn.DB()
+			if err != nil {
+				return err
+			}
+			return sqlDB.Ping()
+		},
+	}
+	if presenceBus != nil {
+		checks["nats"] = func() error {
+			if b, ok := presenceBus.(interface{ Connected() bool }); ok && b.Connected() {
+				return nil
+			}
+			return errors.New("NATS is not connected")
+		}
+	}
+	admin.SetHealthChecks(checks)
 
 	if conf.IntranetPorts != nil {
 		policy := make(map[string][]*net.IPNet, len(conf.IntranetPorts.Domains))

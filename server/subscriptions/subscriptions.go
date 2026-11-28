@@ -108,3 +108,8 @@ func (s *SubscriptionManager) Close() {
 	s.conn.Close()
 	logger.Default.Info("NATS connection closed")
 }
+
+// Connected reports whether the NATS connection is up right now.
+func (m *SubscriptionManager) Connected() bool {
+	return m != nil && m.conn != nil && m.conn.IsConnected()
+}

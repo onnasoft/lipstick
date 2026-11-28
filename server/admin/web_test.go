@@ -3,6 +3,7 @@ package admin
 import (
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -116,11 +117,11 @@ func TestLogoutClearsTheCookie(t *testing.T) {
 // Without a session the panel shows only the login form; its files are public.
 func TestLoginPageAssetsArePublicAndStrict(t *testing.T) {
 	a := newTestAdmin(testKey)
-	rec := request(a, http.MethodGet, "/admin/panel.js", "", nil)
+	rec := request(a, http.MethodGet, "/admin/js/core.js", "", nil)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Header().Get("Content-Type"), "javascript") {
 		t.Fatalf("panel.js: %d %q", rec.Code, rec.Header().Get("Content-Type"))
 	}
-	if rec := request(a, http.MethodGet, "/admin/login.js", "", nil); rec.Code != http.StatusOK {
+	if rec := request(a, http.MethodGet, "/admin/js/login.js", "", nil); rec.Code != http.StatusOK {
 		t.Fatalf("login.js: %d", rec.Code)
 	}
 	if rec := request(a, http.MethodGet, "/health", "", nil); rec.Code != http.StatusOK {
@@ -134,9 +135,58 @@ func TestLoginPageAssetsArePublicAndStrict(t *testing.T) {
 
 // Pages and files never contain inline script or style, so the policy can forbid them.
 func TestPanelHasNoInlineScriptOrStyle(t *testing.T) {
-	for _, bad := range []string{"<script>", "<style>", " style=", " onclick=", " onchange="} {
-		if strings.Contains(panelHTML, bad) || strings.Contains(loginHTML, bad) {
-			t.Errorf("page contains %q", bad)
+	for _, page := range []string{"index.html", "login.html"} {
+		html := string(pageFile(page))
+		for _, bad := range []string{"<script>", "<style>", " style=", " onclick=", " onchange="} {
+			if strings.Contains(html, bad) {
+				t.Errorf("%s contains %q", page, bad)
+			}
+		}
+	}
+}
+
+// Data from the server must never be parsed as HTML. The scripts build every node with
+// textContent, so none of these may appear in any script of the panel.
+func TestScriptsNeverParseDataAsHTML(t *testing.T) {
+	entries, err := webFiles.ReadDir("web/js")
+	if err != nil || len(entries) == 0 {
+		t.Fatal("no scripts embedded", err)
+	}
+	for _, e := range entries {
+		src := string(pageFile("js/" + e.Name()))
+		for _, bad := range []string{"innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "eval(", "new Function("} {
+			if strings.Contains(src, bad) {
+				t.Errorf("%s uses %s", e.Name(), bad)
+			}
+		}
+	}
+}
+
+// Every script and stylesheet a page names must be in the embedded tree. A typo here
+// would leave the screen blank with no visible error.
+func TestEveryAssetAPageNamesExists(t *testing.T) {
+	re := regexp.MustCompile(`/admin/(js|css)/([A-Za-z0-9._-]+)`)
+	for _, page := range []string{"index.html", "login.html"} {
+		for _, m := range re.FindAllStringSubmatch(string(pageFile(page)), -1) {
+			if _, err := webFiles.ReadFile("web/" + m[1] + "/" + m[2]); err != nil {
+				t.Errorf("%s names %s, which is not embedded", page, m[0])
+			}
+		}
+	}
+}
+
+// The static route serves only files that exist, and never anything outside its folder.
+func TestStaticRouteServesOnlyEmbeddedFiles(t *testing.T) {
+	a := newTestAdmin(testKey)
+	if rec := request(a, http.MethodGet, "/admin/js/core.js", "", nil); rec.Code != http.StatusOK || !strings.Contains(rec.Header().Get("Content-Type"), "javascript") {
+		t.Fatalf("core.js: %d %q", rec.Code, rec.Header().Get("Content-Type"))
+	}
+	if rec := request(a, http.MethodGet, "/admin/css/app.css", "", nil); rec.Code != http.StatusOK || !strings.Contains(rec.Header().Get("Content-Type"), "css") {
+		t.Fatalf("app.css: %d", rec.Code)
+	}
+	for _, bad := range []string{"/admin/js/nope.js", "/admin/js/..%2Fsessions.go", "/admin/css/../../admin.go", "/admin/js/"} {
+		if rec := request(a, http.MethodGet, bad, "", nil); rec.Code == http.StatusOK {
+			t.Errorf("%s served with 200", bad)
 		}
 	}
 }

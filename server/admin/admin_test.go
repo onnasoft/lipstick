@@ -55,13 +55,19 @@ func (f fakeSessions) Login(username, password string) (uint, error) {
 func (f fakeSessions) NewSession(uint) (string, time.Time, error) {
 	return f.valid, time.Now().Add(time.Hour), nil
 }
-func (f fakeSessions) Authenticate(token string) (string, error) {
+func (f fakeSessions) Authenticate(token string) (string, string, error) {
 	if token != "" && token == f.valid {
-		return "tester", nil
+		return "tester", auth.RoleSuperuser, nil
 	}
-	return "", errFakeLogin
+	return "", "", errFakeLogin
 }
-func (f fakeSessions) Logout(string) error { return nil }
+func (f fakeSessions) Logout(string) error                            { return nil }
+func (f fakeSessions) ChangeOwnPassword(string, string, string) error { return nil }
+func (f fakeSessions) CreateAdminUser(string, string, string) error   { return nil }
+func (f fakeSessions) ResetAdminPassword(string, string) error        { return nil }
+func (f fakeSessions) SetAdminRole(string, string) error              { return nil }
+func (f fakeSessions) SetAdminDisabled(string, bool) error            { return nil }
+func (f fakeSessions) ListAdminUsers() ([]auth.AdminInfo, error)      { return nil, nil }
 
 // newTestAdmin builds the API. token is the only session token it accepts.
 func newTestAdmin(token string) *Admin {

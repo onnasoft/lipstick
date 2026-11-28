@@ -3,15 +3,18 @@ package admin
 import (
 	"embed"
 	"net/http"
+	"path"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 )
 
-// The panel and the login form are served from these files. They are compiled into
-// the binary, and the policy sent with them allows no inline script or style.
+// The panel is served from these files, compiled into the binary. The stylesheet is
+// built from frontend/app.css with Tailwind (npm run build). The page policy allows
+// no inline script or style, so every page is a file of its own.
 //
-//go:embed web/panel.css web/panel.js web/login.js
+//go:embed web
 var webFiles embed.FS
 
 const (
@@ -26,43 +29,46 @@ const (
 		"img-src 'self' data:; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
 )
 
-const loginHTML = `<!DOCTYPE html>
-<html lang="es">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Lipstick · Entrar</title>
-<link rel="stylesheet" href="/admin/panel.css">
-</head>
-<body>
-<div class="login">
-  <h1>Lipstick</h1>
-  <form id="login-form" autocomplete="on">
-    <label for="username">Usuario</label>
-    <input id="username" name="username" autocomplete="username" required autofocus>
-    <label for="password">Contraseña</label>
-    <input id="password" name="password" type="password" autocomplete="current-password" required>
-    <button type="submit">Entrar</button>
-    <div id="login-error" class="error" role="alert"></div>
-  </form>
-</div>
-<script src="/admin/login.js"></script>
-</body>
-</html>
-`
-
-// serveAsset answers with one embedded file. The content never changes between
-// releases, so the browser may cache it for a while.
-func serveAsset(name, contentType string) gin.HandlerFunc {
+// pageFile reads an embedded page or asset. The path is always under web/.
+func pageFile(name string) []byte {
 	data, err := webFiles.ReadFile("web/" + name)
 	if err != nil {
-		panic("embedded asset missing: " + name)
+		panic("embedded file missing: " + name)
 	}
+	return data
+}
+
+// contentTypeOf returns the media type of an asset by its extension.
+func contentTypeOf(name string) string {
+	switch path.Ext(name) {
+	case ".css":
+		return "text/css; charset=utf-8"
+	case ".js":
+		return "application/javascript; charset=utf-8"
+	case ".html":
+		return "text/html; charset=utf-8"
+	}
+	return "application/octet-stream"
+}
+
+// serveStatic answers with one file from web/<dir>/. Only names that exist in the
+// embedded tree are served; anything else is a 404, and nothing outside web/ can be read.
+func serveStatic(dir string) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		name := strings.TrimPrefix(c.Param("file"), "/")
+		if name == "" || strings.Contains(name, "/") {
+			c.Status(http.StatusNotFound)
+			return
+		}
+		data, err := webFiles.ReadFile("web/" + dir + "/" + name)
+		if err != nil {
+			c.Status(http.StatusNotFound)
+			return
+		}
 		c.Header("Content-Security-Policy", pageCSP)
 		c.Header("X-Content-Type-Options", "nosniff")
 		c.Header("Cache-Control", "max-age=3600")
-		c.Data(http.StatusOK, contentType, data)
+		c.Data(http.StatusOK, contentTypeOf(name), data)
 	}
 }
 

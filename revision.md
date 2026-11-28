@@ -582,6 +582,42 @@ Lipstick exposes local ports to the internet through a reverse tunnel. The main 
 - **Verified:** tests for the cookie attributes, the token missing from the web login answer, the CSRF rule for cookie changes and for Bearer, the shared lock, logout clearing the cookie, public assets, and no inline script or style in the pages.
 - **Left for later:** the cookie is not bound to the client's address or to a device; a session stolen from the machine itself is still a session.
 
+### 60. Account and visitor-user management in the panel; superuser role (feature)
+- **Roles:** `superuser` (manages admin accounts) and `operator` (manages domains and visitor users, changes its own password). The old `admin` name is migrated to `superuser` at startup. The first account is still created from the console.
+- **Enforced:** `requireSuperuser` on the account-management routes; every other route accepts both roles. The role is carried by the session (`Authenticate` returns it).
+- **Rules:** the last active superuser cannot be disabled or demoted; a superuser cannot disable itself; changing one's own password needs the current one and ends every session of the account.
+- **API:** `GET /account`, `POST /account/password`, `GET|POST /admin-users`, `POST /admin-users/{username}/password|role|disable|enable`. Visitor-user routes are unchanged.
+- **Panel:** three sections, *Mi cuenta*, *Cuentas de administrador* (hidden unless superuser), *Usuarios de visitante* (per domain). The scripts build the page with `textContent`, so no name from the server is ever read as HTML. A new secret is shown once.
+- **Verified:** store tests (last superuser, own password with the current one, sessions ended); API tests on a real SQLite store (operator refused with 403 on every account route, duplicate 409, short password 400, self-disable 409, disable and reactivate, reset ends sessions, last superuser 409, CSRF on cookie changes); the panel's element ids match the scripts; the scripts pass `node --check`.
+- **Not done:** no audit log of account changes yet; no per-domain permissions (an operator manages every domain).
+
+### 61. Panel redesign: screens, Tailwind, and the gaps on the server (feature)
+- **Structure:** a sidebar application with hash routes: Panel, Dominios (list and detail), Tráfico y peticiones, Usuarios visitantes, Mi cuenta, Cuentas de administrador (superusers only), Configuración. Each screen is one file in `server/admin/web/js/`.
+- **Styling:** Tailwind CSS v4. The source is `server/admin/frontend/app.css`; `npm run build` writes `server/admin/web/css/app.css`, which the binary serves. Colors are CSS variables, so the dark theme switches on `data-theme` without duplicate classes. The compiled file is committed, so building the server needs no Node.
+- **Why not HTMX:** the screens need the JSON API that already exists and client-side filters. HTMX would need HTML fragment endpoints that repeat the logic, plus a vendored dependency under the page policy. The panel uses plain JavaScript with no dependencies.
+- **Security kept:** every node is built with `textContent`; a test fails if a script uses `innerHTML`, `outerHTML`, `insertAdjacentHTML`, `document.write` or `eval`. The page policy forbids inline scripts and styles. Writes send the CSRF header. Destructive actions ask for confirmation, and deleting a domain asks for its name. A one-time secret or key is shown once in a box.
+- **Serving:** `GET /admin/js/*` and `/admin/css/*` serve only files that exist in the embedded tree; other names are 404. A test checks that every asset a page names exists.
+- **Roles:** the panel hides the accounts screen for operators and says why; the server refuses their calls as well.
+- **Gaps in the server, not invented in the panel:**
+  1. Close all of my sessions at once (only the current one can be closed).
+  2. Visitor users with their creation date and status (the list returns names only). The screen shows names and actions.
+  3. Method and status filters on `/requests` (the panel filters up to 500 rows in the browser).
+  4. A read-only server information endpoint: version, uptime, listen addresses.
+  5. An audit log of account and domain changes.
+- **Not verified in a browser here:** the screens were checked for syntax, element ids and the built stylesheet, not by clicking through them.
+
+### 62. Cluster-wide state in the database; honest health (change)
+- **Why:** `/stats` and the recent requests came from each server's memory, so two admin APIs in a cluster answered differently. `/health` always said `ok`, even when the database or NATS was down.
+- **State:** `node_statuses` (node, domain, status, counters, ports, updated_at). Each server writes its rows every 5 s (`StartNodeStatus`) and removes them when it stops. `ReadClusterStatus` adds up the rows reported in the last 20 s, taking the best status when several servers serve the same domain.
+- **Requests:** `RecentRequests` reads the request table for every query. The in-memory ring still feeds the persister but is no longer read by the API.
+- **Health:** the database is pinged and, with a cluster, NATS connectivity is checked; each check has a 2 s deadline. 200 when all pass, 503 with `degraded` otherwise. The answer names the failed check and never its error text.
+- **Cache:** domain cache lifetime reduced from 5 minutes to 5 seconds, so changes made on one server reach the others within that time.
+- **Errors:** `/stats` and `/requests` answer 503 when the database does not respond, instead of showing an empty or stale state.
+- **Verified:** tests on a shared SQLite file with two connections standing in for two servers and a third reader: identical totals from every connection; silent servers drop out; servers remove domains they stop serving; recent requests newest first from the database; health ok, degraded without leaking the error, and a hung check cut off after 2 s; 503 when the database is down.
+- **Not verified:** two real servers on PostgreSQL and NATS. The tests use SQLite and do not prove the PostgreSQL upsert or latency under load.
+- **Known limit:** a domain change disconnects the clients only of the server that received the change; clients on other servers reconnect on their own. A NATS broadcast of that event is the next step.
+- **Known limit:** `bytesSinceStart` is the sum of each server's own counter, so it drops when one server restarts.
+
 ## Recommended order
 
 1. Items 1, 2, 3, and 4: authentication, unpredictable tickets, TLS verification, and admin API hardening.

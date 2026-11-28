@@ -74,7 +74,7 @@ type AdminUser struct {
 	ID           uint   `gorm:"primary_key"`
 	Username     string `gorm:"not null;uniqueIndex"`
 	PasswordHash string `gorm:"not null"`
-	Role         string `gorm:"not null;default:'admin'"`
+	Role         string `gorm:"not null;default:'superuser'"`
 	Disabled     bool   `gorm:"not null;default:false"`
 	CreatedAt    time.Time
 }
@@ -87,4 +87,20 @@ type AdminSession struct {
 	ExpiresAt time.Time `gorm:"not null;index"`
 	RevokedAt *time.Time
 	CreatedAt time.Time
+}
+
+// NodeStatus is the state one server reports for one domain, every few seconds. The
+// rows of all servers in a cluster together give the state of the cluster, so any
+// server's admin API answers the same. A row older than the freshness window belongs
+// to a server that stopped reporting and is ignored.
+type NodeStatus struct {
+	NodeID          string    `gorm:"primaryKey;size:191"`
+	Domain          string    `gorm:"primaryKey;size:255"`
+	Status          string    `gorm:"not null;size:16"`
+	Clients         int       `gorm:"not null;default:0"`
+	ActiveSessions  int64     `gorm:"not null;default:0"`
+	PendingVisitors int       `gorm:"not null;default:0"`
+	BytesSinceStart int64     `gorm:"not null;default:0"`
+	IntranetPorts   string    `gorm:"not null;default:''"`
+	UpdatedAt       time.Time `gorm:"not null;index"`
 }

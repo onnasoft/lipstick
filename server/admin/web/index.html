@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Lipstick · Administración</title>
+<link rel="stylesheet" href="/admin/css/app.css">
+<script src="/admin/js/theme.js"></script>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" aria-label="Navegación principal">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true">L</div>
+      <div class="brand-name">Lipstick</div>
+    </div>
+    <nav id="nav" aria-label="Secciones"></nav>
+    <div class="sidebar-foot">Panel de administración</div>
+  </aside>
+  <div class="main">
+    <header class="topbar">
+      <div class="crumb" id="crumb"></div>
+      <div class="userbox">
+        <button class="btn btn-ghost icon-btn" id="theme-toggle" type="button" aria-label="Cambiar tema claro u oscuro">Tema</button>
+        <div class="avatar" id="avatar" aria-hidden="true">·</div>
+        <div>
+          <div class="cell-strong" id="me-name">…</div>
+          <div class="hint" id="me-role"></div>
+        </div>
+        <button class="btn btn-sm" id="logout" type="button">Cerrar sesión</button>
+      </div>
+    </header>
+    <main class="view" id="view" tabindex="-1"></main>
+  </div>
+</div>
+<div id="toasts" aria-live="polite"></div>
+<script src="/admin/js/core.js"></script>
+<script src="/admin/js/dashboard.js"></script>
+<script src="/admin/js/domains.js"></script>
+<script src="/admin/js/traffic.js"></script>
+<script src="/admin/js/account.js"></script>
+<script src="/admin/js/accounts.js"></script>
+<script src="/admin/js/visitors.js"></script>
+<script src="/admin/js/settings.js"></script>
+<script src="/admin/js/boot.js"></script>
+</body>
+</html>

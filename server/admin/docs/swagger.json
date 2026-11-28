@@ -13,7 +13,7 @@
     "paths": {
         "/": {
             "get": {
-                "description": "HTML panel that reads /stats, /requests and the daily traffic. Needs no key.",
+                "description": "HTML panel that reads /stats, /requests and the daily traffic.",
                 "produces": [
                     "text/html"
                 ],
@@ -31,6 +31,493 @@
                 }
             }
         },
+        "/account": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "The account and role of the session making the request.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "accounts"
+                ],
+                "summary": "Who am I",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/admin.accountInfo"
+                        }
+                    },
+                    "401": {
+                        "description": "Missing, expired or invalid session. Error: 'Unauthorized'",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/account/password": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Changes the password of the session's own account after checking the current one. Every session of the account ends, so the user logs in again with the new password.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "accounts"
+                ],
+                "summary": "Change my password",
+                "parameters": [
+                    {
+                        "description": "Current and new password",
+                        "name": "change",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/admin.ownPasswordBody"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/admin.statusResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "The new password is shorter than 12 characters, or the body is not JSON",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Missing, expired or invalid session. Error: 'Unauthorized'",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "The current password is wrong. Error: 'the current password is wrong'",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "The password could not be changed",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin-users": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Every account with its role and status. Superusers only.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "accounts"
+                ],
+                "summary": "List admin accounts",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/admin.accountView"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing, expired or invalid session. Error: 'Unauthorized'",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Only a superuser can do this",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "The accounts could not be listed",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Creates an account with a role: superuser (manages accounts) or operator (manages domains and visitor users). Superusers only. The password is at least 12 characters.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "accounts"
+                ],
+                "summary": "Create an admin account",
+                "parameters": [
+                    {
+                        "description": "Account to create",
+                        "name": "account",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/admin.createAccountBody"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/admin.statusResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad username, short password, role not superuser or operator, or malformed JSON",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Missing, expired or invalid session. Error: 'Unauthorized'",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Only a superuser can do this",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "An account with that name already exists",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "The account could not be created",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin-users/{username}/disable": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Blocks the account and ends its sessions. You cannot disable your own account, and the last active superuser cannot be disabled. Superusers only.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "accounts"
+                ],
+                "summary": "Disable an account",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Account name",
+                        "name": "username",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/admin.statusResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Missing, expired or invalid session. Error: 'Unauthorized'",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Only a superuser can do this",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "The account does not exist. Error: 'admin user not found'",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Your own account, or the last active superuser",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "The account could not be changed",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin-users/{username}/enable": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Allows a disabled account to log in again. Superusers only.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "accounts"
+                ],
+                "summary": "Enable an account",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Account name",
+                        "name": "username",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/admin.statusResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Missing, expired or invalid session. Error: 'Unauthorized'",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Only a superuser can do this",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "The account does not exist. Error: 'admin user not found'",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "The account could not be changed",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin-users/{username}/password": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Sets a new password for an account and ends all its sessions. Superusers only.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "accounts"
+                ],
+                "summary": "Reset an account's password",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Account name",
+                        "name": "username",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "New password",
+                        "name": "password",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/admin.passwordBody"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/admin.statusResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Short password or malformed JSON",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Missing, expired or invalid session. Error: 'Unauthorized'",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Only a superuser can do this",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "The account does not exist. Error: 'admin user not found'",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "The password could not be changed",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin-users/{username}/role": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Sets superuser or operator. The last active superuser cannot be demoted. Superusers only.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "accounts"
+                ],
+                "summary": "Change an account's role",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Account name",
+                        "name": "username",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "New role",
+                        "name": "role",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/admin.roleBody"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/admin.statusResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Role is not superuser or operator, or malformed JSON",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Missing, expired or invalid session. Error: 'Unauthorized'",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Only a superuser can do this",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "The account does not exist. Error: 'admin user not found'",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "At least one active superuser must remain",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "The role could not be changed",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/domains": {
             "get": {
                 "security": [
@@ -38,7 +525,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Every domain with its policies. Client keys are never returned. Needs no key.",
+                "description": "Every domain with its policies. Client keys are never returned.",
                 "produces": [
                     "application/json"
                 ],
@@ -127,7 +614,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "One domain with its policies. The client key is never returned. Needs no key.",
+                "description": "One domain with its policies. The client key is never returned.",
                 "produces": [
                     "application/json"
                 ],
@@ -297,7 +784,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Bytes transferred per day between two dates, inclusive. Needs no key.",
+                "description": "Bytes transferred per day between two dates, inclusive.",
                 "produces": [
                     "application/json"
                 ],
@@ -781,7 +1268,7 @@
         },
         "/health": {
             "get": {
-                "description": "Reports that the admin API is up. Needs no key.",
+                "description": "Checks the database and, in a cluster, NATS. 200 when every check passes; 503 when one fails, naming the failed check without the error text. Needs no session.",
                 "produces": [
                     "application/json"
                 ],
@@ -793,7 +1280,13 @@
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/admin.statusResponse"
+                            "$ref": "#/definitions/admin.healthResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "At least one check failed: its value is down",
+                        "schema": {
+                            "$ref": "#/definitions/admin.healthResponse"
                         }
                     }
                 }
@@ -907,7 +1400,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Finished HTTP requests, newest first: domain, port the visitor came in on, method, path without query, status, duration and response size. Headers and bodies are never stored. Without from or to, the newest requests come from memory; with a time range they come from the database (kept 7 days). Needs no key.",
+                "description": "Finished HTTP requests, newest first, read from the database (about two seconds of delay): domain, port the visitor came in on, method, path without query, status, duration and response size. Headers and bodies are never stored. Without from or to, the newest requests come from memory; with a time range they come from the database (kept 7 days).",
                 "produces": [
                     "application/json"
                 ],
@@ -964,8 +1457,8 @@
                             "$ref": "#/definitions/admin.errorResponse"
                         }
                     },
-                    "500": {
-                        "description": "The request log could not be read. Error: 'could not read the request log'",
+                    "503": {
+                        "description": "The request history is not available: the database does not answer",
                         "schema": {
                             "$ref": "#/definitions/admin.errorResponse"
                         }
@@ -980,7 +1473,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Clients, active sessions, pending visitors, bytes since start, and intranet ports for each domain with a hub. Needs no key.",
+                "description": "Clients, active sessions, pending visitors, bytes since start, and intranet ports for each domain, added up over every server of the cluster that reported in the last 20 seconds. Read from the database, so any server answers the same.",
                 "produces": [
                     "application/json"
                 ],
@@ -996,6 +1489,12 @@
                             "items": {
                                 "$ref": "#/definitions/manager.DomainStats"
                             }
+                        }
+                    },
+                    "503": {
+                        "description": "The database that holds the cluster state does not answer",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
                         }
                     }
                 }
@@ -1067,6 +1566,56 @@
         }
     },
     "definitions": {
+        "admin.accountInfo": {
+            "type": "object",
+            "properties": {
+                "role": {
+                    "type": "string",
+                    "example": "superuser"
+                },
+                "username": {
+                    "type": "string",
+                    "example": "jtorres"
+                }
+            }
+        },
+        "admin.accountView": {
+            "type": "object",
+            "properties": {
+                "createdAt": {
+                    "type": "string"
+                },
+                "disabled": {
+                    "type": "boolean",
+                    "example": false
+                },
+                "role": {
+                    "type": "string",
+                    "example": "operator"
+                },
+                "username": {
+                    "type": "string",
+                    "example": "operador"
+                }
+            }
+        },
+        "admin.createAccountBody": {
+            "type": "object",
+            "properties": {
+                "password": {
+                    "type": "string",
+                    "example": "a-password-of-12-or-more"
+                },
+                "role": {
+                    "type": "string",
+                    "example": "operator"
+                },
+                "username": {
+                    "type": "string",
+                    "example": "operador"
+                }
+            }
+        },
         "admin.dailyConsumption": {
             "type": "object",
             "properties": {
@@ -1187,6 +1736,21 @@
                 }
             }
         },
+        "admin.healthResponse": {
+            "type": "object",
+            "properties": {
+                "checks": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "status": {
+                    "type": "string",
+                    "example": "ok"
+                }
+            }
+        },
         "admin.loginBody": {
             "type": "object",
             "properties": {
@@ -1213,6 +1777,37 @@
                 "username": {
                     "type": "string",
                     "example": "jtorres"
+                }
+            }
+        },
+        "admin.ownPasswordBody": {
+            "type": "object",
+            "properties": {
+                "currentPassword": {
+                    "type": "string",
+                    "example": "the-password-you-have-now"
+                },
+                "newPassword": {
+                    "type": "string",
+                    "example": "a-password-of-12-or-more"
+                }
+            }
+        },
+        "admin.passwordBody": {
+            "type": "object",
+            "properties": {
+                "password": {
+                    "type": "string",
+                    "example": "a-password-of-12-or-more"
+                }
+            }
+        },
+        "admin.roleBody": {
+            "type": "object",
+            "properties": {
+                "role": {
+                    "type": "string",
+                    "example": "operator"
                 }
             }
         },

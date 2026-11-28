@@ -75,6 +75,8 @@ type Manager struct {
 	intranet       *intranetPorts
 	reqlog         *RequestLog
 	persist        *persister
+	nodeStop       chan struct{} // closes to stop publishing this server's state, see nodestatus.go
+	nodeDone       chan struct{}
 	nonces         nonceCache
 	cluster        *cluster         // nil on a single server
 	failures       failureLimiter   // failed visitor logins, see guard.go
@@ -151,6 +153,8 @@ func (m *Manager) DropHub(domain string) {
 // Close stops every hub and flushes the pending traffic counters. Called on
 // shutdown.
 func (m *Manager) Close() {
+	m.stopNodeStatus()
+	m.stopNodeStatus()
 	m.releaseAllIntranetPorts()
 	m.hubs.Range(func(key, value any) bool {
 		m.hubs.Delete(key)
