@@ -668,6 +668,11 @@ Lipstick exposes local ports to the internet through a reverse tunnel. The main 
 - **Validated by the race-enabled suite:** several full runs under `-race`.
 - **Not validated yet:** domain/client association with two clients connected; slow clients that read very slowly; database restarts (needs a restart of the production PostgreSQL, so it waits for an explicit decision); a malformed `Content-Length` closes the connection without an answer, where a 400 would be better.
 
+### 69. 400 for a request the parser cannot read (fix)
+- **Before:** a request with a non-numeric `Content-Length` (or any header the HTTP parser rejects) closed the connection without an answer.
+- **Now:** the listener answers `400 Bad Request` with `Connection: close` before closing (`helper.BadRequestResponse`, `helper/listener.go`).
+- **Verified:** `TestMalformedContentLengthGets400` (helper); live, through the TLS proxy: `HTTP/1.1 400 Bad Request`, and the proxy keeps serving 200. The manager package passes under `-race`.
+
 ## Recommended order
 
 1. Items 1, 2, 3, and 4: authentication, unpredictable tickets, TLS verification, and admin API hardening.

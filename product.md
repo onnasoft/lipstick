@@ -117,7 +117,7 @@ The system must remain stable under network failures, client disconnections, bac
 
 - [x] Review open concurrency issues. (the race-enabled suite passes; see revision.md, item 68)
 - [ ] Validate domain/client association consistency.
-- [ ] Improve handling of HTTP edge cases.
+- [ ] Improve handling of HTTP edge cases. (partly: a request the parser cannot read, such as a non-numeric `Content-Length`, now gets 400; other edge cases are not reviewed yet)
 - [x] Validate chunked transfer encoding. (5 MiB chunked upload, digest verified live)
 - [x] Validate `Expect: 100-continue`. (20 MiB upload with the header, digest verified live)
 - [x] Validate HTTP keep-alive. (20 held connections each answered a second request)

@@ -98,6 +98,9 @@ func (l *ListenerManager) handleHTTPConn(conn *ConnWithBuffer) error {
 		conn.Unread(b)
 		req, err := http.ReadRequest(bufio.NewReader(bytes.NewBuffer(b)))
 		if err != nil {
+			// A request the parser cannot read (a bad Content-Length, a broken header)
+			// gets a 400 before the connection is closed, instead of silence.
+			conn.Write([]byte(BadRequestResponse))
 			return err
 		}
 		l.onHTTPConn(conn, req)

@@ -28,3 +28,10 @@ var GatewayTimeoutResponse = "HTTP/1.1 504 Gateway Timeout\r\n" +
 	"Content-Length: 0\r\n" +
 	"Connection: close\r\n" +
 	"\r\n"
+
+// BadRequestResponse is a complete HTTP/1.1 400 response, sent when the request cannot be
+// parsed. The connection is closed after it.
+var BadRequestResponse = "HTTP/1.1 400 Bad Request\r\n" +
+	"Content-Length: 0\r\n" +
+	"Connection: close\r\n" +
+	"\r\n"
