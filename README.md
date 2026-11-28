@@ -480,7 +480,13 @@ Un dominio puede exigir credenciales a sus visitantes: **usuarios con firma HMAC
 
 **Usuarios con firma HMAC.** Cada usuario tiene un secreto propio. El secreto nunca viaja por la red: el visitante firma cada petición con él.
 
-Al crear el usuario (`POST /domains/:name/visitor-users` con `{"username"}`, solo con la clave de admin), la respuesta trae el secreto **una sola vez**. Guárdalo: si lo pierdes, rota el secreto con `POST /domains/:name/visitor-users/:username/rotate`. El anterior deja de funcionar al instante. El servidor necesita conocer el secreto para verificar la firma, por eso lo guarda; por eso la API nunca lo devuelve después.
+Al crear el usuario (`POST /domains/:name/visitor-users`, solo con la clave de admin) envías el usuario y su secreto, que debe tener al menos 32 caracteres:
+
+```json
+{"username": "jtorres", "secret": "<al menos 32 caracteres aleatorios>"}
+```
+
+Si omites `secret`, el servidor genera uno y lo devuelve **una sola vez** en la respuesta. Si lo pierdes, rota el secreto con `POST /domains/:name/visitor-users/:username/rotate`; el anterior deja de funcionar al instante. El servidor necesita conocer el secreto para verificar la firma, por eso lo guarda; por eso la API nunca lo devuelve después.
 
 Cada petición lleva esta cabecera:
 

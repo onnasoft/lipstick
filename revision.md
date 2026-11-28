@@ -548,9 +548,17 @@ Lipstick exposes local ports to the internet through a reverse tunnel. The main 
 - **Where:** `helper/visitorsig.go` (signing, parsing, verifying, shared with tests), `server/manager/guard.go` (`checkSignedRequest`, `signedNonceCache`), `server/auth/visitor.go` (`AddVisitorUser` returns the secret, `RotateVisitorUser`, `VisitorUserSecret`), `server/db/models.go` (`VisitorUser.Secret`), `server/db/manager.go` (drops `password_hash`), `server/admin/routes.go` (create returns the secret once; rotate route).
 - **Scheme:** `Authorization: LipstickHMAC user, ts, nonce, sig`. The signature is HMAC-SHA256 with the user's secret over the method, request target, Host, user, timestamp and nonce. Window ±2 minutes. A nonce is refused for the whole window (replay). The signature is checked before the nonce is recorded, so only holders of the secret can fill the cache. Bad signatures count toward the existing limiter.
 - **Trade-off, stated:** the server must hold each user's secret to verify signatures, so the secret is stored (not hashed). Anyone with read access to the database can impersonate the users. Argon2 is gone, so verification costs one HMAC, not one argon2id run per request.
+- **Secret at creation:** the create body takes `username` and an optional `secret` (at least 32 characters). If omitted, the server generates one and returns it once. A supplied secret is never echoed back.
 - **Not signed:** the request body. TLS protects it; the signature does not.
 - **Migration:** users created before this change have no secret and cannot sign requests. Create them again. The `password_hash` column is dropped at startup.
 - **Verified:** helper tests (valid, each covered field tampered, malformed headers, username rules, a vector computed by the README's Python example); manager tests (replay, skew, wrong secret, moved path, unknown user, limiter, nonce expiry); an integration scenario with the real client binary (signed 200, replay 401, rotation invalidates the old secret, bearer still works); auth tests on SQLite.
+
+### 57. Typed responses for every admin endpoint (documentation)
+- **Where:** `server/admin/models.go` (response and request body types), `server/admin/routes.go` (every handler writes these types; annotations rewritten from one list), `server/admin/swagger_test.go`.
+- **Change:** no handler writes an untyped map. Errors are `errorResponse`, confirmations `statusResponse`, the create and rotate responses `visitorUserResponse`, tokens `visitorTokenCreated` and `visitorTokenItem`, traffic `trafficResponse`. Each annotation lists the failure codes that handler can return.
+- **Found while doing it:** the rotate route had no annotation of its own (its block sat on top of the delete route's), so the reference was missing it.
+- **Verified:** a test fails if any response is a generic object or the rotate route is missing. Live, the field names of health, domains, domain, stats, traffic and tokens match the documented schemas exactly.
+- **Known gap:** the create-token response has no `id`; the id comes from the list. Adding it means changing `AddVisitorToken` to return the id as well.
 
 ## Recommended order
 

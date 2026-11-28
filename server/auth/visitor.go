@@ -24,10 +24,14 @@ type VisitorToken = db.VisitorToken
 
 var (
 	ErrInvalidUsername = errors.New("username must be 1 to 64 letters, digits, dots, underscores, at signs or hyphens")
+	ErrWeakSecret      = errors.New("secret must be at least 32 characters")
 	ErrUserExists      = errors.New("a visitor user with that name already exists")
 	ErrUserNotFound    = errors.New("visitor user not found")
 	ErrTokenNotFound   = errors.New("visitor token not found")
 )
+
+// MinSecretLen is the shortest secret accepted for a visitor user.
+const MinSecretLen = 32
 
 // newSecret returns a fresh 256-bit secret, base64url encoded.
 func newSecret() (string, error) {
@@ -52,17 +56,23 @@ func (p *PostgresAuthManager) domainID(domain string) (uint, error) {
 	return d.ID, nil
 }
 
-// AddVisitorUser creates a user for a domain with a new secret, and returns the
-// secret. The caller must show it now: the user needs it to sign requests.
-func (p *PostgresAuthManager) AddVisitorUser(domain, username string) (string, error) {
+// AddVisitorUser creates a user for a domain with its own secret. If secret is
+// empty, a new one is generated. It returns the secret stored, so the caller knows
+// the value in both cases. The secret must be at least MinSecretLen characters.
+func (p *PostgresAuthManager) AddVisitorUser(domain, username, secret string) (string, error) {
 	if !helper.ValidVisitorUsername(username) {
 		return "", ErrInvalidUsername
 	}
-	id, err := p.domainID(domain)
-	if err != nil {
-		return "", err
+	if secret == "" {
+		generated, err := newSecret()
+		if err != nil {
+			return "", err
+		}
+		secret = generated
+	} else if len(secret) < MinSecretLen {
+		return "", ErrWeakSecret
 	}
-	secret, err := newSecret()
+	id, err := p.domainID(domain)
 	if err != nil {
 		return "", err
 	}

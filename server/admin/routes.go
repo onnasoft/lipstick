@@ -101,7 +101,7 @@ func (r *router) authorized(c *gin.Context) bool {
 	if isAuthorized(c, r.admin.adminKey) {
 		return true
 	}
-	c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+	c.JSON(http.StatusUnauthorized, errorResponse{Error: "Unauthorized"})
 	return false
 }
 
@@ -109,10 +109,10 @@ func (r *router) authorized(c *gin.Context) bool {
 // exist, 500 for anything else.
 func writeLookupError(c *gin.Context, err error) {
 	if errors.Is(err, auth.ErrDomainNotFound) {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Domain not found"})
+		c.JSON(http.StatusNotFound, errorResponse{Error: "Domain not found"})
 		return
 	}
-	c.JSON(http.StatusInternalServerError, gin.H{"error": "Unable to get domain"})
+	c.JSON(http.StatusInternalServerError, errorResponse{Error: "Unable to get domain"})
 }
 
 // getDomains is read-only and needs no key; see the note on authorized.
@@ -121,12 +121,13 @@ func writeLookupError(c *gin.Context, err error) {
 // @Tags domains
 // @Produce json
 // @Success 200 {array} domainView
+// @Failure 500 {object} errorResponse "Internal error"
 // @Router /domains [get]
 func (r *router) getDomains(c *gin.Context) {
 
 	domains, err := r.admin.authManager.GetDomains()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Unable to get domains"})
+		c.JSON(http.StatusInternalServerError, errorResponse{Error: "Unable to get domains"})
 		return
 	}
 
@@ -144,7 +145,8 @@ func (r *router) getDomains(c *gin.Context) {
 // @Produce json
 // @Param domainName path string true "Domain name"
 // @Success 200 {object} domainView
-// @Failure 404 {object} map[string]string
+// @Failure 404 {object} errorResponse "Domain or user not found"
+// @Failure 500 {object} errorResponse "Internal error"
 // @Router /domains/{domainName} [get]
 func (r *router) getDomain(c *gin.Context) {
 
@@ -164,10 +166,11 @@ func (r *router) getDomain(c *gin.Context) {
 // @Security AdminKey
 // @Accept json
 // @Produce json
-// @Param domain body object true "Domain: name, apiKey, allowMultipleConnections, passthrough, allowedCidrs"
-// @Success 200 {object} map[string]string
-// @Failure 400 {object} map[string]string
-// @Failure 401 {object} map[string]string
+// @Param domain body domainCreateBody true "Domain to create"
+// @Success 200 {object} statusResponse
+// @Failure 400 {object} errorResponse "Bad request: a field is missing, malformed or not allowed"
+// @Failure 401 {object} errorResponse "Missing or wrong admin key"
+// @Failure 500 {object} errorResponse "Internal error"
 // @Router /domains [post]
 func (r *router) addDomain(c *gin.Context) {
 	if !r.authorized(c) {
@@ -179,31 +182,31 @@ func (r *router) addDomain(c *gin.Context) {
 	domain := &auth.Domain{AllowMultipleConnections: true}
 	raw, err := c.GetRawData()
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, errorResponse{Error: err.Error()})
 		return
 	}
 	if err := json.Unmarshal(raw, domain); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, errorResponse{Error: err.Error()})
 		return
 	}
 	var rules struct {
 		AllowedCIDRs []string `json:"allowedCidrs"`
 	}
 	if err := json.Unmarshal(raw, &rules); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "allowedCidrs must be a list of strings"})
+		c.JSON(http.StatusBadRequest, errorResponse{Error: "allowedCidrs must be a list of strings"})
 		return
 	}
 	if domain.AllowedCIDRs, err = helper.NormalizeAccessRules(rules.AllowedCIDRs); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, errorResponse{Error: err.Error()})
 		return
 	}
 
 	if err := r.admin.authManager.AddDomain(domain); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Unable to add domain"})
+		c.JSON(http.StatusInternalServerError, errorResponse{Error: "Unable to add domain"})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	c.JSON(http.StatusOK, statusResponse{Status: "ok"})
 }
 
 // @Summary Change a domain
@@ -213,12 +216,13 @@ func (r *router) addDomain(c *gin.Context) {
 // @Accept json
 // @Produce json
 // @Param domainName path string true "Domain name"
-// @Param changes body object true "Fields to change"
-// @Success 200 {object} map[string]string
-// @Failure 400 {object} map[string]string
-// @Failure 401 {object} map[string]string
-// @Failure 404 {object} map[string]string
-// @Failure 409 {object} map[string]string "Passthrough would conflict with visitor auth"
+// @Param changes body domainChangeBody true "Fields to change; send only those"
+// @Success 200 {object} statusResponse
+// @Failure 400 {object} errorResponse "Bad request: a field is missing, malformed or not allowed"
+// @Failure 401 {object} errorResponse "Missing or wrong admin key"
+// @Failure 404 {object} errorResponse "Domain or user not found"
+// @Failure 409 {object} errorResponse "Conflict with the domain's current state"
+// @Failure 500 {object} errorResponse "Internal error"
 // @Router /domains/{domainName} [patch]
 func (r *router) updateDomain(c *gin.Context) {
 	if !r.authorized(c) {
@@ -227,7 +231,7 @@ func (r *router) updateDomain(c *gin.Context) {
 
 	domain := map[string]interface{}{}
 	if err := c.BindJSON(&domain); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, errorResponse{Error: err.Error()})
 		return
 	}
 
@@ -242,7 +246,7 @@ func (r *router) updateDomain(c *gin.Context) {
 	if raw, ok := domain["apiKey"]; ok {
 		key, isString := raw.(string)
 		if !isString || key == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "apiKey must be a non-empty string"})
+			c.JSON(http.StatusBadRequest, errorResponse{Error: "apiKey must be a non-empty string"})
 			return
 		}
 		record.ApiKey = key
@@ -250,7 +254,7 @@ func (r *router) updateDomain(c *gin.Context) {
 	if raw, ok := domain["allowMultipleConnections"]; ok {
 		allow, isBool := raw.(bool)
 		if !isBool {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "allowMultipleConnections must be true or false"})
+			c.JSON(http.StatusBadRequest, errorResponse{Error: "allowMultipleConnections must be true or false"})
 			return
 		}
 		record.AllowMultipleConnections = allow
@@ -258,11 +262,11 @@ func (r *router) updateDomain(c *gin.Context) {
 	if raw, ok := domain["passthrough"]; ok {
 		pass, isBool := raw.(bool)
 		if !isBool {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "passthrough must be true or false"})
+			c.JSON(http.StatusBadRequest, errorResponse{Error: "passthrough must be true or false"})
 			return
 		}
 		if pass && record.AuthLatched {
-			c.JSON(http.StatusConflict, gin.H{"error": "passthrough cannot be turned on: the domain requires visitor authentication"})
+			c.JSON(http.StatusConflict, errorResponse{Error: "passthrough cannot be turned on: the domain requires visitor authentication"})
 			return
 		}
 		record.Passthrough = pass
@@ -270,21 +274,21 @@ func (r *router) updateDomain(c *gin.Context) {
 	if raw, ok := domain["allowedCidrs"]; ok {
 		list, isList := raw.([]interface{})
 		if !isList {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "allowedCidrs must be a list of addresses or networks"})
+			c.JSON(http.StatusBadRequest, errorResponse{Error: "allowedCidrs must be a list of addresses or networks"})
 			return
 		}
 		items := make([]string, 0, len(list))
 		for _, item := range list {
 			text, isText := item.(string)
 			if !isText {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "allowedCidrs must be a list of strings"})
+				c.JSON(http.StatusBadRequest, errorResponse{Error: "allowedCidrs must be a list of strings"})
 				return
 			}
 			items = append(items, text)
 		}
 		normalized, err := helper.NormalizeAccessRules(items)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			c.JSON(http.StatusBadRequest, errorResponse{Error: err.Error()})
 			return
 		}
 		record.AllowedCIDRs = normalized
@@ -293,7 +297,7 @@ func (r *router) updateDomain(c *gin.Context) {
 		// Clients set the restricted mode by asking for it. An admin can only clear it.
 		clear, isBool := raw.(bool)
 		if !isBool || clear {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "authLatched can only be set to false: clients set the restricted mode"})
+			c.JSON(http.StatusBadRequest, errorResponse{Error: "authLatched can only be set to false: clients set the restricted mode"})
 			return
 		}
 		record.AuthLatched = false
@@ -301,13 +305,13 @@ func (r *router) updateDomain(c *gin.Context) {
 	}
 
 	if err := r.admin.authManager.UpdateDomain(record); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Unable to update domain"})
+		c.JSON(http.StatusInternalServerError, errorResponse{Error: "Unable to update domain"})
 		return
 	}
 	// A new key or a new policy must apply to the clients already connected.
 	r.admin.domainChanged(record.Name)
 
-	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	c.JSON(http.StatusOK, statusResponse{Status: "ok"})
 }
 
 // @Summary Delete a domain
@@ -316,9 +320,10 @@ func (r *router) updateDomain(c *gin.Context) {
 // @Security AdminKey
 // @Produce json
 // @Param domainName path string true "Domain name"
-// @Success 200 {object} map[string]string
-// @Failure 401 {object} map[string]string
-// @Failure 404 {object} map[string]string
+// @Success 200 {object} statusResponse
+// @Failure 401 {object} errorResponse "Missing or wrong admin key"
+// @Failure 404 {object} errorResponse "Domain or user not found"
+// @Failure 500 {object} errorResponse "Internal error"
 // @Router /domains/{domainName} [delete]
 func (r *router) deleteDomain(c *gin.Context) {
 	if !r.authorized(c) {
@@ -333,22 +338,22 @@ func (r *router) deleteDomain(c *gin.Context) {
 	}
 
 	if err := r.admin.authManager.DelDomain(record.ID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Unable to delete domain"})
+		c.JSON(http.StatusInternalServerError, errorResponse{Error: "Unable to delete domain"})
 		return
 	}
 	r.admin.domainChanged(record.Name)
 
-	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	c.JSON(http.StatusOK, statusResponse{Status: "ok"})
 }
 
 // @Summary Health check
 // @Description Reports that the admin API is up. Needs no key.
 // @Tags system
 // @Produce json
-// @Success 200 {object} map[string]string
+// @Success 200 {object} statusResponse
 // @Router /health [get]
 func (r *router) health(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	c.JSON(http.StatusOK, statusResponse{Status: "ok"})
 }
 
 // getTraffic returns the daily usage of one domain between two dates, both in
@@ -361,8 +366,9 @@ func (r *router) health(c *gin.Context) {
 // @Param domainName path string true "Domain name"
 // @Param from query string true "First day, YYYY-MM-DD"
 // @Param to query string true "Last day, YYYY-MM-DD"
-// @Success 200 {object} map[string]interface{}
-// @Failure 400 {object} map[string]string
+// @Success 200 {object} trafficResponse
+// @Failure 400 {object} errorResponse "Bad request: a field is missing, malformed or not allowed"
+// @Failure 500 {object} errorResponse "Internal error"
 // @Router /domains/{domainName}/traffic [get]
 func (r *router) getTraffic(c *gin.Context) {
 	domainName := c.Param("domainName")
@@ -371,12 +377,12 @@ func (r *router) getTraffic(c *gin.Context) {
 
 	from, err := time.Parse("2006-01-02", fromParam)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid 'from' parameter, use YYYY-MM-DD"})
+		c.JSON(http.StatusBadRequest, errorResponse{Error: "Invalid 'from' parameter, use YYYY-MM-DD"})
 		return
 	}
 	to, err := time.Parse("2006-01-02", toParam)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid 'to' parameter, use YYYY-MM-DD"})
+		c.JSON(http.StatusBadRequest, errorResponse{Error: "Invalid 'to' parameter, use YYYY-MM-DD"})
 		return
 	}
 	to = to.Add(23*time.Hour + 59*time.Minute + 59*time.Second)
@@ -384,29 +390,29 @@ func (r *router) getTraffic(c *gin.Context) {
 	conf, err := config.GetConfig()
 	if err != nil {
 		logger.Default.Error("Error getting configuration:", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Unable to get config"})
+		c.JSON(http.StatusInternalServerError, errorResponse{Error: "Unable to get config"})
 		return
 	}
 
 	connection, err := db.GetConnection(conf.Database)
 	if err != nil {
 		logger.Default.Error("Error connecting to database:", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Unable to connect to database"})
+		c.JSON(http.StatusInternalServerError, errorResponse{Error: "Unable to connect to database"})
 		return
 	}
 
 	var consumptions []db.DailyConsumption
 	if err := connection.Where("domain = ? AND date >= ? AND date <= ?", domainName, from, to).Find(&consumptions).Error; err != nil {
 		logger.Default.Error("Error reading traffic for domain:", domainName, "Error:", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Unable to read traffic"})
+		c.JSON(http.StatusInternalServerError, errorResponse{Error: "Unable to read traffic"})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"domain":       domainName,
-		"from":         fromParam,
-		"to":           toParam,
-		"consumptions": consumptions,
+	c.JSON(http.StatusOK, trafficResponse{
+		Domain:       domainName,
+		From:         fromParam,
+		To:           toParam,
+		Consumptions: toDailyConsumptions(consumptions),
 	})
 }
 
@@ -460,14 +466,15 @@ func (r *router) ui(c *gin.Context) {
 // @Param from query string false "Start of the range: RFC 3339 or YYYY-MM-DD"
 // @Param to query string false "End of the range: RFC 3339 or YYYY-MM-DD (a date includes the whole day)"
 // @Success 200 {array} manager.RequestRecord
-// @Failure 400 {object} map[string]string "Bad parameter, or a range with no database"
+// @Failure 400 {object} errorResponse "Bad request: a field is missing, malformed or not allowed"
+// @Failure 500 {object} errorResponse "Internal error"
 // @Router /requests [get]
 func (r *router) getRequests(c *gin.Context) {
 	q := manager.RequestQuery{Domain: c.Query("domain"), Limit: 100}
 	if raw := c.Query("port"); raw != "" {
 		n, err := strconv.Atoi(raw)
 		if err != nil || n < 1 || n > 65535 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "port must be between 1 and 65535"})
+			c.JSON(http.StatusBadRequest, errorResponse{Error: "port must be between 1 and 65535"})
 			return
 		}
 		q.Port = n
@@ -475,19 +482,19 @@ func (r *router) getRequests(c *gin.Context) {
 	if raw := c.Query("limit"); raw != "" {
 		n, err := strconv.Atoi(raw)
 		if err != nil || n < 1 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "limit must be a positive number"})
+			c.JSON(http.StatusBadRequest, errorResponse{Error: "limit must be a positive number"})
 			return
 		}
 		q.Limit = min(n, 500)
 	}
 	from, err := parseTimeParam(c.Query("from"), false)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "from must be RFC 3339 or YYYY-MM-DD"})
+		c.JSON(http.StatusBadRequest, errorResponse{Error: "from must be RFC 3339 or YYYY-MM-DD"})
 		return
 	}
 	to, err := parseTimeParam(c.Query("to"), true)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "to must be RFC 3339 or YYYY-MM-DD"})
+		c.JSON(http.StatusBadRequest, errorResponse{Error: "to must be RFC 3339 or YYYY-MM-DD"})
 		return
 	}
 	q.From, q.To = from, to
@@ -498,11 +505,11 @@ func (r *router) getRequests(c *gin.Context) {
 	}
 	list, err := r.admin.requests(q)
 	if errors.Is(err, manager.ErrHistoryUnavailable) {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, errorResponse{Error: err.Error()})
 		return
 	}
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "could not read the request log"})
+		c.JSON(http.StatusInternalServerError, errorResponse{Error: "could not read the request log"})
 		return
 	}
 	c.JSON(http.StatusOK, list)
@@ -543,19 +550,23 @@ func (r *router) visitorDomain(c *gin.Context) (string, bool) {
 
 type visitorUserBody struct {
 	Username string `json:"username"`
+	// Secret is optional. If it is omitted, the server generates one and returns it once.
+	Secret string `json:"secret,omitempty"`
 }
 
 // @Summary Add a visitor user
-// @Description Creates a user of a restricted domain with a secret of its own. The response is the only time the secret is shown: store it, the user needs it to sign requests. The user signs each request with HMAC-SHA256 and sends it in the Authorization header as LipstickHMAC user, ts, nonce and sig. Usernames: 1 to 64 letters, digits, dots, underscores, at signs or hyphens.
+// @Description Creates a user of a restricted domain with its own secret. Send the secret in the body (at least 32 characters) or omit it: then the server generates one and returns it in this response, the only time it is shown. The user signs each request with HMAC-SHA256 using that secret and sends it in the Authorization header as LipstickHMAC user, ts, nonce and sig. Usernames: 1 to 64 letters, digits, dots, underscores, at signs or hyphens.
 // @Tags visitor-auth
 // @Security AdminKey
 // @Accept json
 // @Produce json
 // @Param domainName path string true "Domain name"
-// @Param user body visitorUserBody true "Username"
-// @Success 200 {object} map[string]string "username and secret, shown once"
-// @Failure 400 {object} map[string]string
-// @Failure 401 {object} map[string]string
+// @Param user body visitorUserBody true "Username and optional secret"
+// @Success 200 {object} visitorUserResponse
+// @Failure 400 {object} errorResponse "Bad request: a field is missing, malformed or not allowed"
+// @Failure 401 {object} errorResponse "Missing or wrong admin key"
+// @Failure 404 {object} errorResponse "Domain or user not found"
+// @Failure 500 {object} errorResponse "Internal error"
 // @Router /domains/{domainName}/visitor-users [post]
 func (r *router) addVisitorUser(c *gin.Context) {
 	name, ok := r.visitorDomain(c)
@@ -564,19 +575,35 @@ func (r *router) addVisitorUser(c *gin.Context) {
 	}
 	var body visitorUserBody
 	if err := c.BindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, errorResponse{Error: err.Error()})
 		return
 	}
-	secret, err := r.admin.authManager.AddVisitorUser(name, body.Username)
+	secret, err := r.admin.authManager.AddVisitorUser(name, body.Username, body.Secret)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, errorResponse{Error: err.Error()})
 		return
 	}
-	// The secret is shown only in this response.
-	c.JSON(http.StatusOK, gin.H{"status": "ok", "username": body.Username, "secret": secret})
+	out := visitorUserResponse{Status: "ok", Username: body.Username}
+	if body.Secret == "" {
+		// Generated here, so it is shown once, in this response only.
+		out.Secret = secret
+	}
+	c.JSON(http.StatusOK, out)
 }
 
 // rotateVisitorUser replaces a user's secret. The old one stops working at once.
+// @Summary Rotate a visitor user's secret
+// @Description Replaces the secret of a user and returns the new one, shown once. The old secret stops working at once.
+// @Tags visitor-auth
+// @Security AdminKey
+// @Produce json
+// @Param domainName path string true "Domain name"
+// @Param username path string true "Username"
+// @Success 200 {object} visitorUserResponse
+// @Failure 401 {object} errorResponse "Missing or wrong admin key"
+// @Failure 404 {object} errorResponse "Domain or user not found"
+// @Failure 500 {object} errorResponse "Internal error"
+// @Router /domains/{domainName}/visitor-users/{username}/rotate [post]
 func (r *router) rotateVisitorUser(c *gin.Context) {
 	name, ok := r.visitorDomain(c)
 	if !ok {
@@ -585,24 +612,26 @@ func (r *router) rotateVisitorUser(c *gin.Context) {
 	username := c.Param("username")
 	secret, err := r.admin.authManager.RotateVisitorUser(name, username)
 	if errors.Is(err, auth.ErrUserNotFound) {
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		c.JSON(http.StatusNotFound, errorResponse{Error: err.Error()})
 		return
 	}
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "unable to rotate secret"})
+		c.JSON(http.StatusInternalServerError, errorResponse{Error: "unable to rotate secret"})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"status": "ok", "username": username, "secret": secret})
+	c.JSON(http.StatusOK, visitorUserResponse{Status: "ok", Username: username, Secret: secret})
 }
 
 // @Summary List visitor users
-// @Description Usernames of a domain. Passwords are never returned.
+// @Description Usernames of a domain. Secrets are never returned.
 // @Tags visitor-auth
 // @Security AdminKey
 // @Produce json
 // @Param domainName path string true "Domain name"
 // @Success 200 {array} string
-// @Failure 401 {object} map[string]string
+// @Failure 401 {object} errorResponse "Missing or wrong admin key"
+// @Failure 404 {object} errorResponse "Domain or user not found"
+// @Failure 500 {object} errorResponse "Internal error"
 // @Router /domains/{domainName}/visitor-users [get]
 func (r *router) listVisitorUsers(c *gin.Context) {
 	name, ok := r.visitorDomain(c)
@@ -611,23 +640,12 @@ func (r *router) listVisitorUsers(c *gin.Context) {
 	}
 	users, err := r.admin.authManager.ListVisitorUsers(name)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "unable to list users"})
+		c.JSON(http.StatusInternalServerError, errorResponse{Error: "unable to list users"})
 		return
 	}
 	c.JSON(http.StatusOK, users)
 }
 
-// @Summary Rotate a visitor user's secret
-// @Description Replaces the secret of a user and returns the new one, shown once. The old secret stops working at once.
-// @Tags visitor-auth
-// @Security AdminKey
-// @Produce json
-// @Param domainName path string true "Domain name"
-// @Param username path string true "Username"
-// @Success 200 {object} map[string]string "username and new secret, shown once"
-// @Failure 401 {object} map[string]string
-// @Failure 404 {object} map[string]string
-// @Router /domains/{domainName}/visitor-users/{username}/rotate [post]
 // @Summary Delete a visitor user
 // @Description Removes the user; their access ends at once.
 // @Tags visitor-auth
@@ -635,9 +653,10 @@ func (r *router) listVisitorUsers(c *gin.Context) {
 // @Produce json
 // @Param domainName path string true "Domain name"
 // @Param username path string true "Username"
-// @Success 200 {object} map[string]string
-// @Failure 401 {object} map[string]string
-// @Failure 404 {object} map[string]string
+// @Success 200 {object} statusResponse
+// @Failure 401 {object} errorResponse "Missing or wrong admin key"
+// @Failure 404 {object} errorResponse "Domain or user not found"
+// @Failure 500 {object} errorResponse "Internal error"
 // @Router /domains/{domainName}/visitor-users/{username} [delete]
 func (r *router) deleteVisitorUser(c *gin.Context) {
 	name, ok := r.visitorDomain(c)
@@ -645,10 +664,10 @@ func (r *router) deleteVisitorUser(c *gin.Context) {
 		return
 	}
 	if err := r.admin.authManager.DeleteVisitorUser(name, c.Param("username")); err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		c.JSON(http.StatusNotFound, errorResponse{Error: err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	c.JSON(http.StatusOK, statusResponse{Status: "ok"})
 }
 
 type visitorTokenBody struct {
@@ -659,16 +678,18 @@ type visitorTokenBody struct {
 
 // addVisitorToken returns the token once. It is not stored and cannot be read again.
 // @Summary Create an API token
-// @Description Creates a Bearer token with permissions: methods (or "*") and path prefixes. The token value is returned once; only its SHA-256 hash is stored.
+// @Description Creates a Bearer token with permissions: methods (or "*") and path prefixes. The token value is returned once; only its SHA-256 hash is stored. The response has no id: list the tokens to get it.
 // @Tags visitor-auth
 // @Security AdminKey
 // @Accept json
 // @Produce json
 // @Param domainName path string true "Domain name"
-// @Param token body visitorTokenBody true "Name, methods, pathPrefixes"
-// @Success 200 {object} map[string]string "token shown once"
-// @Failure 400 {object} map[string]string
-// @Failure 401 {object} map[string]string
+// @Param token body visitorTokenBody true "Name, methods and path prefixes"
+// @Success 200 {object} visitorTokenCreated
+// @Failure 400 {object} errorResponse "Bad request: a field is missing, malformed or not allowed"
+// @Failure 401 {object} errorResponse "Missing or wrong admin key"
+// @Failure 404 {object} errorResponse "Domain or user not found"
+// @Failure 500 {object} errorResponse "Internal error"
 // @Router /domains/{domainName}/visitor-tokens [post]
 func (r *router) addVisitorToken(c *gin.Context) {
 	name, ok := r.visitorDomain(c)
@@ -677,15 +698,15 @@ func (r *router) addVisitorToken(c *gin.Context) {
 	}
 	var body visitorTokenBody
 	if err := c.BindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, errorResponse{Error: err.Error()})
 		return
 	}
 	token, err := r.admin.authManager.AddVisitorToken(name, body.Name, body.Methods, body.PathPrefixes)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, errorResponse{Error: err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"name": body.Name, "token": token, "note": "shown once; store it now"})
+	c.JSON(http.StatusOK, visitorTokenCreated{Name: body.Name, Token: token, Note: "shown once; store it now"})
 }
 
 // @Summary List API tokens
@@ -694,8 +715,10 @@ func (r *router) addVisitorToken(c *gin.Context) {
 // @Security AdminKey
 // @Produce json
 // @Param domainName path string true "Domain name"
-// @Success 200 {array} map[string]interface{}
-// @Failure 401 {object} map[string]string
+// @Success 200 {array} visitorTokenItem
+// @Failure 401 {object} errorResponse "Missing or wrong admin key"
+// @Failure 404 {object} errorResponse "Domain or user not found"
+// @Failure 500 {object} errorResponse "Internal error"
 // @Router /domains/{domainName}/visitor-tokens [get]
 func (r *router) listVisitorTokens(c *gin.Context) {
 	name, ok := r.visitorDomain(c)
@@ -704,14 +727,14 @@ func (r *router) listVisitorTokens(c *gin.Context) {
 	}
 	recs, err := r.admin.authManager.ListVisitorTokens(name)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "unable to list tokens"})
+		c.JSON(http.StatusInternalServerError, errorResponse{Error: "unable to list tokens"})
 		return
 	}
-	out := make([]gin.H, 0, len(recs))
+	out := make([]visitorTokenItem, 0, len(recs))
 	for _, t := range recs {
-		out = append(out, gin.H{
-			"id": t.ID, "name": t.Name, "methods": t.Methods, "pathPrefixes": t.PathPrefixes,
-			"createdAt": t.CreatedAt, "revoked": t.RevokedAt != nil,
+		out = append(out, visitorTokenItem{
+			ID: t.ID, Name: t.Name, Methods: t.Methods, PathPrefixes: t.PathPrefixes,
+			CreatedAt: t.CreatedAt, Revoked: t.RevokedAt != nil,
 		})
 	}
 	c.JSON(http.StatusOK, out)
@@ -724,10 +747,11 @@ func (r *router) listVisitorTokens(c *gin.Context) {
 // @Produce json
 // @Param domainName path string true "Domain name"
 // @Param id path int true "Token id"
-// @Success 200 {object} map[string]string
-// @Failure 400 {object} map[string]string
-// @Failure 401 {object} map[string]string
-// @Failure 404 {object} map[string]string
+// @Success 200 {object} statusResponse
+// @Failure 400 {object} errorResponse "Bad request: a field is missing, malformed or not allowed"
+// @Failure 401 {object} errorResponse "Missing or wrong admin key"
+// @Failure 404 {object} errorResponse "Domain or user not found"
+// @Failure 500 {object} errorResponse "Internal error"
 // @Router /domains/{domainName}/visitor-tokens/{id} [delete]
 func (r *router) revokeVisitorToken(c *gin.Context) {
 	name, ok := r.visitorDomain(c)
@@ -736,14 +760,14 @@ func (r *router) revokeVisitorToken(c *gin.Context) {
 	}
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "id must be a number"})
+		c.JSON(http.StatusBadRequest, errorResponse{Error: "id must be a number"})
 		return
 	}
 	if err := r.admin.authManager.RevokeVisitorToken(name, uint(id)); err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		c.JSON(http.StatusNotFound, errorResponse{Error: err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	c.JSON(http.StatusOK, statusResponse{Status: "ok"})
 }
 
 // splitRules turns the stored comma-separated rules into the list the API shows.
@@ -752,4 +776,14 @@ func splitRules(stored string) []string {
 		return []string{}
 	}
 	return strings.Split(stored, ",")
+}
+
+// toDailyConsumptions converts the database rows to the documented response type.
+func toDailyConsumptions(rows []db.DailyConsumption) []dailyConsumption {
+	out := make([]dailyConsumption, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, dailyConsumption{ID: r.ID, Domain: r.Domain, Date: r.Date, Month: r.Month,
+			BytesUsed: r.BytesUsed, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt})
+	}
+	return out
 }

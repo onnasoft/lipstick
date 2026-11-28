@@ -286,7 +286,7 @@ func TestIntegrationDTLSRejectsUntrustedService(t *testing.T) {
 func TestIntegrationRestrictedDomain(t *testing.T) {
 	st := startStack(t, stackOptions{})
 	defer st.close()
-	secret, err := st.auth.AddVisitorUser(testDomain, "alice")
+	secret, err := st.auth.AddVisitorUser(testDomain, "alice", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -365,7 +365,7 @@ func TestIntegrationRestrictedDomain(t *testing.T) {
 func TestIntegrationRefusedOnPassthrough(t *testing.T) {
 	st := startStack(t, stackOptions{passthrough: true})
 	defer st.close()
-	st.auth.AddVisitorUser(testDomain, "alice")
+	st.auth.AddVisitorUser(testDomain, "alice", "")
 
 	bin := clientBinary(t)
 	cfg := writeClientConfig(t, st, clientConfig{ProxyPass: localHTTP(t), VisitorAuth: true})

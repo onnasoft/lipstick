@@ -1,5 +1,64 @@
 basePath: /
 definitions:
+  admin.dailyConsumption:
+    properties:
+      BytesUsed:
+        example: 1048576
+        type: integer
+      CreatedAt:
+        type: string
+      Date:
+        type: string
+      Domain:
+        example: robot.example.com
+        type: string
+      ID:
+        example: 12
+        type: integer
+      Month:
+        example: 2026-11
+        type: string
+      UpdatedAt:
+        type: string
+    type: object
+  admin.domainChangeBody:
+    properties:
+      allowMultipleConnections:
+        type: boolean
+      allowedCidrs:
+        items:
+          type: string
+        type: array
+      apiKey:
+        type: string
+      authLatched:
+        example: false
+        type: boolean
+      passthrough:
+        type: boolean
+    type: object
+  admin.domainCreateBody:
+    properties:
+      allowMultipleConnections:
+        example: true
+        type: boolean
+      allowedCidrs:
+        example:
+        - 10.0.0.0/8
+        - 192.168.1.7
+        items:
+          type: string
+        type: array
+      apiKey:
+        example: clave-del-cliente-de-al-menos-32-caracteres
+        type: string
+      name:
+        example: robot.example.com
+        type: string
+      passthrough:
+        example: false
+        type: boolean
+    type: object
   admin.domainView:
     properties:
       allowMultipleConnections:
@@ -17,6 +76,34 @@ definitions:
       passthrough:
         type: boolean
     type: object
+  admin.errorResponse:
+    properties:
+      error:
+        example: Domain not found
+        type: string
+    type: object
+  admin.statusResponse:
+    properties:
+      status:
+        example: ok
+        type: string
+    type: object
+  admin.trafficResponse:
+    properties:
+      consumptions:
+        items:
+          $ref: '#/definitions/admin.dailyConsumption'
+        type: array
+      domain:
+        example: robot.example.com
+        type: string
+      from:
+        example: "2026-11-01"
+        type: string
+      to:
+        example: "2026-11-30"
+        type: string
+    type: object
   admin.visitorTokenBody:
     properties:
       methods:
@@ -30,9 +117,57 @@ definitions:
           type: string
         type: array
     type: object
+  admin.visitorTokenCreated:
+    properties:
+      name:
+        example: reader
+        type: string
+      note:
+        example: shown once; store it now
+        type: string
+      token:
+        example: q8Vx2nqT1sK9wEZl0cHjR3pYb7LmUo4aGdNfXiTr5Ys
+        type: string
+    type: object
+  admin.visitorTokenItem:
+    properties:
+      createdAt:
+        type: string
+      id:
+        example: 3
+        type: integer
+      methods:
+        example: GET,HEAD
+        type: string
+      name:
+        example: reader
+        type: string
+      pathPrefixes:
+        example: /api,/public
+        type: string
+      revoked:
+        example: false
+        type: boolean
+    type: object
   admin.visitorUserBody:
     properties:
+      secret:
+        description: Secret is optional. If it is omitted, the server generates one
+          and returns it once.
+        type: string
       username:
+        type: string
+    type: object
+  admin.visitorUserResponse:
+    properties:
+      secret:
+        example: V_adFY98sN6seUTCMqf38ZXYG2tbGt8ETJsIw3_7cBg
+        type: string
+      status:
+        example: ok
+        type: string
+      username:
+        example: jtorres
         type: string
     type: object
   manager.DomainStats:
@@ -113,6 +248,10 @@ paths:
             items:
               $ref: '#/definitions/admin.domainView'
             type: array
+        "500":
+          description: Internal error
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
       summary: List domains
       tags:
       - domains
@@ -123,34 +262,31 @@ paths:
         are allowed unless allowMultipleConnections is false. allowedCidrs is a list
         of networks or addresses; empty means no restriction.
       parameters:
-      - description: 'Domain: name, apiKey, allowMultipleConnections, passthrough,
-          allowedCidrs'
+      - description: Domain to create
         in: body
         name: domain
         required: true
         schema:
-          type: object
+          $ref: '#/definitions/admin.domainCreateBody'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/admin.statusResponse'
         "400":
-          description: Bad Request
+          description: 'Bad request: a field is missing, malformed or not allowed'
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/admin.errorResponse'
         "401":
-          description: Unauthorized
+          description: Missing or wrong admin key
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/admin.errorResponse'
+        "500":
+          description: Internal error
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
       security:
       - AdminKey: []
       summary: Create a domain
@@ -171,21 +307,19 @@ paths:
         "200":
           description: OK
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/admin.statusResponse'
         "401":
-          description: Unauthorized
+          description: Missing or wrong admin key
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/admin.errorResponse'
         "404":
-          description: Not Found
+          description: Domain or user not found
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/admin.errorResponse'
+        "500":
+          description: Internal error
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
       security:
       - AdminKey: []
       summary: Delete a domain
@@ -208,11 +342,13 @@ paths:
           schema:
             $ref: '#/definitions/admin.domainView'
         "404":
-          description: Not Found
+          description: Domain or user not found
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/admin.errorResponse'
+        "500":
+          description: Internal error
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
       summary: Get one domain
       tags:
       - domains
@@ -229,45 +365,39 @@ paths:
         name: domainName
         required: true
         type: string
-      - description: Fields to change
+      - description: Fields to change; send only those
         in: body
         name: changes
         required: true
         schema:
-          type: object
+          $ref: '#/definitions/admin.domainChangeBody'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/admin.statusResponse'
         "400":
-          description: Bad Request
+          description: 'Bad request: a field is missing, malformed or not allowed'
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/admin.errorResponse'
         "401":
-          description: Unauthorized
+          description: Missing or wrong admin key
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/admin.errorResponse'
         "404":
-          description: Not Found
+          description: Domain or user not found
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/admin.errorResponse'
         "409":
-          description: Passthrough would conflict with visitor auth
+          description: Conflict with the domain's current state
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/admin.errorResponse'
+        "500":
+          description: Internal error
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
       security:
       - AdminKey: []
       summary: Change a domain
@@ -299,14 +429,15 @@ paths:
         "200":
           description: OK
           schema:
-            additionalProperties: true
-            type: object
+            $ref: '#/definitions/admin.trafficResponse'
         "400":
-          description: Bad Request
+          description: 'Bad request: a field is missing, malformed or not allowed'
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/admin.errorResponse'
+        "500":
+          description: Internal error
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
       summary: Daily traffic of a domain
       tags:
       - domains
@@ -327,15 +458,20 @@ paths:
           description: OK
           schema:
             items:
-              additionalProperties: true
-              type: object
+              $ref: '#/definitions/admin.visitorTokenItem'
             type: array
         "401":
-          description: Unauthorized
+          description: Missing or wrong admin key
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/admin.errorResponse'
+        "404":
+          description: Domain or user not found
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
+        "500":
+          description: Internal error
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
       security:
       - AdminKey: []
       summary: List API tokens
@@ -346,14 +482,14 @@ paths:
       - application/json
       description: 'Creates a Bearer token with permissions: methods (or "*") and
         path prefixes. The token value is returned once; only its SHA-256 hash is
-        stored.'
+        stored. The response has no id: list the tokens to get it.'
       parameters:
       - description: Domain name
         in: path
         name: domainName
         required: true
         type: string
-      - description: Name, methods, pathPrefixes
+      - description: Name, methods and path prefixes
         in: body
         name: token
         required: true
@@ -363,23 +499,25 @@ paths:
       - application/json
       responses:
         "200":
-          description: token shown once
+          description: OK
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/admin.visitorTokenCreated'
         "400":
-          description: Bad Request
+          description: 'Bad request: a field is missing, malformed or not allowed'
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/admin.errorResponse'
         "401":
-          description: Unauthorized
+          description: Missing or wrong admin key
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/admin.errorResponse'
+        "404":
+          description: Domain or user not found
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
+        "500":
+          description: Internal error
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
       security:
       - AdminKey: []
       summary: Create an API token
@@ -405,27 +543,23 @@ paths:
         "200":
           description: OK
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/admin.statusResponse'
         "400":
-          description: Bad Request
+          description: 'Bad request: a field is missing, malformed or not allowed'
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/admin.errorResponse'
         "401":
-          description: Unauthorized
+          description: Missing or wrong admin key
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/admin.errorResponse'
         "404":
-          description: Not Found
+          description: Domain or user not found
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/admin.errorResponse'
+        "500":
+          description: Internal error
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
       security:
       - AdminKey: []
       summary: Revoke an API token
@@ -433,7 +567,7 @@ paths:
       - visitor-auth
   /domains/{domainName}/visitor-users:
     get:
-      description: Usernames of a domain. Passwords are never returned.
+      description: Usernames of a domain. Secrets are never returned.
       parameters:
       - description: Domain name
         in: path
@@ -450,11 +584,17 @@ paths:
               type: string
             type: array
         "401":
-          description: Unauthorized
+          description: Missing or wrong admin key
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/admin.errorResponse'
+        "404":
+          description: Domain or user not found
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
+        "500":
+          description: Internal error
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
       security:
       - AdminKey: []
       summary: List visitor users
@@ -463,10 +603,11 @@ paths:
     post:
       consumes:
       - application/json
-      description: 'Creates a user of a restricted domain with a secret of its own.
-        The response is the only time the secret is shown: store it, the user needs
-        it to sign requests. The user signs each request with HMAC-SHA256 and sends
-        it in the Authorization header as LipstickHMAC user, ts, nonce and sig. Usernames:
+      description: 'Creates a user of a restricted domain with its own secret. Send
+        the secret in the body (at least 32 characters) or omit it: then the server
+        generates one and returns it in this response, the only time it is shown.
+        The user signs each request with HMAC-SHA256 using that secret and sends it
+        in the Authorization header as LipstickHMAC user, ts, nonce and sig. Usernames:
         1 to 64 letters, digits, dots, underscores, at signs or hyphens.'
       parameters:
       - description: Domain name
@@ -474,7 +615,7 @@ paths:
         name: domainName
         required: true
         type: string
-      - description: Username
+      - description: Username and optional secret
         in: body
         name: user
         required: true
@@ -484,23 +625,25 @@ paths:
       - application/json
       responses:
         "200":
-          description: username and secret, shown once
+          description: OK
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/admin.visitorUserResponse'
         "400":
-          description: Bad Request
+          description: 'Bad request: a field is missing, malformed or not allowed'
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/admin.errorResponse'
         "401":
-          description: Unauthorized
+          description: Missing or wrong admin key
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/admin.errorResponse'
+        "404":
+          description: Domain or user not found
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
+        "500":
+          description: Internal error
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
       security:
       - AdminKey: []
       summary: Add a visitor user
@@ -508,20 +651,8 @@ paths:
       - visitor-auth
   /domains/{domainName}/visitor-users/{username}:
     delete:
-      description: |-
-        Replaces the secret of a user and returns the new one, shown once. The old secret stops working at once.
-        Removes the user; their access ends at once.
+      description: Removes the user; their access ends at once.
       parameters:
-      - description: Domain name
-        in: path
-        name: domainName
-        required: true
-        type: string
-      - description: Username
-        in: path
-        name: username
-        required: true
-        type: string
       - description: Domain name
         in: path
         name: domainName
@@ -534,49 +665,33 @@ paths:
         type: string
       produces:
       - application/json
-      - application/json
       responses:
         "200":
           description: OK
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/admin.statusResponse'
         "401":
-          description: Unauthorized
+          description: Missing or wrong admin key
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/admin.errorResponse'
         "404":
-          description: Not Found
+          description: Domain or user not found
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/admin.errorResponse'
+        "500":
+          description: Internal error
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
       security:
-      - AdminKey: []
       - AdminKey: []
       summary: Delete a visitor user
       tags:
-      - visitor-auth
       - visitor-auth
   /domains/{domainName}/visitor-users/{username}/rotate:
     post:
-      description: |-
-        Replaces the secret of a user and returns the new one, shown once. The old secret stops working at once.
-        Removes the user; their access ends at once.
+      description: Replaces the secret of a user and returns the new one, shown once.
+        The old secret stops working at once.
       parameters:
-      - description: Domain name
-        in: path
-        name: domainName
-        required: true
-        type: string
-      - description: Username
-        in: path
-        name: username
-        required: true
-        type: string
       - description: Domain name
         in: path
         name: domainName
@@ -589,32 +704,27 @@ paths:
         type: string
       produces:
       - application/json
-      - application/json
       responses:
         "200":
           description: OK
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/admin.visitorUserResponse'
         "401":
-          description: Unauthorized
+          description: Missing or wrong admin key
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/admin.errorResponse'
         "404":
-          description: Not Found
+          description: Domain or user not found
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/admin.errorResponse'
+        "500":
+          description: Internal error
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
       security:
       - AdminKey: []
-      - AdminKey: []
-      summary: Delete a visitor user
+      summary: Rotate a visitor user's secret
       tags:
-      - visitor-auth
       - visitor-auth
   /health:
     get:
@@ -625,9 +735,7 @@ paths:
         "200":
           description: OK
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/admin.statusResponse'
       summary: Health check
       tags:
       - system
@@ -671,11 +779,13 @@ paths:
               $ref: '#/definitions/manager.RequestRecord'
             type: array
         "400":
-          description: Bad parameter, or a range with no database
+          description: 'Bad request: a field is missing, malformed or not allowed'
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/admin.errorResponse'
+        "500":
+          description: Internal error
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
       summary: Recent HTTP requests
       tags:
       - requests

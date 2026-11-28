@@ -54,6 +54,12 @@ const docTemplate = `{
                                 "$ref": "#/definitions/admin.domainView"
                             }
                         }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
                     }
                 }
             },
@@ -76,12 +82,12 @@ const docTemplate = `{
                 "summary": "Create a domain",
                 "parameters": [
                     {
-                        "description": "Domain: name, apiKey, allowMultipleConnections, passthrough, allowedCidrs",
+                        "description": "Domain to create",
                         "name": "domain",
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "type": "object"
+                            "$ref": "#/definitions/admin.domainCreateBody"
                         }
                     }
                 ],
@@ -89,28 +95,25 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/admin.statusResponse"
                         }
                     },
                     "400": {
-                        "description": "Bad Request",
+                        "description": "Bad request: a field is missing, malformed or not allowed",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/admin.errorResponse"
                         }
                     },
                     "401": {
-                        "description": "Unauthorized",
+                        "description": "Missing or wrong admin key",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
                         }
                     }
                 }
@@ -143,12 +146,15 @@ const docTemplate = `{
                         }
                     },
                     "404": {
-                        "description": "Not Found",
+                        "description": "Domain or user not found",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
                         }
                     }
                 }
@@ -180,28 +186,25 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/admin.statusResponse"
                         }
                     },
                     "401": {
-                        "description": "Unauthorized",
+                        "description": "Missing or wrong admin key",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/admin.errorResponse"
                         }
                     },
                     "404": {
-                        "description": "Not Found",
+                        "description": "Domain or user not found",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
                         }
                     }
                 }
@@ -232,12 +235,12 @@ const docTemplate = `{
                         "required": true
                     },
                     {
-                        "description": "Fields to change",
+                        "description": "Fields to change; send only those",
                         "name": "changes",
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "type": "object"
+                            "$ref": "#/definitions/admin.domainChangeBody"
                         }
                     }
                 ],
@@ -245,46 +248,37 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/admin.statusResponse"
                         }
                     },
                     "400": {
-                        "description": "Bad Request",
+                        "description": "Bad request: a field is missing, malformed or not allowed",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/admin.errorResponse"
                         }
                     },
                     "401": {
-                        "description": "Unauthorized",
+                        "description": "Missing or wrong admin key",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/admin.errorResponse"
                         }
                     },
                     "404": {
-                        "description": "Not Found",
+                        "description": "Domain or user not found",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/admin.errorResponse"
                         }
                     },
                     "409": {
-                        "description": "Passthrough would conflict with visitor auth",
+                        "description": "Conflict with the domain's current state",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
                         }
                     }
                 }
@@ -327,17 +321,19 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "$ref": "#/definitions/admin.trafficResponse"
                         }
                     },
                     "400": {
-                        "description": "Bad Request",
+                        "description": "Bad request: a field is missing, malformed or not allowed",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
                         }
                     }
                 }
@@ -373,18 +369,26 @@ const docTemplate = `{
                         "schema": {
                             "type": "array",
                             "items": {
-                                "type": "object",
-                                "additionalProperties": true
+                                "$ref": "#/definitions/admin.visitorTokenItem"
                             }
                         }
                     },
                     "401": {
-                        "description": "Unauthorized",
+                        "description": "Missing or wrong admin key",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Domain or user not found",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
                         }
                     }
                 }
@@ -395,7 +399,7 @@ const docTemplate = `{
                         "AdminKey": []
                     }
                 ],
-                "description": "Creates a Bearer token with permissions: methods (or \"*\") and path prefixes. The token value is returned once; only its SHA-256 hash is stored.",
+                "description": "Creates a Bearer token with permissions: methods (or \"*\") and path prefixes. The token value is returned once; only its SHA-256 hash is stored. The response has no id: list the tokens to get it.",
                 "consumes": [
                     "application/json"
                 ],
@@ -415,7 +419,7 @@ const docTemplate = `{
                         "required": true
                     },
                     {
-                        "description": "Name, methods, pathPrefixes",
+                        "description": "Name, methods and path prefixes",
                         "name": "token",
                         "in": "body",
                         "required": true,
@@ -426,30 +430,33 @@ const docTemplate = `{
                 ],
                 "responses": {
                     "200": {
-                        "description": "token shown once",
+                        "description": "OK",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/admin.visitorTokenCreated"
                         }
                     },
                     "400": {
-                        "description": "Bad Request",
+                        "description": "Bad request: a field is missing, malformed or not allowed",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/admin.errorResponse"
                         }
                     },
                     "401": {
-                        "description": "Unauthorized",
+                        "description": "Missing or wrong admin key",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Domain or user not found",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
                         }
                     }
                 }
@@ -490,37 +497,31 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/admin.statusResponse"
                         }
                     },
                     "400": {
-                        "description": "Bad Request",
+                        "description": "Bad request: a field is missing, malformed or not allowed",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/admin.errorResponse"
                         }
                     },
                     "401": {
-                        "description": "Unauthorized",
+                        "description": "Missing or wrong admin key",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/admin.errorResponse"
                         }
                     },
                     "404": {
-                        "description": "Not Found",
+                        "description": "Domain or user not found",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
                         }
                     }
                 }
@@ -533,7 +534,7 @@ const docTemplate = `{
                         "AdminKey": []
                     }
                 ],
-                "description": "Usernames of a domain. Passwords are never returned.",
+                "description": "Usernames of a domain. Secrets are never returned.",
                 "produces": [
                     "application/json"
                 ],
@@ -561,12 +562,21 @@ const docTemplate = `{
                         }
                     },
                     "401": {
-                        "description": "Unauthorized",
+                        "description": "Missing or wrong admin key",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Domain or user not found",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
                         }
                     }
                 }
@@ -577,7 +587,7 @@ const docTemplate = `{
                         "AdminKey": []
                     }
                 ],
-                "description": "Creates a user of a restricted domain with a secret of its own. The response is the only time the secret is shown: store it, the user needs it to sign requests. The user signs each request with HMAC-SHA256 and sends it in the Authorization header as LipstickHMAC user, ts, nonce and sig. Usernames: 1 to 64 letters, digits, dots, underscores, at signs or hyphens.",
+                "description": "Creates a user of a restricted domain with its own secret. Send the secret in the body (at least 32 characters) or omit it: then the server generates one and returns it in this response, the only time it is shown. The user signs each request with HMAC-SHA256 using that secret and sends it in the Authorization header as LipstickHMAC user, ts, nonce and sig. Usernames: 1 to 64 letters, digits, dots, underscores, at signs or hyphens.",
                 "consumes": [
                     "application/json"
                 ],
@@ -597,7 +607,7 @@ const docTemplate = `{
                         "required": true
                     },
                     {
-                        "description": "Username",
+                        "description": "Username and optional secret",
                         "name": "user",
                         "in": "body",
                         "required": true,
@@ -608,30 +618,33 @@ const docTemplate = `{
                 ],
                 "responses": {
                     "200": {
-                        "description": "username and secret, shown once",
+                        "description": "OK",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/admin.visitorUserResponse"
                         }
                     },
                     "400": {
-                        "description": "Bad Request",
+                        "description": "Bad request: a field is missing, malformed or not allowed",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/admin.errorResponse"
                         }
                     },
                     "401": {
-                        "description": "Unauthorized",
+                        "description": "Missing or wrong admin key",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Domain or user not found",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
                         }
                     }
                 }
@@ -642,36 +655,17 @@ const docTemplate = `{
                 "security": [
                     {
                         "AdminKey": []
-                    },
-                    {
-                        "AdminKey": []
                     }
                 ],
-                "description": "Replaces the secret of a user and returns the new one, shown once. The old secret stops working at once.\nRemoves the user; their access ends at once.",
+                "description": "Removes the user; their access ends at once.",
                 "produces": [
-                    "application/json",
                     "application/json"
                 ],
                 "tags": [
-                    "visitor-auth",
                     "visitor-auth"
                 ],
                 "summary": "Delete a visitor user",
                 "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Domain name",
-                        "name": "domainName",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Username",
-                        "name": "username",
-                        "in": "path",
-                        "required": true
-                    },
                     {
                         "type": "string",
                         "description": "Domain name",
@@ -691,28 +685,25 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/admin.statusResponse"
                         }
                     },
                     "401": {
-                        "description": "Unauthorized",
+                        "description": "Missing or wrong admin key",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/admin.errorResponse"
                         }
                     },
                     "404": {
-                        "description": "Not Found",
+                        "description": "Domain or user not found",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
                         }
                     }
                 }
@@ -723,36 +714,17 @@ const docTemplate = `{
                 "security": [
                     {
                         "AdminKey": []
-                    },
-                    {
-                        "AdminKey": []
                     }
                 ],
-                "description": "Replaces the secret of a user and returns the new one, shown once. The old secret stops working at once.\nRemoves the user; their access ends at once.",
+                "description": "Replaces the secret of a user and returns the new one, shown once. The old secret stops working at once.",
                 "produces": [
-                    "application/json",
                     "application/json"
                 ],
                 "tags": [
-                    "visitor-auth",
                     "visitor-auth"
                 ],
-                "summary": "Delete a visitor user",
+                "summary": "Rotate a visitor user's secret",
                 "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Domain name",
-                        "name": "domainName",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Username",
-                        "name": "username",
-                        "in": "path",
-                        "required": true
-                    },
                     {
                         "type": "string",
                         "description": "Domain name",
@@ -772,28 +744,25 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/admin.visitorUserResponse"
                         }
                     },
                     "401": {
-                        "description": "Unauthorized",
+                        "description": "Missing or wrong admin key",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/admin.errorResponse"
                         }
                     },
                     "404": {
-                        "description": "Not Found",
+                        "description": "Domain or user not found",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
                         }
                     }
                 }
@@ -813,10 +782,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/admin.statusResponse"
                         }
                     }
                 }
@@ -876,12 +842,15 @@ const docTemplate = `{
                         }
                     },
                     "400": {
-                        "description": "Bad parameter, or a range with no database",
+                        "description": "Bad request: a field is missing, malformed or not allowed",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal error",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
                         }
                     }
                 }
@@ -912,6 +881,91 @@ const docTemplate = `{
         }
     },
     "definitions": {
+        "admin.dailyConsumption": {
+            "type": "object",
+            "properties": {
+                "BytesUsed": {
+                    "type": "integer",
+                    "example": 1048576
+                },
+                "CreatedAt": {
+                    "type": "string"
+                },
+                "Date": {
+                    "type": "string"
+                },
+                "Domain": {
+                    "type": "string",
+                    "example": "robot.example.com"
+                },
+                "ID": {
+                    "type": "integer",
+                    "example": 12
+                },
+                "Month": {
+                    "type": "string",
+                    "example": "2026-11"
+                },
+                "UpdatedAt": {
+                    "type": "string"
+                }
+            }
+        },
+        "admin.domainChangeBody": {
+            "type": "object",
+            "properties": {
+                "allowMultipleConnections": {
+                    "type": "boolean"
+                },
+                "allowedCidrs": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "apiKey": {
+                    "type": "string"
+                },
+                "authLatched": {
+                    "type": "boolean",
+                    "example": false
+                },
+                "passthrough": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "admin.domainCreateBody": {
+            "type": "object",
+            "properties": {
+                "allowMultipleConnections": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "allowedCidrs": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "example": [
+                        "10.0.0.0/8",
+                        "192.168.1.7"
+                    ]
+                },
+                "apiKey": {
+                    "type": "string",
+                    "example": "clave-del-cliente-de-al-menos-32-caracteres"
+                },
+                "name": {
+                    "type": "string",
+                    "example": "robot.example.com"
+                },
+                "passthrough": {
+                    "type": "boolean",
+                    "example": false
+                }
+            }
+        },
         "admin.domainView": {
             "type": "object",
             "properties": {
@@ -938,6 +992,47 @@ const docTemplate = `{
                 }
             }
         },
+        "admin.errorResponse": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string",
+                    "example": "Domain not found"
+                }
+            }
+        },
+        "admin.statusResponse": {
+            "type": "object",
+            "properties": {
+                "status": {
+                    "type": "string",
+                    "example": "ok"
+                }
+            }
+        },
+        "admin.trafficResponse": {
+            "type": "object",
+            "properties": {
+                "consumptions": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/admin.dailyConsumption"
+                    }
+                },
+                "domain": {
+                    "type": "string",
+                    "example": "robot.example.com"
+                },
+                "from": {
+                    "type": "string",
+                    "example": "2026-11-01"
+                },
+                "to": {
+                    "type": "string",
+                    "example": "2026-11-30"
+                }
+            }
+        },
         "admin.visitorTokenBody": {
             "type": "object",
             "properties": {
@@ -958,11 +1053,77 @@ const docTemplate = `{
                 }
             }
         },
+        "admin.visitorTokenCreated": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "example": "reader"
+                },
+                "note": {
+                    "type": "string",
+                    "example": "shown once; store it now"
+                },
+                "token": {
+                    "type": "string",
+                    "example": "q8Vx2nqT1sK9wEZl0cHjR3pYb7LmUo4aGdNfXiTr5Ys"
+                }
+            }
+        },
+        "admin.visitorTokenItem": {
+            "type": "object",
+            "properties": {
+                "createdAt": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer",
+                    "example": 3
+                },
+                "methods": {
+                    "type": "string",
+                    "example": "GET,HEAD"
+                },
+                "name": {
+                    "type": "string",
+                    "example": "reader"
+                },
+                "pathPrefixes": {
+                    "type": "string",
+                    "example": "/api,/public"
+                },
+                "revoked": {
+                    "type": "boolean",
+                    "example": false
+                }
+            }
+        },
         "admin.visitorUserBody": {
             "type": "object",
             "properties": {
+                "secret": {
+                    "description": "Secret is optional. If it is omitted, the server generates one and returns it once.",
+                    "type": "string"
+                },
                 "username": {
                     "type": "string"
+                }
+            }
+        },
+        "admin.visitorUserResponse": {
+            "type": "object",
+            "properties": {
+                "secret": {
+                    "type": "string",
+                    "example": "V_adFY98sN6seUTCMqf38ZXYG2tbGt8ETJsIw3_7cBg"
+                },
+                "status": {
+                    "type": "string",
+                    "example": "ok"
+                },
+                "username": {
+                    "type": "string",
+                    "example": "jtorres"
                 }
             }
         },

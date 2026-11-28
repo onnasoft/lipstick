@@ -29,14 +29,14 @@ func newTestAuth(t *testing.T) AuthManager {
 
 func TestVisitorUserLifecycle(t *testing.T) {
 	a := newTestAuth(t)
-	if _, err := a.AddVisitorUser("robot.example.com", "bad name"); err != ErrInvalidUsername {
+	if _, err := a.AddVisitorUser("robot.example.com", "bad name", ""); err != ErrInvalidUsername {
 		t.Fatalf("username with a space: %v", err)
 	}
-	secret, err := a.AddVisitorUser("robot.example.com", "alice")
+	secret, err := a.AddVisitorUser("robot.example.com", "alice", "")
 	if err != nil || secret == "" {
 		t.Fatalf("create: %v", err)
 	}
-	if _, err := a.AddVisitorUser("robot.example.com", "alice"); err != ErrUserExists {
+	if _, err := a.AddVisitorUser("robot.example.com", "alice", ""); err != ErrUserExists {
 		t.Fatalf("duplicate user: %v", err)
 	}
 	got, err := a.VisitorUserSecret("robot.example.com", "alice")
@@ -109,7 +109,7 @@ func TestCredentialCountAndLatch(t *testing.T) {
 	if n, _ := a.CountVisitorCredentials("robot.example.com"); n != 0 {
 		t.Fatalf("new domain has %d credentials", n)
 	}
-	a.AddVisitorUser("robot.example.com", "alice")
+	a.AddVisitorUser("robot.example.com", "alice", "")
 	a.AddVisitorToken("robot.example.com", "reader", []string{"GET"}, nil)
 	if n, _ := a.CountVisitorCredentials("robot.example.com"); n != 2 {
 		t.Fatalf("count %d, want 2", n)
@@ -150,5 +150,20 @@ func TestAllowedCIDRsAreStored(t *testing.T) {
 	}
 	if got, _ := a.GetDomain("robot.example.com"); got.AllowedCIDRs != "10.0.0.0/8,192.168.1.7/32" {
 		t.Fatalf("rules stored as %q", got.AllowedCIDRs)
+	}
+}
+
+func TestSuppliedSecretIsStoredAsGiven(t *testing.T) {
+	a := newTestAuth(t)
+	mine := "a-secret-the-client-chose-for-jtorres-01"
+	got, err := a.AddVisitorUser("robot.example.com", "jtorres", mine)
+	if err != nil || got != mine {
+		t.Fatalf("supplied secret: %q %v", got, err)
+	}
+	if stored, _ := a.VisitorUserSecret("robot.example.com", "jtorres"); stored != mine {
+		t.Fatal("supplied secret not stored")
+	}
+	if _, err := a.AddVisitorUser("robot.example.com", "short", "too-short"); err != ErrWeakSecret {
+		t.Fatalf("short secret: %v", err)
 	}
 }

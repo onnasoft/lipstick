@@ -32,12 +32,13 @@ func TestSwaggerDocumentDescribesTheAPI(t *testing.T) {
 	}
 
 	protected := map[string][]string{
-		"/domains":                                       {"post"},
-		"/domains/{domainName}":                          {"patch", "delete"},
-		"/domains/{domainName}/visitor-users":            {"post", "get"},
-		"/domains/{domainName}/visitor-users/{username}": {"delete"},
-		"/domains/{domainName}/visitor-tokens":           {"post", "get"},
-		"/domains/{domainName}/visitor-tokens/{id}":      {"delete"},
+		"/domains":                                              {"post"},
+		"/domains/{domainName}":                                 {"patch", "delete"},
+		"/domains/{domainName}/visitor-users":                   {"post", "get"},
+		"/domains/{domainName}/visitor-users/{username}":        {"delete"},
+		"/domains/{domainName}/visitor-users/{username}/rotate": {"post"},
+		"/domains/{domainName}/visitor-tokens":                  {"post", "get"},
+		"/domains/{domainName}/visitor-tokens/{id}":             {"delete"},
 	}
 	for path, methods := range protected {
 		for _, m := range methods {
@@ -62,5 +63,42 @@ func TestSwaggerUIIsServed(t *testing.T) {
 	rec := do(a, http.MethodGet, "/swagger/index.html", "")
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "swagger") {
 		t.Fatalf("UI status %d", rec.Code)
+	}
+}
+
+// Every response must name its type, so the reference shows the real bodies. A
+// generic object would hide them.
+func TestEveryResponseHasATypedSchema(t *testing.T) {
+	a := newTestAdmin("secret")
+	rec := do(a, http.MethodGet, "/swagger/doc.json", "")
+	var spec struct {
+		Paths map[string]map[string]struct {
+			Responses map[string]struct {
+				Schema map[string]any `json:"schema"`
+			} `json:"responses"`
+		} `json:"paths"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &spec); err != nil {
+		t.Fatal(err)
+	}
+	for path, ops := range spec.Paths {
+		for method, op := range ops {
+			for code, resp := range op.Responses {
+				if code == "200" && path == "/" {
+					continue // the HTML panel
+				}
+				if resp.Schema == nil {
+					t.Errorf("%s %s %s has no schema", method, path, code)
+					continue
+				}
+				if ap, ok := resp.Schema["additionalProperties"]; ok && resp.Schema["type"] == "object" {
+					t.Errorf("%s %s %s is a generic object %v", method, path, code, ap)
+				}
+			}
+		}
+	}
+	rotate := spec.Paths["/domains/{domainName}/visitor-users/{username}/rotate"]["post"]
+	if _, ok := rotate.Responses["200"]; !ok {
+		t.Fatal("rotate route is not documented")
 	}
 }
