@@ -700,6 +700,12 @@ Lipstick exposes local ports to the internet through a reverse tunnel. The main 
 - **Not measured:** the time to accept the TCP or TLS connection, which happens before the relay starts.
 - **Verified:** a test with a backend that answers after 300 ms records at least 0.25 s; live, five visits to the local backend all fall in the 10 ms bucket.
 
+### 75. Tunnel latency (feature)
+- **Added:** `lipstick_tunnel_latency_seconds`, a histogram per domain. Each mux session is pinged every 5 seconds with yamux's ping, and the round trip is recorded. Buckets run from 0.5 ms to 1 s.
+- **Includes:** any wait behind data frames on the same connection, so under load the value shows what a request would wait on the tunnel. It does not include the backend's own time, which is in the connection latency.
+- **Not measured:** tunnels that are not mux sessions (the single-connection fallback) have no probe.
+- **Verified:** an integration test with a real client records at least three round trips in 10 seconds; live, eight round trips to localhost all fall in the 1 ms bucket.
+
 ## Recommended order
 
 1. Items 1, 2, 3, and 4: authentication, unpredictable tickets, TLS verification, and admin API hardening.
