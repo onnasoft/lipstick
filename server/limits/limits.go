@@ -124,3 +124,17 @@ func (c *Concurrency) Open(key string) int {
 	defer c.mu.Unlock()
 	return c.counts[key]
 }
+
+// Total returns how many connections are open across all keys.
+func (c *Concurrency) Total() int {
+	if c == nil {
+		return 0
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	total := 0
+	for _, n := range c.counts {
+		total += n
+	}
+	return total
+}

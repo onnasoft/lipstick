@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -35,6 +36,9 @@ type RequestLog struct {
 	next    int
 	full    bool
 	hook    func(RequestRecord) // called after each Add, outside the lock
+	// statusClass counts finished requests by status class: index 1 for 1xx ... 5 for 5xx,
+	// 0 for anything else. It counts every request, not just the ones in the ring.
+	statusClass [6]atomic.Int64
 }
 
 // setHook sets the function called for every added record, such as the
@@ -62,6 +66,7 @@ func (l *RequestLog) Add(r RequestRecord) {
 	if r.Status < 0 || r.Status > 999 {
 		r.Status = 0
 	}
+	l.statusClass[statusClassOf(r.Status)].Add(1)
 	if r.DurationMS < 0 {
 		r.DurationMS = 0
 	}
@@ -123,3 +128,20 @@ func (m *Manager) RecentRequests(q RequestQuery) ([]RequestRecord, error) {
 // ErrHistoryUnavailable means a time range was asked for but no database is
 // configured to hold the history.
 var ErrHistoryUnavailable = errors.New("request history is not stored: no database persistence")
+
+// statusClassOf maps a status to its index in statusClass: 1 to 5 for 1xx to 5xx, else 0.
+func statusClassOf(status int) int {
+	if status < 100 || status > 599 {
+		return 0
+	}
+	return status / 100
+}
+
+// StatusCounts returns the finished requests per status class, indexed like statusClass.
+func (l *RequestLog) StatusCounts() [6]int64 {
+	var out [6]int64
+	for i := range l.statusClass {
+		out[i] = l.statusClass[i].Load()
+	}
+	return out
+}

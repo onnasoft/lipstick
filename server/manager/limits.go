@@ -63,6 +63,7 @@ type refusalLog struct {
 	last    time.Time
 	count   int
 	reasons map[string]int
+	totals  map[string]int64 // since start, per reason, for /metrics
 }
 
 func (r *refusalLog) note(reason, domain string, from net.Addr) {
@@ -73,6 +74,10 @@ func (r *refusalLog) note(reason, domain string, from net.Addr) {
 	}
 	r.count++
 	r.reasons[reason]++
+	if r.totals == nil {
+		r.totals = map[string]int64{}
+	}
+	r.totals[reason]++
 	if time.Since(r.last) < time.Second {
 		return
 	}
@@ -81,4 +86,15 @@ func (r *refusalLog) note(reason, domain string, from net.Addr) {
 	r.last = time.Now()
 	r.count = 0
 	r.reasons = map[string]int{}
+}
+
+// Totals returns the refused connections since start, per reason.
+func (r *refusalLog) Totals() map[string]int64 {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make(map[string]int64, len(r.totals))
+	for k, v := range r.totals {
+		out[k] = v
+	}
+	return out
 }

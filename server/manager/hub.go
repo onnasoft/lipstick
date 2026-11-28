@@ -237,6 +237,7 @@ func (hub *NetworkHub) syncConnections(pipe net.Conn, destination net.Conn) {
 		if err != nil {
 			if isTimeout(err) && !answered.Load() && time.Since(time.Unix(0, requestAt.Load())) > backendResponseTimeout {
 				logger.Default.Info("backend did not answer within", backendResponseTimeout, "for hub:", hub.HubName)
+				backendTimeouts.Add(1)
 				fmt.Fprint(pipe, helper.GatewayTimeoutResponse)
 				break
 			}

@@ -43,7 +43,7 @@ const (
 	ReasonDomainRate  = "domain_rate"
 	ReasonIPConns     = "ip_connections"
 	ReasonDomainConns = "domain_connections"
-	ReasonQuota = "monthly_quota"
+	ReasonQuota       = "monthly_quota"
 )
 
 // Refusal says why a connection was not admitted, and when to try again.
@@ -107,4 +107,12 @@ func (v *Visitors) Admit(ip, domain string) (release func(), refused *Refusal) {
 // AdminLimiter returns the per-address limiter for the admin API.
 func AdminLimiter(s Settings, now Clock) *Rate {
 	return NewRate(s.AdminIPRate, s.AdminIPBurst, maxTrackedKeys, now)
+}
+
+// OpenConnections returns the visitor connections open now, across all addresses.
+func (v *Visitors) OpenConnections() int {
+	if v == nil {
+		return 0
+	}
+	return v.ipConns.Total()
 }

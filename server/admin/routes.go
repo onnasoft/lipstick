@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"bytes"
 	"encoding/json"
 	"strings"
 
@@ -17,6 +18,7 @@ import (
 	"github.com/OnnaSoft/lipstick/server/config"
 	"github.com/OnnaSoft/lipstick/server/db"
 	"github.com/OnnaSoft/lipstick/server/manager"
+	"github.com/OnnaSoft/lipstick/server/metrics"
 	"github.com/gin-gonic/gin"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
@@ -34,6 +36,7 @@ func configureRouter(admin *Admin) {
 	r.Use(router.sessionGate())
 
 	r.GET("/health", router.health)
+	r.GET("/metrics", router.metrics)
 	r.GET("/admin/js/*file", serveStatic("js"))
 	r.GET("/admin/css/*file", serveStatic("css"))
 	r.GET("/admin/img/*file", serveStatic("img"))
@@ -864,4 +867,24 @@ func wholeNonNegative(raw any) (int64, bool) {
 		return 0, false
 	}
 	return int64(f), true
+}
+
+// @Summary Prometheus metrics
+// @Description The server's numbers in the Prometheus text format: connected clients, sessions, pending visitors, traffic per domain, responses by status class, refusals by reason, backend timeouts, tunnels opened, and process resources. Public, so a scraper needs no session; the listener should stay on a private address.
+// @Tags health
+// @Produce plain
+// @Success 200 {string} string "Prometheus text exposition"
+// @Failure 503 {object} errorResponse "Metrics are not configured on this server"
+// @Router /metrics [get]
+func (r *router) metrics(c *gin.Context) {
+	if r.admin.metrics == nil {
+		c.JSON(http.StatusServiceUnavailable, errorResponse{Error: "metrics are not configured on this server"})
+		return
+	}
+	var b bytes.Buffer
+	if err := metrics.Render(&b, r.admin.metrics()); err != nil {
+		c.JSON(http.StatusInternalServerError, errorResponse{Error: "metrics could not be written"})
+		return
+	}
+	c.Data(http.StatusOK, "text/plain; version=0.0.4; charset=utf-8", b.Bytes())
 }

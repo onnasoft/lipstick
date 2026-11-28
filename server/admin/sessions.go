@@ -111,6 +111,7 @@ func sessionFromRequest(req *http.Request) (token string, fromCookie bool) {
 // files the login page loads. Everything else is behind the session gate.
 var publicPaths = map[string]bool{
 	"/health":    true,
+	"/metrics":   true,
 	"/login":     true,
 	"/web/login": true,
 }

@@ -251,22 +251,22 @@ The existing logs and traffic statistics should be expanded to provide sufficien
 
 ### Required improvements
 
-- [ ] Prometheus metrics endpoint.
-- [ ] Active connections metric.
-- [ ] Connected clients metric.
-- [ ] Active sessions metric.
-- [ ] Pending visitors metric.
-- [ ] Traffic throughput.
-- [ ] Traffic consumption by domain.
+- [x] Prometheus metrics endpoint. (`GET /metrics` on the admin listener, public like `/health`; see revision.md, item 73)
+- [x] Active connections metric. (`lipstick_visitor_connections_open`)
+- [x] Connected clients metric. (`lipstick_connected_clients`, per domain and total)
+- [x] Active sessions metric. (`lipstick_active_sessions`, `lipstick_sessions_active`)
+- [x] Pending visitors metric. (`lipstick_pending_visitors`, `lipstick_visitors_pending`)
+- [x] Traffic throughput. (`lipstick_traffic_bytes_since_start` is a counter; the rate is read with `rate()` in Prometheus)
+- [x] Traffic consumption by domain. (the same counter, per domain, since this process started; monthly totals stay in the database and the panel)
 - [ ] Connection latency.
 - [ ] Tunnel latency.
-- [ ] HTTP response status metrics.
-- [ ] Connection errors.
+- [x] HTTP response status metrics. (`lipstick_http_responses_total` by status class)
+- [ ] Connection errors. (partly: refused visitor connections are counted by reason in `lipstick_visitor_refusals_total`; failures of tunnel setup are not yet counted)
 - [ ] Reconnection metrics.
-- [ ] Timeout metrics.
-- [ ] CPU and memory information.
+- [x] Timeout metrics. (`lipstick_backend_timeouts_total`, the 504s)
+- [ ] CPU and memory information. (memory and goroutines are exported; CPU time is not)
 - [ ] Structured logging.
-- [ ] Health checks.
+- [x] Health checks. (`/health`, which checks the database and reports 503 when it is down)
 - [ ] Readiness checks.
 - [ ] Alerting integration.
 

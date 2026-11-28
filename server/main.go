@@ -122,6 +122,7 @@ func main() {
 	admin.SetRequestSource(manager.RecentRequests)
 	// Every change is recorded before it is made; without this, changes are refused.
 	admin.SetAudit(audit.NewStore(conn))
+	admin.SetMetricsSource(manager.Metrics)
 	// Visitor limits (per address and per domain, connections) and the admin request limit.
 	limitSettings := limits.Settings(conf.Limits)
 	manager.ConfigureLimits(limitSettings)

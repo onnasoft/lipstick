@@ -143,6 +143,7 @@ func (r *router) upgrade(c *gin.Context) {
 		return
 	}
 
+	tunnelsOpened.Add(1)
 	logger.Default.Info("Connection upgraded for domain:", domain.Name)
 	notification := &ProxyNotificationConn{
 		Domain:                   domain.Name,

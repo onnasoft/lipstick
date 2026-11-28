@@ -689,6 +689,12 @@ Lipstick exposes local ports to the internet through a reverse tunnel. The main 
 - **Validated, on a throwaway PostgreSQL 18 instance on port 5433 with its own database, a second server on other ports, and a connected client:** while the database was stopped, `/health` answered 503 with `{"database":"down"}`, visitors kept receiving 200 (the proxy does not ask the database for each request), and the server logged the failures and kept the requests for a retry. After the database returned, `/health` answered 200 within about 12 seconds, the node status reporting resumed, and the requests held during the outage were stored.
 - **Not done:** production's database was not restarted. The retry logs are noisy (one line per failed write), which is acceptable for now but worth limiting.
 
+### 73. Prometheus metrics endpoint (feature)
+- **Added:** `GET /metrics` on the admin listener, in the Prometheus text format, with no dependency. It is public like `/health`, so a scraper needs no session; the listener should stay on a private address. Without a metrics source it answers 503.
+- **Metrics:** connected clients, active sessions, pending visitors (per domain and total); visitor connections open; traffic bytes since start per domain; HTTP responses by status class; refused visitor connections by reason; backend timeouts (504); tunnels opened; goroutines and heap in use.
+- **Not yet:** CPU time, connection and tunnel latency, reconnection counts, failures of tunnel setup, structured logging, readiness checks, alert rules.
+- **Verified:** unit tests for the text format (escaping, name order), status-class counting, and the rendered families; the live output is checked after the restart.
+
 ## Recommended order
 
 1. Items 1, 2, 3, and 4: authentication, unpredictable tickets, TLS verification, and admin API hardening.

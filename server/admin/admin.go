@@ -12,6 +12,7 @@ import (
 	"github.com/OnnaSoft/lipstick/server/auth"
 	"github.com/OnnaSoft/lipstick/server/limits"
 	"github.com/OnnaSoft/lipstick/server/manager"
+	"github.com/OnnaSoft/lipstick/server/metrics"
 	"github.com/gin-gonic/gin"
 )
 
@@ -28,6 +29,7 @@ type Admin struct {
 	stats       func() ([]manager.DomainStats, error)
 	health      []healthCheck
 	requests    func(q manager.RequestQuery) ([]manager.RequestRecord, error)
+	metrics     func() []metrics.Family // read on each /metrics scrape
 }
 
 // SetRequestSource sets the function that returns finished requests.
@@ -90,6 +92,11 @@ func (a *Admin) Listen() {
 type healthCheck struct {
 	name  string
 	check func() error
+}
+
+// SetMetricsSource sets what /metrics reports. Without one, /metrics answers 503.
+func (a *Admin) SetMetricsSource(fn func() []metrics.Family) {
+	a.metrics = fn
 }
 
 // SetHealthChecks replaces the dependencies /health checks. Each check should be quick.
