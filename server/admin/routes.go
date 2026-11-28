@@ -29,8 +29,14 @@ type router struct {
 func configureRouter(admin *Admin) {
 	router := &router{admin: admin}
 	r := gin.New()
+	// Every route except the public ones needs a session; see sessionGate.
+	r.Use(router.sessionGate())
 
 	r.GET("/health", router.health)
+	r.GET("/admin/panel.css", serveAsset("panel.css", "text/css; charset=utf-8"))
+	r.GET("/admin/panel.js", serveAsset("panel.js", "application/javascript; charset=utf-8"))
+	r.GET("/admin/login.js", serveAsset("login.js", "application/javascript; charset=utf-8"))
+	r.POST("/web/login", router.webLogin)
 	r.GET("/stats", router.getStats)
 	r.GET("/", router.ui)
 	r.GET("/ui", func(c *gin.Context) { c.Redirect(http.StatusFound, "/") })
@@ -98,6 +104,7 @@ func writeLookupError(c *gin.Context, err error) {
 // @Summary List domains
 // @Description Every domain with its policies. Client keys are never returned. Needs no key.
 // @Tags domains
+// @Security BearerAuth
 // @Produce json
 // @Success 200 {array} domainView
 // @Failure 500 {object} errorResponse "The domains could not be read. Error: 'Unable to get domains'"
@@ -121,6 +128,7 @@ func (r *router) getDomains(c *gin.Context) {
 // @Summary Get one domain
 // @Description One domain with its policies. The client key is never returned. Needs no key.
 // @Tags domains
+// @Security BearerAuth
 // @Produce json
 // @Param domainName path string true "Domain name"
 // @Success 200 {object} domainView
@@ -341,6 +349,7 @@ func (r *router) health(c *gin.Context) {
 // @Summary Daily traffic of a domain
 // @Description Bytes transferred per day between two dates, inclusive. Needs no key.
 // @Tags domains
+// @Security BearerAuth
 // @Produce json
 // @Param domainName path string true "Domain name"
 // @Param from query string true "First day, YYYY-MM-DD"
@@ -401,6 +410,7 @@ func (r *router) getTraffic(c *gin.Context) {
 // @Summary Live state of every domain
 // @Description Clients, active sessions, pending visitors, bytes since start, and intranet ports for each domain with a hub. Needs no key.
 // @Tags domains
+// @Security BearerAuth
 // @Produce json
 // @Success 200 {array} manager.DomainStats
 // @Router /stats [get]
@@ -421,7 +431,7 @@ func (r *router) getStats(c *gin.Context) {
 // @Success 200 {string} string "HTML page"
 // @Router / [get]
 func (r *router) ui(c *gin.Context) {
-	c.Header("Content-Security-Policy", "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'")
+	c.Header("Content-Security-Policy", pageCSP)
 	c.Header("X-Content-Type-Options", "nosniff")
 	c.Header("X-Frame-Options", "DENY")
 	c.Header("Referrer-Policy", "no-referrer")
@@ -438,6 +448,7 @@ func (r *router) ui(c *gin.Context) {
 // @Summary Recent HTTP requests
 // @Description Finished HTTP requests, newest first: domain, port the visitor came in on, method, path without query, status, duration and response size. Headers and bodies are never stored. Without from or to, the newest requests come from memory; with a time range they come from the database (kept 7 days). Needs no key.
 // @Tags requests
+// @Security BearerAuth
 // @Produce json
 // @Param domain query string false "Only this domain"
 // @Param port query int false "Only this port: 5050 is the proxy, others are intranet ports"

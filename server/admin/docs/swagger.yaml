@@ -190,6 +190,14 @@ definitions:
         example: jtorres
         type: string
     type: object
+  admin.webLoginResponse:
+    properties:
+      expiresAt:
+        type: string
+      username:
+        example: jtorres
+        type: string
+    type: object
   manager.DomainStats:
     properties:
       activeSessions:
@@ -235,11 +243,11 @@ info:
   description: |-
     Administration of a Lipstick server: domains, live state, request log, visitor users and API tokens, and access rules.
 
-    The API is served over TLS. The example configuration binds it to 127.0.0.1, so only the machine itself can reach it. Reads of domains, statistics and the request log need no key. Every change needs a session token.
+    The API is served over TLS. The example configuration binds it to 127.0.0.1, so only the machine itself can reach it. Everything except the health check and the login endpoints needs a session: the web panel gets it from its login form, API clients from /login.
 
     **Accounts.** Admin accounts are created on the server machine, from the console, with a password typed in the terminal: `lipstick-server admin create -username NAME`. There is no key to configure. Without an account no change is possible. Other console commands: `admin list`, `admin reset-password -username NAME`, `admin disable -username NAME`, `admin enable -username NAME`.
 
-    **Sessions.** `POST /login` with the account's username and password returns a token. Send it on each change as `Authorization: Bearer <token>`. It expires after 12 hours; `POST /logout` ends it. Five wrong passwords lock the account for 15 minutes.
+    **Sessions.** `POST /login` with the account's username and password returns a token. Send it on each request as `Authorization: Bearer <token>`. The web panel uses `POST /web/login` instead, which keeps the token in an HttpOnly cookie that scripts cannot read; changes made with that cookie must carry the header `X-Lipstick-CSRF: 1`. It expires after 12 hours; `POST /logout` ends it. Five wrong passwords lock the account for 15 minutes.
 
     **Example with curl.** The certificate is self-signed, so use -k:
 
@@ -284,6 +292,8 @@ paths:
           description: 'The domains could not be read. Error: ''Unable to get domains'''
           schema:
             $ref: '#/definitions/admin.errorResponse'
+      security:
+      - BearerAuth: []
       summary: List domains
       tags:
       - domains
@@ -383,6 +393,8 @@ paths:
           description: 'The domain could not be read. Error: ''Unable to get domain'''
           schema:
             $ref: '#/definitions/admin.errorResponse'
+      security:
+      - BearerAuth: []
       summary: Get one domain
       tags:
       - domains
@@ -480,6 +492,8 @@ paths:
             ''Unable to connect to database'' or ''Unable to read traffic'''
           schema:
             $ref: '#/definitions/admin.errorResponse'
+      security:
+      - BearerAuth: []
       summary: Daily traffic of a domain
       tags:
       - domains
@@ -795,7 +809,7 @@ paths:
         token on every change as "Authorization: Bearer <token>". The token expires
         after 12 hours. Five wrong passwords lock the account for 15 minutes. Accounts
         are created on the server machine with: lipstick-server admin create -username
-        NAME.'
+        NAME. The web panel uses /web/login instead, which keeps the token in a cookie.'
       parameters:
       - description: Account name and password
         in: body
@@ -833,8 +847,9 @@ paths:
       - session
   /logout:
     post:
-      description: Ends the session of the token sent in the Authorization header.
-        The token stops working at once.
+      description: 'Ends the session of the token or cookie of the request. The token
+        stops working at once, and the session cookie is cleared. Changes with the
+        cookie need the X-Lipstick-CSRF: 1 header.'
       produces:
       - application/json
       responses:
@@ -843,7 +858,11 @@ paths:
           schema:
             $ref: '#/definitions/admin.statusResponse'
         "401":
-          description: 'Missing, expired or invalid session token. Error: ''Unauthorized'''
+          description: 'Missing, expired or invalid session. Error: ''Unauthorized'''
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
+        "403":
+          description: The X-Lipstick-CSRF header is missing on a cookie logout
           schema:
             $ref: '#/definitions/admin.errorResponse'
         "500":
@@ -905,6 +924,8 @@ paths:
             the request log'''
           schema:
             $ref: '#/definitions/admin.errorResponse'
+      security:
+      - BearerAuth: []
       summary: Recent HTTP requests
       tags:
       - requests
@@ -921,9 +942,57 @@ paths:
             items:
               $ref: '#/definitions/manager.DomainStats'
             type: array
+      security:
+      - BearerAuth: []
       summary: Live state of every domain
       tags:
       - domains
+  /web/login:
+    post:
+      consumes:
+      - application/json
+      description: 'The same check as /login, for the web panel. The token is not
+        in the answer: it is stored in the HttpOnly, Secure, SameSite=Strict cookie
+        "lipstick_session", which scripts cannot read. The request must carry the
+        header X-Lipstick-CSRF: 1.'
+      parameters:
+      - description: Account name and password
+        in: body
+        name: credentials
+        required: true
+        schema:
+          $ref: '#/definitions/admin.loginBody'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: The session cookie is set
+          schema:
+            $ref: '#/definitions/admin.webLoginResponse'
+        "400":
+          description: Body is not JSON with username and password
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
+        "401":
+          description: Invalid username or password
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
+        "403":
+          description: The X-Lipstick-CSRF header is missing
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
+        "429":
+          description: Too many failed logins; the Retry-After header says how long
+            to wait
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
+        "500":
+          description: The session could not be created
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
+      summary: Log in to the web panel
+      tags:
+      - session
 schemes:
 - https
 securityDefinitions:

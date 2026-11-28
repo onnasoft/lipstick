@@ -80,3 +80,9 @@ type domainChangeBody struct {
 	AllowedCIDRs             *[]string `json:"allowedCidrs,omitempty"`
 	AuthLatched              *bool     `json:"authLatched,omitempty" example:"false"`
 }
+
+// webLoginResponse confirms a web login. The token is not in it: it is in the cookie.
+type webLoginResponse struct {
+	Username  string    `json:"username" example:"jtorres"`
+	ExpiresAt time.Time `json:"expiresAt"`
+}

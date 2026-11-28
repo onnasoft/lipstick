@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -17,11 +18,11 @@ type adminStore interface {
 	Logout(token string) error
 }
 
-// Failed logins for one account lock it for a while. Five free attempts, then the
-// lock lasts 15 minutes; a successful login clears the count.
+// Five wrong passwords lock an account for 15 minutes. A successful login clears the
+// count.
 const (
-	freeLoginFailures = 5
-	loginLockout      = 15 * time.Minute
+	maxLoginFailures = 5
+	loginLockout     = 15 * time.Minute
 )
 
 type loginState struct {
@@ -62,7 +63,7 @@ func (l *loginLimiter) fail(username string) {
 		l.states[username] = st
 	}
 	st.fails++
-	if st.fails > freeLoginFailures {
+	if st.fails >= maxLoginFailures {
 		st.until = time.Now().Add(loginLockout)
 	}
 }
@@ -84,30 +85,109 @@ type loginResponse struct {
 	ExpiresAt time.Time `json:"expiresAt"`
 }
 
-// bearerToken returns the token of an "Authorization: Bearer <token>" header.
-func bearerToken(header string) (string, bool) {
-	token, ok := strings.CutPrefix(header, "Bearer ")
-	token = strings.TrimSpace(token)
-	return token, ok && token != ""
-}
-
-// authorized checks the session token of the request. It guards every endpoint that
-// changes data. Read-only endpoints do not use it: the admin port listens on
-// 127.0.0.1 only and they expose no keys.
-func (r *router) authorized(c *gin.Context) bool {
-	if token, ok := bearerToken(c.Request.Header.Get("Authorization")); ok && r.admin.store != nil {
-		if user, err := r.admin.store.Authenticate(token); err == nil {
-			c.Set("adminUser", user)
-			return true
+// sessionFromRequest returns the session token of the request. A Bearer header
+// wins (API clients); otherwise the session cookie (the web panel). fromCookie tells
+// which one it was, because cookie requests need the CSRF header for changes.
+func sessionFromRequest(req *http.Request) (token string, fromCookie bool) {
+	if raw, ok := strings.CutPrefix(req.Header.Get("Authorization"), "Bearer "); ok {
+		if t := strings.TrimSpace(raw); t != "" {
+			return t, false
 		}
 	}
-	c.Header("WWW-Authenticate", `Bearer realm="lipstick-admin"`)
-	c.JSON(401, errorResponse{Error: "Unauthorized"})
+	if cookie, err := req.Cookie(sessionCookie); err == nil && cookie.Value != "" {
+		return cookie.Value, true
+	}
+	return "", false
+}
+
+// publicPaths need no session: the health check, the two login endpoints, and the
+// files the login page loads. Everything else is behind the session gate.
+var publicPaths = map[string]bool{
+	"/health":          true,
+	"/login":           true,
+	"/web/login":       true,
+	"/admin/panel.css": true,
+	"/admin/panel.js":  true,
+	"/admin/login.js":  true,
+}
+
+func unsafeMethod(method string) bool {
+	switch method {
+	case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
+		return true
+	}
 	return false
 }
 
+// sessionGate checks the session of every request except the public paths. Without
+// a valid session, "/" shows the login form and every other path answers 401.
+// Changes made with the cookie must carry the CSRF header.
+func (r *router) sessionGate() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if publicPaths[c.Request.URL.Path] {
+			c.Next()
+			return
+		}
+		token, fromCookie := sessionFromRequest(c.Request)
+		user := ""
+		if token != "" && r.admin.store != nil {
+			if name, err := r.admin.store.Authenticate(token); err == nil {
+				user = name
+			}
+		}
+		if user == "" {
+			if c.Request.URL.Path == "/" && c.Request.Method == http.MethodGet {
+				c.Header("Content-Security-Policy", pageCSP)
+				c.Header("Cache-Control", "no-store")
+				c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(loginHTML))
+				c.Abort()
+				return
+			}
+			c.Header("WWW-Authenticate", `Bearer realm="lipstick-admin"`)
+			c.AbortWithStatusJSON(http.StatusUnauthorized, errorResponse{Error: "Unauthorized"})
+			return
+		}
+		if fromCookie && unsafeMethod(c.Request.Method) && c.GetHeader(csrfHeader) != "1" {
+			c.AbortWithStatusJSON(http.StatusForbidden, errorResponse{Error: "changes from the panel need the " + csrfHeader + " header"})
+			return
+		}
+		c.Set("adminUser", user)
+		c.Next()
+	}
+}
+
+// authorized reports whether the gate accepted the request. Handlers call it as a
+// second check; it never answers by itself on the normal path.
+func (r *router) authorized(c *gin.Context) bool {
+	if c.GetString("adminUser") != "" {
+		return true
+	}
+	c.Header("WWW-Authenticate", `Bearer realm="lipstick-admin"`)
+	c.JSON(http.StatusUnauthorized, errorResponse{Error: "Unauthorized"})
+	return false
+}
+
+// issueSession checks the credentials, applies the lock, and creates a session.
+// wait is set when the account is locked.
+func (r *router) issueSession(username, password string) (token string, expires time.Time, wait time.Duration, status int, message string) {
+	if wait := r.admin.logins.blocked(username); wait > 0 {
+		return "", time.Time{}, wait, http.StatusTooManyRequests, "too many failed logins; wait before trying again"
+	}
+	userID, err := r.admin.store.Login(username, password)
+	if err != nil {
+		r.admin.logins.fail(username)
+		return "", time.Time{}, 0, http.StatusUnauthorized, "invalid username or password"
+	}
+	token, expires, err = r.admin.store.NewSession(userID)
+	if err != nil {
+		return "", time.Time{}, 0, http.StatusInternalServerError, "unable to create a session"
+	}
+	r.admin.logins.reset(username)
+	return token, expires, 0, http.StatusOK, ""
+}
+
 // @Summary Log in
-// @Description Checks an admin account and returns a session token. Send the token on every change as "Authorization: Bearer <token>". The token expires after 12 hours. Five wrong passwords lock the account for 15 minutes. Accounts are created on the server machine with: lipstick-server admin create -username NAME.
+// @Description Checks an admin account and returns a session token. Send the token on every change as "Authorization: Bearer <token>". The token expires after 12 hours. Five wrong passwords lock the account for 15 minutes. Accounts are created on the server machine with: lipstick-server admin create -username NAME. The web panel uses /web/login instead, which keeps the token in a cookie.
 // @Tags session
 // @Accept json
 // @Produce json
@@ -121,46 +201,74 @@ func (r *router) authorized(c *gin.Context) bool {
 func (r *router) login(c *gin.Context) {
 	var body loginBody
 	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(400, errorResponse{Error: "body must be JSON with username and password"})
+		c.JSON(http.StatusBadRequest, errorResponse{Error: "body must be JSON with username and password"})
 		return
 	}
-	if wait := r.admin.logins.blocked(body.Username); wait > 0 {
+	token, expires, wait, status, message := r.issueSession(body.Username, body.Password)
+	if status == http.StatusTooManyRequests {
 		c.Header("Retry-After", wait.Round(time.Second).String())
-		c.JSON(429, errorResponse{Error: "too many failed logins; wait before trying again"})
+	}
+	if status != http.StatusOK {
+		c.JSON(status, errorResponse{Error: message})
 		return
 	}
-	userID, err := r.admin.store.Login(body.Username, body.Password)
-	if err != nil {
-		r.admin.logins.fail(body.Username)
-		c.JSON(401, errorResponse{Error: "invalid username or password"})
+	c.JSON(http.StatusOK, loginResponse{Username: body.Username, Token: token, ExpiresAt: expires})
+}
+
+// @Summary Log in to the web panel
+// @Description The same check as /login, for the web panel. The token is not in the answer: it is stored in the HttpOnly, Secure, SameSite=Strict cookie "lipstick_session", which scripts cannot read. The request must carry the header X-Lipstick-CSRF: 1.
+// @Tags session
+// @Accept json
+// @Produce json
+// @Param credentials body loginBody true "Account name and password"
+// @Success 200 {object} webLoginResponse "The session cookie is set"
+// @Failure 400 {object} errorResponse "Body is not JSON with username and password"
+// @Failure 401 {object} errorResponse "Invalid username or password"
+// @Failure 403 {object} errorResponse "The X-Lipstick-CSRF header is missing"
+// @Failure 429 {object} errorResponse "Too many failed logins; the Retry-After header says how long to wait"
+// @Failure 500 {object} errorResponse "The session could not be created"
+// @Router /web/login [post]
+func (r *router) webLogin(c *gin.Context) {
+	if c.GetHeader(csrfHeader) != "1" {
+		c.JSON(http.StatusForbidden, errorResponse{Error: "the " + csrfHeader + " header is required"})
 		return
 	}
-	token, expires, err := r.admin.store.NewSession(userID)
-	if err != nil {
-		c.JSON(500, errorResponse{Error: "unable to create a session"})
+	var body loginBody
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, errorResponse{Error: "body must be JSON with username and password"})
 		return
 	}
-	r.admin.logins.reset(body.Username)
-	c.JSON(200, loginResponse{Username: body.Username, Token: token, ExpiresAt: expires})
+	token, expires, wait, status, message := r.issueSession(body.Username, body.Password)
+	if status == http.StatusTooManyRequests {
+		c.Header("Retry-After", wait.Round(time.Second).String())
+	}
+	if status != http.StatusOK {
+		c.JSON(status, errorResponse{Error: message})
+		return
+	}
+	setSessionCookie(c, token, expires)
+	c.JSON(http.StatusOK, webLoginResponse{Username: body.Username, ExpiresAt: expires})
 }
 
 // @Summary Log out
-// @Description Ends the session of the token sent in the Authorization header. The token stops working at once.
+// @Description Ends the session of the token or cookie of the request. The token stops working at once, and the session cookie is cleared. Changes with the cookie need the X-Lipstick-CSRF: 1 header.
 // @Tags session
 // @Security BearerAuth
 // @Produce json
 // @Success 200 {object} statusResponse
-// @Failure 401 {object} errorResponse "Missing, expired or invalid session token. Error: 'Unauthorized'"
+// @Failure 401 {object} errorResponse "Missing, expired or invalid session. Error: 'Unauthorized'"
+// @Failure 403 {object} errorResponse "The X-Lipstick-CSRF header is missing on a cookie logout"
 // @Failure 500 {object} errorResponse "The session could not be ended"
 // @Router /logout [post]
 func (r *router) logout(c *gin.Context) {
 	if !r.authorized(c) {
 		return
 	}
-	token, _ := bearerToken(c.Request.Header.Get("Authorization"))
+	token, _ := sessionFromRequest(c.Request)
 	if err := r.admin.store.Logout(token); err != nil {
-		c.JSON(500, errorResponse{Error: "unable to end the session"})
+		c.JSON(http.StatusInternalServerError, errorResponse{Error: "unable to end the session"})
 		return
 	}
-	c.JSON(200, statusResponse{Status: "ok"})
+	clearSessionCookie(c)
+	c.JSON(http.StatusOK, statusResponse{Status: "ok"})
 }

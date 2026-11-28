@@ -17,13 +17,16 @@ func statsAdmin() *Admin {
 	return a
 }
 
-// /stats is read-only, so it needs no key, with or without a key sent.
-func TestStatsNeedsNoKey(t *testing.T) {
+// Reads need a session like everything else. Without one, /stats answers 401.
+func TestStatsNeedsASession(t *testing.T) {
 	a := statsAdmin()
-	for _, h := range []string{"", "wrong"} {
-		if rec := do(a, http.MethodGet, "/stats", h); rec.Code != http.StatusOK {
-			t.Fatalf("stats with header %q: got %d, want 200", h, rec.Code)
+	for _, h := range []string{"", "Bearer wrong", testKey} {
+		if rec := do(a, http.MethodGet, "/stats", h); rec.Code != http.StatusUnauthorized {
+			t.Fatalf("stats with header %q: got %d, want 401", h, rec.Code)
 		}
+	}
+	if rec := do(a, http.MethodGet, "/stats", "Bearer "+testKey); rec.Code != http.StatusOK {
+		t.Fatalf("stats with a session: got %d, want 200", rec.Code)
 	}
 }
 
@@ -51,14 +54,24 @@ func TestStatsWithoutSourceIsEmpty(t *testing.T) {
 	}
 }
 
-// The panel is public HTML with no data in it, served at /, and carries the security headers.
+// Without a session, / shows the login form and no data. With one, it shows the panel.
 func TestPanelHasNoDataAndSecurityHeaders(t *testing.T) {
 	a := statsAdmin()
 	rec := do(a, http.MethodGet, "/", "")
-	if rec.Code != http.StatusOK {
-		t.Fatalf("panel at /: got %d", rec.Code)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "login-form") {
+		t.Fatalf("/ without a session should show the login form: got %d", rec.Code)
 	}
-	if old := do(a, http.MethodGet, "/ui", ""); old.Code != http.StatusFound || old.Header().Get("Location") != "/" {
+	if strings.Contains(rec.Body.String(), "robot-42") {
+		t.Fatal("login form contains data")
+	}
+	if csp := rec.Header().Get("Content-Security-Policy"); strings.Contains(csp, "unsafe-inline") || !strings.Contains(csp, "script-src 'self'") {
+		t.Fatalf("policy too weak: %q", csp)
+	}
+	rec = do(a, http.MethodGet, "/", "Bearer "+testKey)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("panel at / with a session: got %d", rec.Code)
+	}
+	if old := do(a, http.MethodGet, "/ui", "Bearer "+testKey); old.Code != http.StatusFound || old.Header().Get("Location") != "/" {
 		t.Fatalf("/ui should redirect to /: got %d %q", old.Code, old.Header().Get("Location"))
 	}
 	body := rec.Body.String()

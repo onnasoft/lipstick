@@ -11,7 +11,7 @@ import (
 // protected routes, and the public ones.
 func TestSwaggerDocumentDescribesTheAPI(t *testing.T) {
 	a := newTestAdmin("secret")
-	rec := do(a, http.MethodGet, "/swagger/doc.json", "")
+	rec := do(a, http.MethodGet, "/swagger/doc.json", "Bearer secret")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("doc.json status %d", rec.Code)
 	}
@@ -52,16 +52,24 @@ func TestSwaggerDocumentDescribesTheAPI(t *testing.T) {
 			}
 		}
 	}
-	for _, path := range []string{"/health", "/stats", "/domains", "/requests"} {
-		if op, ok := spec.Paths[path]["get"]; ok && len(op.Security) != 0 {
-			t.Errorf("GET %s is read-only but declares a key", path)
+	// Everything except the health check, the login endpoints and the panel's own
+	// files needs a session, so the reference must say so on every operation.
+	public := map[string]bool{"/health": true, "/login": true, "/web/login": true, "/": true}
+	for path, ops := range spec.Paths {
+		if public[path] {
+			continue
+		}
+		for m, op := range ops {
+			if len(op.Security) == 0 {
+				t.Errorf("%s %s needs a session but declares no security", m, path)
+			}
 		}
 	}
 }
 
 func TestSwaggerUIIsServed(t *testing.T) {
 	a := newTestAdmin("secret")
-	rec := do(a, http.MethodGet, "/swagger/index.html", "")
+	rec := do(a, http.MethodGet, "/swagger/index.html", "Bearer secret")
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "swagger") {
 		t.Fatalf("UI status %d", rec.Code)
 	}
@@ -71,7 +79,7 @@ func TestSwaggerUIIsServed(t *testing.T) {
 // generic object would hide them.
 func TestEveryResponseHasATypedSchema(t *testing.T) {
 	a := newTestAdmin("secret")
-	rec := do(a, http.MethodGet, "/swagger/doc.json", "")
+	rec := do(a, http.MethodGet, "/swagger/doc.json", "Bearer secret")
 	var spec struct {
 		Paths map[string]map[string]struct {
 			Responses map[string]struct {

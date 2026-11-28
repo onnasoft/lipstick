@@ -50,11 +50,11 @@ func TestLoginRefusesWrongPassword(t *testing.T) {
 // After five wrong passwords the account waits, even with the right password.
 func TestLoginLocksAfterFailures(t *testing.T) {
 	a := newTestAdmin(testKey)
-	for i := 0; i < freeLoginFailures; i++ {
+	for i := 0; i < maxLoginFailures-1; i++ {
 		postLogin(a, `{"username":"tester","password":"nope"}`)
 	}
 	if rec := postLogin(a, `{"username":"tester","password":"nope"}`); rec.Code != http.StatusUnauthorized {
-		t.Fatalf("attempt %d: %d, want 401", freeLoginFailures+1, rec.Code)
+		t.Fatalf("fifth wrong password: %d, want 401", rec.Code)
 	}
 	rec := postLogin(a, `{"username":"tester","password":"tester-password-long"}`)
 	if rec.Code != http.StatusTooManyRequests {

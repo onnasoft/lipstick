@@ -37,6 +37,11 @@ const docTemplate = `{
         },
         "/domains": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Every domain with its policies. Client keys are never returned. Needs no key.",
                 "produces": [
                     "application/json"
@@ -121,6 +126,11 @@ const docTemplate = `{
         },
         "/domains/{domainName}": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "One domain with its policies. The client key is never returned. Needs no key.",
                 "produces": [
                     "application/json"
@@ -286,6 +296,11 @@ const docTemplate = `{
         },
         "/domains/{domainName}/traffic": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Bytes transferred per day between two dates, inclusive. Needs no key.",
                 "produces": [
                     "application/json"
@@ -790,7 +805,7 @@ const docTemplate = `{
         },
         "/login": {
             "post": {
-                "description": "Checks an admin account and returns a session token. Send the token on every change as \"Authorization: Bearer \u003ctoken\u003e\". The token expires after 12 hours. Five wrong passwords lock the account for 15 minutes. Accounts are created on the server machine with: lipstick-server admin create -username NAME.",
+                "description": "Checks an admin account and returns a session token. Send the token on every change as \"Authorization: Bearer \u003ctoken\u003e\". The token expires after 12 hours. Five wrong passwords lock the account for 15 minutes. Accounts are created on the server machine with: lipstick-server admin create -username NAME. The web panel uses /web/login instead, which keeps the token in a cookie.",
                 "consumes": [
                     "application/json"
                 ],
@@ -853,7 +868,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Ends the session of the token sent in the Authorization header. The token stops working at once.",
+                "description": "Ends the session of the token or cookie of the request. The token stops working at once, and the session cookie is cleared. Changes with the cookie need the X-Lipstick-CSRF: 1 header.",
                 "produces": [
                     "application/json"
                 ],
@@ -869,7 +884,13 @@ const docTemplate = `{
                         }
                     },
                     "401": {
-                        "description": "Missing, expired or invalid session token. Error: 'Unauthorized'",
+                        "description": "Missing, expired or invalid session. Error: 'Unauthorized'",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "The X-Lipstick-CSRF header is missing on a cookie logout",
                         "schema": {
                             "$ref": "#/definitions/admin.errorResponse"
                         }
@@ -885,6 +906,11 @@ const docTemplate = `{
         },
         "/requests": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Finished HTTP requests, newest first: domain, port the visitor came in on, method, path without query, status, duration and response size. Headers and bodies are never stored. Without from or to, the newest requests come from memory; with a time range they come from the database (kept 7 days). Needs no key.",
                 "produces": [
                     "application/json"
@@ -953,6 +979,11 @@ const docTemplate = `{
         },
         "/stats": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Clients, active sessions, pending visitors, bytes since start, and intranet ports for each domain with a hub. Needs no key.",
                 "produces": [
                     "application/json"
@@ -969,6 +1000,70 @@ const docTemplate = `{
                             "items": {
                                 "$ref": "#/definitions/manager.DomainStats"
                             }
+                        }
+                    }
+                }
+            }
+        },
+        "/web/login": {
+            "post": {
+                "description": "The same check as /login, for the web panel. The token is not in the answer: it is stored in the HttpOnly, Secure, SameSite=Strict cookie \"lipstick_session\", which scripts cannot read. The request must carry the header X-Lipstick-CSRF: 1.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "session"
+                ],
+                "summary": "Log in to the web panel",
+                "parameters": [
+                    {
+                        "description": "Account name and password",
+                        "name": "credentials",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/admin.loginBody"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The session cookie is set",
+                        "schema": {
+                            "$ref": "#/definitions/admin.webLoginResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Body is not JSON with username and password",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Invalid username or password",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "The X-Lipstick-CSRF header is missing",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Too many failed logins; the Retry-After header says how long to wait",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "The session could not be created",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
                         }
                     }
                 }
@@ -1251,6 +1346,18 @@ const docTemplate = `{
                 }
             }
         },
+        "admin.webLoginResponse": {
+            "type": "object",
+            "properties": {
+                "expiresAt": {
+                    "type": "string"
+                },
+                "username": {
+                    "type": "string",
+                    "example": "jtorres"
+                }
+            }
+        },
         "manager.DomainStats": {
             "type": "object",
             "properties": {
@@ -1329,7 +1436,7 @@ var SwaggerInfo = &swag.Spec{
 	BasePath:         "/",
 	Schemes:          []string{"https"},
 	Title:            "Lipstick Admin API",
-	Description:      "Administration of a Lipstick server: domains, live state, request log, visitor users and API tokens, and access rules.\n\nThe API is served over TLS. The example configuration binds it to 127.0.0.1, so only the machine itself can reach it. Reads of domains, statistics and the request log need no key. Every change needs a session token.\n\n**Accounts.** Admin accounts are created on the server machine, from the console, with a password typed in the terminal: `lipstick-server admin create -username NAME`. There is no key to configure. Without an account no change is possible. Other console commands: `admin list`, `admin reset-password -username NAME`, `admin disable -username NAME`, `admin enable -username NAME`.\n\n**Sessions.** `POST /login` with the account's username and password returns a token. Send it on each change as `Authorization: Bearer <token>`. It expires after 12 hours; `POST /logout` ends it. Five wrong passwords lock the account for 15 minutes.\n\n**Example with curl.** The certificate is self-signed, so use -k:\n\n`curl -k -X POST 'https://127.0.0.1:5052/login' -H 'Content-Type: application/json' -d '{\"username\": \"jtorres\", \"password\": \"<your password>\"}'`\n\nCopy the token from the answer, then:\n\n`curl -k -X POST 'https://127.0.0.1:5052/domains/localhost/visitor-users' -H 'Content-Type: application/json' -H 'Authorization: Bearer <token>' -d '{\"username\": \"jtorres\"}'`\n\nWithout a valid token the answer is 401 Unauthorized.",
+	Description:      "Administration of a Lipstick server: domains, live state, request log, visitor users and API tokens, and access rules.\n\nThe API is served over TLS. The example configuration binds it to 127.0.0.1, so only the machine itself can reach it. Everything except the health check and the login endpoints needs a session: the web panel gets it from its login form, API clients from /login.\n\n**Accounts.** Admin accounts are created on the server machine, from the console, with a password typed in the terminal: `lipstick-server admin create -username NAME`. There is no key to configure. Without an account no change is possible. Other console commands: `admin list`, `admin reset-password -username NAME`, `admin disable -username NAME`, `admin enable -username NAME`.\n\n**Sessions.** `POST /login` with the account's username and password returns a token. Send it on each request as `Authorization: Bearer <token>`. The web panel uses `POST /web/login` instead, which keeps the token in an HttpOnly cookie that scripts cannot read; changes made with that cookie must carry the header `X-Lipstick-CSRF: 1`. It expires after 12 hours; `POST /logout` ends it. Five wrong passwords lock the account for 15 minutes.\n\n**Example with curl.** The certificate is self-signed, so use -k:\n\n`curl -k -X POST 'https://127.0.0.1:5052/login' -H 'Content-Type: application/json' -d '{\"username\": \"jtorres\", \"password\": \"<your password>\"}'`\n\nCopy the token from the answer, then:\n\n`curl -k -X POST 'https://127.0.0.1:5052/domains/localhost/visitor-users' -H 'Content-Type: application/json' -H 'Authorization: Bearer <token>' -d '{\"username\": \"jtorres\"}'`\n\nWithout a valid token the answer is 401 Unauthorized.",
 	InfoInstanceName: "swagger",
 	SwaggerTemplate:  docTemplate,
 	LeftDelim:        "{{",

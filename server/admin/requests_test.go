@@ -27,10 +27,13 @@ func requestsAdmin() *Admin {
 	return a
 }
 
-func TestRequestsNeedNoKey(t *testing.T) {
+func TestRequestsNeedASession(t *testing.T) {
 	a := requestsAdmin()
-	if rec := do(a, http.MethodGet, "/requests", ""); rec.Code != http.StatusOK {
-		t.Fatalf("requests without key: got %d, want 200", rec.Code)
+	if rec := do(a, http.MethodGet, "/requests", ""); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("requests without a session: got %d, want 401", rec.Code)
+	}
+	if rec := do(a, http.MethodGet, "/requests", "Bearer "+testKey); rec.Code != http.StatusOK {
+		t.Fatalf("requests with a session: got %d, want 200", rec.Code)
 	}
 }
 

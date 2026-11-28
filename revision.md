@@ -573,6 +573,15 @@ Lipstick exposes local ports to the internet through a reverse tunnel. The main 
 - **Not done:** a reset of the whole configuration. It would delete data, so it waits for an explicit decision.
 - **Verified:** store tests on SQLite (login, sessions, disable, password reset, expiry, hashes stored, input rules); API tests (token accepted, wrong password, lock after five failures, bearer challenge); console tests (two matching passwords, short password, missing username, unknown command, disable and enable, list without secrets); live: `admin list` reads the real database and `admin create` refuses without a terminal.
 
+### 59. Web panel login with an HttpOnly session cookie (change)
+- **Why:** the panel showed data to anyone who reached the admin port, and a token given to a web page is readable by any script on it.
+- **Now:** every route except `/health`, `/login`, `/web/login` and the panel's own files needs a session. Without one, `/` shows a login form and nothing else. `POST /web/login` sets the session in the cookie `lipstick_session`: HttpOnly, Secure, SameSite=Strict, Path=/. The answer carries no token. `POST /logout` ends the session and clears the cookie.
+- **CSRF:** a change made with the cookie must carry `X-Lipstick-CSRF: 1`. A page on another site cannot set a custom header without a preflight, and the server never answers one. Bearer requests are not affected: browsers do not send them on their own.
+- **Strict page policy:** `default-src 'none'; script-src 'self'; style-src 'self'; frame-ancestors 'none'`. The panel's script and stylesheet moved to files in `server/admin/web/` (embedded in the binary), so no inline script or style is needed.
+- **Lock:** five wrong passwords lock the account for 15 minutes, counted together for `/login` and `/web/login`. The lock applies at the fifth wrong password, as documented.
+- **Verified:** tests for the cookie attributes, the token missing from the web login answer, the CSRF rule for cookie changes and for Bearer, the shared lock, logout clearing the cookie, public assets, and no inline script or style in the pages.
+- **Left for later:** the cookie is not bound to the client's address or to a device; a session stolen from the machine itself is still a session.
+
 ## Recommended order
 
 1. Items 1, 2, 3, and 4: authentication, unpredictable tickets, TLS verification, and admin API hardening.
