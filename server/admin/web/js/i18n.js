@@ -11,6 +11,17 @@
   // Spanish translations. The key is the English text, exactly as the code passes it to t().
   var DICT = {
     es: {
+    "Audit log": "Registro de auditoría",
+    "Who changed what, and when. Changes and login attempts. Values of keys, secrets and passwords are never recorded.": "Quién cambió qué, y cuándo. Cambios e intentos de entrada. Nunca se registran valores de claves, secretos ni contraseñas.",
+    "Search by user, action or object…": "Buscar por usuario, acción u objeto…",
+    "Nothing has been recorded yet.": "Todavía no hay nada registrado.",
+    "Who": "Quién",
+    "Action": "Acción",
+    "Object": "Objeto",
+    "Outcome": "Resultado",
+    "Fields": "Campos",
+    "succeeded": "correcto",
+    "failed": "fallido",
     "1 result · page {page} of {pages}": "1 resultado · página {page} de {pages}",
     "Account": "Cuenta",
     "Lipstick, go to the dashboard": "Lipstick, ir al panel",

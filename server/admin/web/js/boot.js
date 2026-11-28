@@ -17,6 +17,7 @@
     { group: "Account", items: [
       { id: "account", label: "My account", icon: "○" },
       { id: "accounts", label: "Admin accounts", icon: "◆", role: "superuser" },
+      { id: "audit", label: "Audit log", icon: "☰", role: "superuser" },
       { id: "settings", label: "Settings", icon: "⚙" }
     ] }
   ];

@@ -125,6 +125,12 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/admin.errorResponse"
                         }
+                    },
+                    "503": {
+                        "description": "The change was not made: the audit log is not available",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
                     }
                 }
             }
@@ -238,6 +244,12 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/admin.errorResponse"
                         }
+                    },
+                    "503": {
+                        "description": "The change was not made: the audit log is not available",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
                     }
                 }
             }
@@ -302,6 +314,12 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/admin.errorResponse"
                         }
+                    },
+                    "503": {
+                        "description": "The change was not made: the audit log is not available",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
                     }
                 }
             }
@@ -357,6 +375,12 @@ const docTemplate = `{
                     },
                     "500": {
                         "description": "The account could not be changed",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "The change was not made: the audit log is not available",
                         "schema": {
                             "$ref": "#/definitions/admin.errorResponse"
                         }
@@ -433,6 +457,12 @@ const docTemplate = `{
                     },
                     "500": {
                         "description": "The password could not be changed",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "The change was not made: the audit log is not available",
                         "schema": {
                             "$ref": "#/definitions/admin.errorResponse"
                         }
@@ -515,6 +545,109 @@ const docTemplate = `{
                     },
                     "500": {
                         "description": "The role could not be changed",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "The change was not made: the audit log is not available",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/audit": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Every change and login attempt, newest first: who (actor), what (action), which object (target), the outcome, the status code, the client address, and the names of the fields changed. Values of keys, secrets and passwords are never recorded. Superusers only.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "audit"
+                ],
+                "summary": "Search the audit log",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Only this account",
+                        "name": "actor",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Only this action, for example domain.update",
+                        "name": "action",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Only this object",
+                        "name": "target",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "pending, succeeded or failed",
+                        "name": "outcome",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Start: RFC 3339 or YYYY-MM-DD",
+                        "name": "from",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "End: RFC 3339 or YYYY-MM-DD (a date includes the whole day)",
+                        "name": "to",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 100,
+                        "description": "How many, 1 to 500",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/audit.Event"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "A parameter is not valid",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Missing, expired or invalid session. Error: 'Unauthorized'",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Only a superuser can do this",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "The audit log does not answer",
                         "schema": {
                             "$ref": "#/definitions/admin.errorResponse"
                         }
@@ -604,6 +737,12 @@ const docTemplate = `{
                     },
                     "500": {
                         "description": "The domain could not be saved. Error: 'Unable to add domain'",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "The change was not made: the audit log is not available",
                         "schema": {
                             "$ref": "#/definitions/admin.errorResponse"
                         }
@@ -703,6 +842,12 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/admin.errorResponse"
                         }
+                    },
+                    "503": {
+                        "description": "The change was not made: the audit log is not available",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
                     }
                 }
             },
@@ -774,6 +919,12 @@ const docTemplate = `{
                     },
                     "500": {
                         "description": "The domain could not be updated. Error: 'Unable to update domain'",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "The change was not made: the audit log is not available",
                         "schema": {
                             "$ref": "#/definitions/admin.errorResponse"
                         }
@@ -960,6 +1111,12 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/admin.errorResponse"
                         }
+                    },
+                    "503": {
+                        "description": "The change was not made: the audit log is not available",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
                     }
                 }
             }
@@ -1022,6 +1179,12 @@ const docTemplate = `{
                     },
                     "500": {
                         "description": "The domain could not be read. Error: 'Unable to get domain'",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "The change was not made: the audit log is not available",
                         "schema": {
                             "$ref": "#/definitions/admin.errorResponse"
                         }
@@ -1148,6 +1311,12 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/admin.errorResponse"
                         }
+                    },
+                    "503": {
+                        "description": "The change was not made: the audit log is not available",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
                     }
                 }
             }
@@ -1207,6 +1376,12 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/admin.errorResponse"
                         }
+                    },
+                    "503": {
+                        "description": "The change was not made: the audit log is not available",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
                     }
                 }
             }
@@ -1263,6 +1438,12 @@ const docTemplate = `{
                     },
                     "500": {
                         "description": "The secret could not be rotated. Error: 'unable to rotate secret'",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "The change was not made: the audit log is not available",
                         "schema": {
                             "$ref": "#/definitions/admin.errorResponse"
                         }
@@ -1350,6 +1531,12 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/admin.errorResponse"
                         }
+                    },
+                    "503": {
+                        "description": "The change was not made: the audit log is not available",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
                     }
                 }
             }
@@ -1390,6 +1577,12 @@ const docTemplate = `{
                     },
                     "500": {
                         "description": "The session could not be ended",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "The change was not made: the audit log is not available",
                         "schema": {
                             "$ref": "#/definitions/admin.errorResponse"
                         }
@@ -1561,6 +1754,12 @@ const docTemplate = `{
                     },
                     "500": {
                         "description": "The session could not be created",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "The change was not made: the audit log is not available",
                         "schema": {
                             "$ref": "#/definitions/admin.errorResponse"
                         }
@@ -1950,6 +2149,42 @@ const docTemplate = `{
                 "username": {
                     "type": "string",
                     "example": "jtorres"
+                }
+            }
+        },
+        "audit.Event": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string"
+                },
+                "actor": {
+                    "type": "string"
+                },
+                "clientAddr": {
+                    "type": "string"
+                },
+                "details": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "occurredAt": {
+                    "type": "string"
+                },
+                "outcome": {
+                    "type": "string"
+                },
+                "statusCode": {
+                    "type": "integer"
+                },
+                "target": {
+                    "type": "string"
+                },
+                "userAgent": {
+                    "type": "string"
                 }
             }
         },

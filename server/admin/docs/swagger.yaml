@@ -264,6 +264,30 @@ definitions:
         example: jtorres
         type: string
     type: object
+  audit.Event:
+    properties:
+      action:
+        type: string
+      actor:
+        type: string
+      clientAddr:
+        type: string
+      details:
+        additionalProperties: {}
+        type: object
+      id:
+        type: integer
+      occurredAt:
+        type: string
+      outcome:
+        type: string
+      statusCode:
+        type: integer
+      target:
+        type: string
+      userAgent:
+        type: string
+    type: object
   manager.DomainStats:
     properties:
       activeSessions:
@@ -398,6 +422,10 @@ paths:
           description: The password could not be changed
           schema:
             $ref: '#/definitions/admin.errorResponse'
+        "503":
+          description: 'The change was not made: the audit log is not available'
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
       security:
       - BearerAuth: []
       summary: Change my password
@@ -473,6 +501,10 @@ paths:
           description: The account could not be created
           schema:
             $ref: '#/definitions/admin.errorResponse'
+        "503":
+          description: 'The change was not made: the audit log is not available'
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
       security:
       - BearerAuth: []
       summary: Create an admin account
@@ -516,6 +548,10 @@ paths:
           description: The account could not be changed
           schema:
             $ref: '#/definitions/admin.errorResponse'
+        "503":
+          description: 'The change was not made: the audit log is not available'
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
       security:
       - BearerAuth: []
       summary: Disable an account
@@ -551,6 +587,10 @@ paths:
             $ref: '#/definitions/admin.errorResponse'
         "500":
           description: The account could not be changed
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
+        "503":
+          description: 'The change was not made: the audit log is not available'
           schema:
             $ref: '#/definitions/admin.errorResponse'
       security:
@@ -601,6 +641,10 @@ paths:
             $ref: '#/definitions/admin.errorResponse'
         "500":
           description: The password could not be changed
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
+        "503":
+          description: 'The change was not made: the audit log is not available'
           schema:
             $ref: '#/definitions/admin.errorResponse'
       security:
@@ -657,11 +701,81 @@ paths:
           description: The role could not be changed
           schema:
             $ref: '#/definitions/admin.errorResponse'
+        "503":
+          description: 'The change was not made: the audit log is not available'
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
       security:
       - BearerAuth: []
       summary: Change an account's role
       tags:
       - accounts
+  /audit:
+    get:
+      description: 'Every change and login attempt, newest first: who (actor), what
+        (action), which object (target), the outcome, the status code, the client
+        address, and the names of the fields changed. Values of keys, secrets and
+        passwords are never recorded. Superusers only.'
+      parameters:
+      - description: Only this account
+        in: query
+        name: actor
+        type: string
+      - description: Only this action, for example domain.update
+        in: query
+        name: action
+        type: string
+      - description: Only this object
+        in: query
+        name: target
+        type: string
+      - description: pending, succeeded or failed
+        in: query
+        name: outcome
+        type: string
+      - description: 'Start: RFC 3339 or YYYY-MM-DD'
+        in: query
+        name: from
+        type: string
+      - description: 'End: RFC 3339 or YYYY-MM-DD (a date includes the whole day)'
+        in: query
+        name: to
+        type: string
+      - default: 100
+        description: How many, 1 to 500
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/audit.Event'
+            type: array
+        "400":
+          description: A parameter is not valid
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
+        "401":
+          description: 'Missing, expired or invalid session. Error: ''Unauthorized'''
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
+        "403":
+          description: Only a superuser can do this
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
+        "503":
+          description: The audit log does not answer
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
+      security:
+      - BearerAuth: []
+      summary: Search the audit log
+      tags:
+      - audit
   /domains:
     get:
       description: Every domain with its policies. Client keys are never returned.
@@ -716,6 +830,10 @@ paths:
           description: 'The domain could not be saved. Error: ''Unable to add domain'''
           schema:
             $ref: '#/definitions/admin.errorResponse'
+        "503":
+          description: 'The change was not made: the audit log is not available'
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
       security:
       - BearerAuth: []
       summary: Create a domain
@@ -748,6 +866,10 @@ paths:
         "500":
           description: 'The domain could not be deleted. Error: ''Unable to delete
             domain'''
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
+        "503":
+          description: 'The change was not made: the audit log is not available'
           schema:
             $ref: '#/definitions/admin.errorResponse'
       security:
@@ -833,6 +955,10 @@ paths:
         "500":
           description: 'The domain could not be updated. Error: ''Unable to update
             domain'''
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
+        "503":
+          description: 'The change was not made: the audit log is not available'
           schema:
             $ref: '#/definitions/admin.errorResponse'
       security:
@@ -960,6 +1086,10 @@ paths:
           description: 'The domain could not be read. Error: ''Unable to get domain'''
           schema:
             $ref: '#/definitions/admin.errorResponse'
+        "503":
+          description: 'The change was not made: the audit log is not available'
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
       security:
       - BearerAuth: []
       summary: Create an API token
@@ -1001,6 +1131,10 @@ paths:
             $ref: '#/definitions/admin.errorResponse'
         "500":
           description: 'The domain could not be read. Error: ''Unable to get domain'''
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
+        "503":
+          description: 'The change was not made: the audit log is not available'
           schema:
             $ref: '#/definitions/admin.errorResponse'
       security:
@@ -1087,6 +1221,10 @@ paths:
           description: 'The domain could not be read. Error: ''Unable to get domain'''
           schema:
             $ref: '#/definitions/admin.errorResponse'
+        "503":
+          description: 'The change was not made: the audit log is not available'
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
       security:
       - BearerAuth: []
       summary: Add a visitor user
@@ -1124,6 +1262,10 @@ paths:
             $ref: '#/definitions/admin.errorResponse'
         "500":
           description: 'The domain could not be read. Error: ''Unable to get domain'''
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
+        "503":
+          description: 'The change was not made: the audit log is not available'
           schema:
             $ref: '#/definitions/admin.errorResponse'
       security:
@@ -1165,6 +1307,10 @@ paths:
         "500":
           description: 'The secret could not be rotated. Error: ''unable to rotate
             secret'''
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
+        "503":
+          description: 'The change was not made: the audit log is not available'
           schema:
             $ref: '#/definitions/admin.errorResponse'
       security:
@@ -1232,6 +1378,10 @@ paths:
           description: The session could not be created
           schema:
             $ref: '#/definitions/admin.errorResponse'
+        "503":
+          description: 'The change was not made: the audit log is not available'
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
       summary: Log in
       tags:
       - session
@@ -1257,6 +1407,10 @@ paths:
             $ref: '#/definitions/admin.errorResponse'
         "500":
           description: The session could not be ended
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
+        "503":
+          description: 'The change was not made: the audit log is not available'
           schema:
             $ref: '#/definitions/admin.errorResponse'
       security:
@@ -1384,6 +1538,10 @@ paths:
             $ref: '#/definitions/admin.errorResponse'
         "500":
           description: The session could not be created
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
+        "503":
+          description: 'The change was not made: the audit log is not available'
           schema:
             $ref: '#/definitions/admin.errorResponse'
       summary: Log in to the web panel

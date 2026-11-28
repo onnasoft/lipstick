@@ -16,6 +16,7 @@ type Admin struct {
 	authManager auth.AuthManager
 	addr        string
 	store       adminStore // admin accounts and sessions
+	audit       auditSink  // who changed what, see audit.go
 	logins      loginLimiter
 	tlsConfig   *tls.Config
 	onChanged   func(domain string)

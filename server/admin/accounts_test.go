@@ -38,6 +38,7 @@ func realAdmin(t *testing.T) (a *Admin, superToken, operatorToken string) {
 	superToken = sessionFor(t, store, "jtorres")
 	operatorToken = sessionFor(t, store, "operador")
 	a = &Admin{authManager: fakeAuth{}, store: store}
+	a.SetAudit(newMemAudit())
 	configureRouter(a)
 	return a, superToken, operatorToken
 }

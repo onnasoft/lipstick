@@ -315,7 +315,7 @@ This milestone should not be a prerequisite for the initial stable release.
 
 The administration API and panel are functional and tested, but they are not yet fit for a paid production product. Gaps in priority order:
 
-1. [ ] **Audit log.** Every change (domains, keys, accounts, visitor users and secrets, access rules) records who did it, when, and from where. Queryable by superusers.
+1. [x] **Audit log.** (Implemented: `server/audit`, `GET /audit`, panel screen; see revision.md, item 65.) Every change (domains, keys, accounts, visitor users and secrets, access rules) records who did it, when, and from where. Queryable by superusers.
 2. [ ] **Encryption at rest.** Client keys (`api_key`) and visitor secrets are stored in clear text today. Encrypt them with a key held outside the database.
 3. [ ] **Two-factor authentication for superusers.** A compromised superuser controls the whole tunnel; a password alone is not enough for a commercial product.
 4. [ ] **Versioned migrations.** Replace startup `AutoMigrate` (which can drop columns) with explicit, reviewed migrations and a backup step before them.

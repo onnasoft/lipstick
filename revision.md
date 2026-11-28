@@ -634,6 +634,15 @@ Lipstick exposes local ports to the internet through a reverse tunnel. The main 
 - **Verified:** unit test (bytes below the threshold leave memory on flush, the total since start is kept, a flush with nothing waiting writes nothing). Live: 20 requests of 261 bytes produced 5,220 bytes in `daily_consumptions` within 12 seconds, where before the fix the total stayed at 0.
 - **Note:** the 5-second window means the daily total can lag by up to 5 seconds, and bytes waiting in memory are lost only if the process is killed hard.
 
+### 65. Audit log of every change and login (feature)
+- **What is recorded:** each change (domains, client keys, access rules, visitor users and their secrets, visitor API tokens, admin accounts, roles, passwords, own password, logins and logouts), with the actor, the action, the object, the outcome, the status code, the client address, the browser, and the names of the fields changed. Values of keys, secrets, passwords and tokens are never recorded.
+- **Before and after:** an entry is written as `pending` before the change, and completed as `succeeded` or `failed` after it. If the pending entry cannot be written, the change is refused with 503 and nothing happens. A change whose outcome cannot be recorded stays `pending` in the log, and the server log says why.
+- **Address:** taken from the TCP connection only. Forwarded headers are ignored, because any client could set them.
+- **Query:** `GET /audit`, superusers only, with filters for actor, action, object, outcome and dates, newest first, up to 500 entries. Operators are refused, and the refusal is recorded.
+- **Code:** `server/audit` (store), `server/admin/audit.go` (the wrapper that every change route goes through and the query), `server/db` (`audit_events`).
+- **Verified:** store tests (pending then completed, filters, unknown entry, limit); API tests (field names only, no key value in the log, failed changes recorded, refusal when the log cannot be written, no change at all without a log, logins recorded without the password, the query is superuser-only and rejects bad limits).
+- **Not done:** no retention or archive policy yet; the table can be edited by anyone with database access, so the production database user should be allowed to insert and read this table but not update or delete it.
+
 ## Recommended order
 
 1. Items 1, 2, 3, and 4: authentication, unpredictable tickets, TLS verification, and admin API hardening.

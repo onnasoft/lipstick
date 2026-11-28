@@ -17,6 +17,7 @@ import (
 	"github.com/OnnaSoft/lipstick/helper"
 	"github.com/OnnaSoft/lipstick/logger"
 	"github.com/OnnaSoft/lipstick/server/admin"
+	"github.com/OnnaSoft/lipstick/server/audit"
 	"github.com/OnnaSoft/lipstick/server/auth"
 	"github.com/OnnaSoft/lipstick/server/config"
 	"github.com/OnnaSoft/lipstick/server/db"
@@ -118,6 +119,8 @@ func main() {
 	manager.StartNodeStatus(conn, hostname+"/"+conf.Manager.Address)
 	admin.SetStatsSource(clusterStatus)
 	admin.SetRequestSource(manager.RecentRequests)
+	// Every change is recorded before it is made; without this, changes are refused.
+	admin.SetAudit(audit.NewStore(conn))
 	checks := map[string]func() error{
 		"database": func() error {
 			sqlDB, err := conn.DB()

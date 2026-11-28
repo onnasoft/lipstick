@@ -36,21 +36,22 @@ func configureRouter(admin *Admin) {
 	r.GET("/admin/js/*file", serveStatic("js"))
 	r.GET("/admin/css/*file", serveStatic("css"))
 	r.GET("/admin/img/*file", serveStatic("img"))
-	r.POST("/web/login", router.webLogin)
+	r.POST("/web/login", router.audited("session.login", nil, router.webLogin))
 	r.GET("/account", router.whoAmI)
-	r.POST("/account/password", router.changeOwnPassword)
+	r.POST("/account/password", router.audited("account.password_change", currentAccount, router.changeOwnPassword))
 	r.GET("/admin-users", router.listAccounts)
-	r.POST("/admin-users", router.createAccount)
-	r.POST("/admin-users/:username/password", router.resetAccountPassword)
-	r.POST("/admin-users/:username/role", router.changeAccountRole)
-	r.POST("/admin-users/:username/disable", router.disableAccount)
-	r.POST("/admin-users/:username/enable", router.enableAccount)
+	r.POST("/admin-users", router.audited("admin_account.create", nil, router.createAccount))
+	r.POST("/admin-users/:username/password", router.audited("admin_account.password_reset", targetOf("username"), router.resetAccountPassword))
+	r.POST("/admin-users/:username/role", router.audited("admin_account.role", targetOf("username"), router.changeAccountRole))
+	r.POST("/admin-users/:username/disable", router.audited("admin_account.disable", targetOf("username"), router.disableAccount))
+	r.POST("/admin-users/:username/enable", router.audited("admin_account.enable", targetOf("username"), router.enableAccount))
 	r.GET("/stats", router.getStats)
 	r.GET("/", router.ui)
 	r.GET("/ui", func(c *gin.Context) { c.Redirect(http.StatusFound, "/") })
 	r.GET("/requests", router.getRequests)
-	r.POST("/login", router.login)
-	r.POST("/logout", router.logout)
+	r.GET("/audit", router.searchAudit)
+	r.POST("/login", router.audited("session.login", nil, router.login))
+	r.POST("/logout", router.audited("session.logout", currentAccount, router.logout))
 	// The API reference and its "Authorize" button. Read-only, like the other GET routes.
 	docs.SwaggerInfo.BasePath = "/"
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
@@ -60,18 +61,18 @@ func configureRouter(admin *Admin) {
 
 	r.GET(domainNamePath, router.getDomain)
 	r.GET(domainNamePath+"/traffic", router.getTraffic)
-	r.POST("/domains", router.addDomain)
-	r.PATCH(domainNamePath, router.updateDomain)
-	r.DELETE(domainNamePath, router.deleteDomain)
+	r.POST("/domains", router.audited("domain.create", nil, router.addDomain))
+	r.PATCH(domainNamePath, router.audited("domain.update", targetOf("domainName"), router.updateDomain))
+	r.DELETE(domainNamePath, router.audited("domain.delete", targetOf("domainName"), router.deleteDomain))
 
 	// Visitor authentication: users and API tokens of a domain.
-	r.POST(domainNamePath+"/visitor-users", router.addVisitorUser)
+	r.POST(domainNamePath+"/visitor-users", router.audited("visitor_user.create", targetOf("domainName"), router.addVisitorUser))
 	r.GET(domainNamePath+"/visitor-users", router.listVisitorUsers)
-	r.POST(domainNamePath+"/visitor-users/:username/rotate", router.rotateVisitorUser)
-	r.DELETE(domainNamePath+"/visitor-users/:username", router.deleteVisitorUser)
-	r.POST(domainNamePath+"/visitor-tokens", router.addVisitorToken)
+	r.POST(domainNamePath+"/visitor-users/:username/rotate", router.audited("visitor_user.rotate", targetOf2("domainName", "username"), router.rotateVisitorUser))
+	r.DELETE(domainNamePath+"/visitor-users/:username", router.audited("visitor_user.delete", targetOf2("domainName", "username"), router.deleteVisitorUser))
+	r.POST(domainNamePath+"/visitor-tokens", router.audited("visitor_token.create", targetOf("domainName"), router.addVisitorToken))
 	r.GET(domainNamePath+"/visitor-tokens", router.listVisitorTokens)
-	r.DELETE(domainNamePath+"/visitor-tokens/:id", router.revokeVisitorToken)
+	r.DELETE(domainNamePath+"/visitor-tokens/:id", router.audited("visitor_token.revoke", targetOf2("domainName", "id"), router.revokeVisitorToken))
 
 	admin.engine = r
 }
@@ -166,6 +167,7 @@ func (r *router) getDomain(c *gin.Context) {
 // @Failure 400 {object} errorResponse "Invalid body. The message names the field, for example 'allowedCidrs must be a list of strings' or an invalid network or address"
 // @Failure 401 {object} errorResponse "Missing, expired or invalid session token. Error: 'Unauthorized'"
 // @Failure 500 {object} errorResponse "The domain could not be saved. Error: 'Unable to add domain'"
+// @Failure 503 {object} errorResponse "The change was not made: the audit log is not available"
 // @Router /domains [post]
 func (r *router) addDomain(c *gin.Context) {
 	if !r.authorized(c) {
@@ -201,6 +203,7 @@ func (r *router) addDomain(c *gin.Context) {
 		return
 	}
 
+	setAudit(c, domain.Name, map[string]any{"fields": bodyFields(raw)})
 	c.JSON(http.StatusOK, statusResponse{Status: "ok"})
 }
 
@@ -218,6 +221,7 @@ func (r *router) addDomain(c *gin.Context) {
 // @Failure 404 {object} errorResponse "The domain does not exist. Error: 'Domain not found'"
 // @Failure 409 {object} errorResponse "Passthrough cannot be turned on for a domain that requires visitor authentication. Error: 'passthrough cannot be turned on: the domain requires visitor authentication'"
 // @Failure 500 {object} errorResponse "The domain could not be updated. Error: 'Unable to update domain'"
+// @Failure 503 {object} errorResponse "The change was not made: the audit log is not available"
 // @Router /domains/{domainName} [patch]
 func (r *router) updateDomain(c *gin.Context) {
 	if !r.authorized(c) {
@@ -306,6 +310,7 @@ func (r *router) updateDomain(c *gin.Context) {
 	// A new key or a new policy must apply to the clients already connected.
 	r.admin.domainChanged(record.Name)
 
+	setAudit(c, domainName, map[string]any{"fields": mapKeys(domain)})
 	c.JSON(http.StatusOK, statusResponse{Status: "ok"})
 }
 
@@ -319,6 +324,7 @@ func (r *router) updateDomain(c *gin.Context) {
 // @Failure 401 {object} errorResponse "Missing, expired or invalid session token. Error: 'Unauthorized'"
 // @Failure 404 {object} errorResponse "The domain does not exist. Error: 'Domain not found'"
 // @Failure 500 {object} errorResponse "The domain could not be deleted. Error: 'Unable to delete domain'"
+// @Failure 503 {object} errorResponse "The change was not made: the audit log is not available"
 // @Router /domains/{domainName} [delete]
 func (r *router) deleteDomain(c *gin.Context) {
 	if !r.authorized(c) {
@@ -598,6 +604,7 @@ type visitorUserBody struct {
 // @Failure 401 {object} errorResponse "Missing, expired or invalid session token. Error: 'Unauthorized'"
 // @Failure 404 {object} errorResponse "The domain does not exist. Error: 'Domain not found'"
 // @Failure 500 {object} errorResponse "The domain could not be read. Error: 'Unable to get domain'"
+// @Failure 503 {object} errorResponse "The change was not made: the audit log is not available"
 // @Router /domains/{domainName}/visitor-users [post]
 func (r *router) addVisitorUser(c *gin.Context) {
 	name, ok := r.visitorDomain(c)
@@ -614,6 +621,7 @@ func (r *router) addVisitorUser(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, errorResponse{Error: err.Error()})
 		return
 	}
+	setAudit(c, name+"/"+body.Username, map[string]any{"secretGenerated": body.Secret == ""})
 	out := visitorUserResponse{Status: "ok", Username: body.Username}
 	if body.Secret == "" {
 		// Generated here, so it is shown once, in this response only.
@@ -634,6 +642,7 @@ func (r *router) addVisitorUser(c *gin.Context) {
 // @Failure 401 {object} errorResponse "Missing, expired or invalid session token. Error: 'Unauthorized'"
 // @Failure 404 {object} errorResponse "The domain or the user does not exist. Errors: 'Domain not found' or 'visitor user not found'"
 // @Failure 500 {object} errorResponse "The secret could not be rotated. Error: 'unable to rotate secret'"
+// @Failure 503 {object} errorResponse "The change was not made: the audit log is not available"
 // @Router /domains/{domainName}/visitor-users/{username}/rotate [post]
 func (r *router) rotateVisitorUser(c *gin.Context) {
 	name, ok := r.visitorDomain(c)
@@ -688,6 +697,7 @@ func (r *router) listVisitorUsers(c *gin.Context) {
 // @Failure 401 {object} errorResponse "Missing, expired or invalid session token. Error: 'Unauthorized'"
 // @Failure 404 {object} errorResponse "The domain or the user does not exist. Errors: 'Domain not found' or 'visitor user not found'"
 // @Failure 500 {object} errorResponse "The domain could not be read. Error: 'Unable to get domain'"
+// @Failure 503 {object} errorResponse "The change was not made: the audit log is not available"
 // @Router /domains/{domainName}/visitor-users/{username} [delete]
 func (r *router) deleteVisitorUser(c *gin.Context) {
 	name, ok := r.visitorDomain(c)
@@ -721,6 +731,7 @@ type visitorTokenBody struct {
 // @Failure 401 {object} errorResponse "Missing, expired or invalid session token. Error: 'Unauthorized'"
 // @Failure 404 {object} errorResponse "The domain does not exist. Error: 'Domain not found'"
 // @Failure 500 {object} errorResponse "The domain could not be read. Error: 'Unable to get domain'"
+// @Failure 503 {object} errorResponse "The change was not made: the audit log is not available"
 // @Router /domains/{domainName}/visitor-tokens [post]
 func (r *router) addVisitorToken(c *gin.Context) {
 	name, ok := r.visitorDomain(c)
@@ -737,6 +748,7 @@ func (r *router) addVisitorToken(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, errorResponse{Error: err.Error()})
 		return
 	}
+	setAudit(c, name+"/"+body.Name, map[string]any{"methods": body.Methods, "pathPrefixes": body.PathPrefixes})
 	c.JSON(http.StatusOK, visitorTokenCreated{Name: body.Name, Token: token, Note: "shown once; store it now"})
 }
 
@@ -783,6 +795,7 @@ func (r *router) listVisitorTokens(c *gin.Context) {
 // @Failure 401 {object} errorResponse "Missing, expired or invalid session token. Error: 'Unauthorized'"
 // @Failure 404 {object} errorResponse "The domain or the token does not exist. Errors: 'Domain not found' or 'visitor token not found'"
 // @Failure 500 {object} errorResponse "The domain could not be read. Error: 'Unable to get domain'"
+// @Failure 503 {object} errorResponse "The change was not made: the audit log is not available"
 // @Router /domains/{domainName}/visitor-tokens/{id} [delete]
 func (r *router) revokeVisitorToken(c *gin.Context) {
 	name, ok := r.visitorDomain(c)

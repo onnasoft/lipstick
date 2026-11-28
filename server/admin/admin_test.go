@@ -72,6 +72,7 @@ func (f fakeSessions) ListAdminUsers() ([]auth.AdminInfo, error)      { return n
 // newTestAdmin builds the API. token is the only session token it accepts.
 func newTestAdmin(token string) *Admin {
 	a := &Admin{authManager: fakeAuth{}, store: fakeSessions{valid: token}}
+	a.SetAudit(newMemAudit())
 	configureRouter(a)
 	return a
 }
@@ -209,6 +210,7 @@ func postDomain(a *Admin, body string) *httptest.ResponseRecorder {
 func TestCreateDomainMultipleConnectionsDefaults(t *testing.T) {
 	rec := &recordingAuth{}
 	a := &Admin{authManager: rec, store: fakeSessions{valid: testKey}}
+	a.SetAudit(newMemAudit())
 	configureRouter(a)
 
 	if r := postDomain(a, `{"name":"a.example.com","apiKey":"0123456789abcdef"}`); r.Code != http.StatusOK {

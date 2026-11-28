@@ -217,6 +217,7 @@ func (r *router) issueSession(username, password string) (token string, expires 
 // @Failure 401 {object} errorResponse "Invalid username or password. The message does not say which of the two was wrong"
 // @Failure 429 {object} errorResponse "Too many failed logins; the Retry-After header says how long to wait"
 // @Failure 500 {object} errorResponse "The session could not be created"
+// @Failure 503 {object} errorResponse "The change was not made: the audit log is not available"
 // @Router /login [post]
 func (r *router) login(c *gin.Context) {
 	var body loginBody
@@ -224,6 +225,8 @@ func (r *router) login(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, errorResponse{Error: "body must be JSON with username and password"})
 		return
 	}
+	c.Set(auditActorKey, body.Username)
+	setAudit(c, body.Username, map[string]any{"via": "api"})
 	token, expires, wait, status, message := r.issueSession(body.Username, body.Password)
 	if status == http.StatusTooManyRequests {
 		c.Header("Retry-After", wait.Round(time.Second).String())
@@ -247,6 +250,7 @@ func (r *router) login(c *gin.Context) {
 // @Failure 403 {object} errorResponse "The X-Lipstick-CSRF header is missing"
 // @Failure 429 {object} errorResponse "Too many failed logins; the Retry-After header says how long to wait"
 // @Failure 500 {object} errorResponse "The session could not be created"
+// @Failure 503 {object} errorResponse "The change was not made: the audit log is not available"
 // @Router /web/login [post]
 func (r *router) webLogin(c *gin.Context) {
 	if c.GetHeader(csrfHeader) != "1" {
@@ -258,6 +262,8 @@ func (r *router) webLogin(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, errorResponse{Error: "body must be JSON with username and password"})
 		return
 	}
+	c.Set(auditActorKey, body.Username)
+	setAudit(c, body.Username, map[string]any{"via": "panel"})
 	token, expires, wait, status, message := r.issueSession(body.Username, body.Password)
 	if status == http.StatusTooManyRequests {
 		c.Header("Retry-After", wait.Round(time.Second).String())
@@ -279,6 +285,7 @@ func (r *router) webLogin(c *gin.Context) {
 // @Failure 401 {object} errorResponse "Missing, expired or invalid session. Error: 'Unauthorized'"
 // @Failure 403 {object} errorResponse "The X-Lipstick-CSRF header is missing on a cookie logout"
 // @Failure 500 {object} errorResponse "The session could not be ended"
+// @Failure 503 {object} errorResponse "The change was not made: the audit log is not available"
 // @Router /logout [post]
 func (r *router) logout(c *gin.Context) {
 	if !r.authorized(c) {

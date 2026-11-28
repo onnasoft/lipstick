@@ -93,6 +93,7 @@ func (r *router) whoAmI(c *gin.Context) {
 // @Failure 401 {object} errorResponse "Missing, expired or invalid session. Error: 'Unauthorized'"
 // @Failure 403 {object} errorResponse "The current password is wrong. Error: 'the current password is wrong'"
 // @Failure 500 {object} errorResponse "The password could not be changed"
+// @Failure 503 {object} errorResponse "The change was not made: the audit log is not available"
 // @Router /account/password [post]
 func (r *router) changeOwnPassword(c *gin.Context) {
 	var body ownPasswordBody
@@ -147,6 +148,7 @@ func (r *router) listAccounts(c *gin.Context) {
 // @Failure 403 {object} errorResponse "Only a superuser can do this"
 // @Failure 409 {object} errorResponse "An account with that name already exists"
 // @Failure 500 {object} errorResponse "The account could not be created"
+// @Failure 503 {object} errorResponse "The change was not made: the audit log is not available"
 // @Router /admin-users [post]
 func (r *router) createAccount(c *gin.Context) {
 	if !requireSuperuser(c) {
@@ -157,6 +159,7 @@ func (r *router) createAccount(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, errorResponse{Error: "body must be JSON with username, password and role"})
 		return
 	}
+	setAudit(c, body.Username, map[string]any{"role": body.Role})
 	if err := r.admin.store.CreateAdminUser(body.Username, body.Password, body.Role); err != nil {
 		writeAccountError(c, err)
 		return
@@ -178,6 +181,7 @@ func (r *router) createAccount(c *gin.Context) {
 // @Failure 403 {object} errorResponse "Only a superuser can do this"
 // @Failure 404 {object} errorResponse "The account does not exist. Error: 'admin user not found'"
 // @Failure 500 {object} errorResponse "The password could not be changed"
+// @Failure 503 {object} errorResponse "The change was not made: the audit log is not available"
 // @Router /admin-users/{username}/password [post]
 func (r *router) resetAccountPassword(c *gin.Context) {
 	if !requireSuperuser(c) {
@@ -210,6 +214,7 @@ func (r *router) resetAccountPassword(c *gin.Context) {
 // @Failure 404 {object} errorResponse "The account does not exist. Error: 'admin user not found'"
 // @Failure 409 {object} errorResponse "At least one active superuser must remain"
 // @Failure 500 {object} errorResponse "The role could not be changed"
+// @Failure 503 {object} errorResponse "The change was not made: the audit log is not available"
 // @Router /admin-users/{username}/role [post]
 func (r *router) changeAccountRole(c *gin.Context) {
 	if !requireSuperuser(c) {
@@ -220,6 +225,7 @@ func (r *router) changeAccountRole(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, errorResponse{Error: "body must be JSON with role"})
 		return
 	}
+	setAudit(c, c.Param("username"), map[string]any{"role": body.Role})
 	if err := r.admin.store.SetAdminRole(c.Param("username"), body.Role); err != nil {
 		writeAccountError(c, err)
 		return
@@ -257,6 +263,7 @@ func (r *router) setAccountDisabled(c *gin.Context, disabled bool) {
 // @Failure 404 {object} errorResponse "The account does not exist. Error: 'admin user not found'"
 // @Failure 409 {object} errorResponse "Your own account, or the last active superuser"
 // @Failure 500 {object} errorResponse "The account could not be changed"
+// @Failure 503 {object} errorResponse "The change was not made: the audit log is not available"
 // @Router /admin-users/{username}/disable [post]
 func (r *router) disableAccount(c *gin.Context) { r.setAccountDisabled(c, true) }
 
@@ -271,5 +278,6 @@ func (r *router) disableAccount(c *gin.Context) { r.setAccountDisabled(c, true) 
 // @Failure 403 {object} errorResponse "Only a superuser can do this"
 // @Failure 404 {object} errorResponse "The account does not exist. Error: 'admin user not found'"
 // @Failure 500 {object} errorResponse "The account could not be changed"
+// @Failure 503 {object} errorResponse "The change was not made: the audit log is not available"
 // @Router /admin-users/{username}/enable [post]
 func (r *router) enableAccount(c *gin.Context) { r.setAccountDisabled(c, false) }

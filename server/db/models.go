@@ -104,3 +104,20 @@ type NodeStatus struct {
 	IntranetPorts   string    `gorm:"not null;default:''"`
 	UpdatedAt       time.Time `gorm:"not null;index"`
 }
+
+// AuditEvent records one attempt to change the server, or to log in. A row is written
+// as "pending" before the change and updated to "succeeded" or "failed" after it, so an
+// attempt without an outcome shows that the process stopped in the middle. Details hold
+// the names of the fields changed, never their values.
+type AuditEvent struct {
+	ID         uint      `gorm:"primaryKey"`
+	OccurredAt time.Time `gorm:"not null;index"`
+	Actor      string    `gorm:"not null;size:64;index"`
+	Action     string    `gorm:"not null;size:64;index"`
+	Target     string    `gorm:"not null;size:255;index"`
+	Outcome    string    `gorm:"not null;size:16;index"`
+	StatusCode int       `gorm:"not null;default:0"`
+	ClientAddr string    `gorm:"not null;size:64"`
+	UserAgent  string    `gorm:"not null;size:255"`
+	Details    string    `gorm:"not null;default:'{}'"`
+}
