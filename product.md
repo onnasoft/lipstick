@@ -83,9 +83,9 @@ The current tunnel authentication protects the connection between the client and
 - [x] Token-based access control. (implemented: see README, Autenticación de visitantes)
 - [x] IP allowlisting. (implemented: README, Reglas de acceso por red)
 - [x] CIDR-based access rules. (implemented: README, Reglas de acceso por red)
-- [ ] Rate limiting by IP.
-- [ ] Rate limiting by domain.
-- [ ] Connection limits.
+- [x] Rate limiting by IP. (implemented: README, Límites de uso; revision.md, item 66)
+- [x] Rate limiting by domain. (implemented: README, Límites de uso; revision.md, item 66)
+- [x] Connection limits. (implemented per IP and per domain; the per-IP concurrency limit is not yet exercised live)
 - [x] Protection against brute-force attempts. (implemented: see README, Autenticación de visitantes)
 - [ ] Configurable bandwidth limits.
 - [ ] Configurable traffic quotas.
@@ -345,8 +345,8 @@ Less urgent: idle session timeout and a "sign out everywhere" action; permission
 - [ ] Implement configurable access policies.
 - [ ] Implement IP allowlists.
 - [ ] Implement CIDR restrictions.
-- [ ] Implement rate limiting.
-- [ ] Implement connection limits.
+- [x] Implement rate limiting.
+- [x] Implement connection limits.
 - [ ] Implement bandwidth limits.
 - [ ] Implement credential revocation.
 - [ ] Implement credential rotation.
