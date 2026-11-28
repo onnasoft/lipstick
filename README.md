@@ -7,17 +7,18 @@ Lipstick publica un servicio que corre en tu máquina (una web, una API, un pane
 ## Índice
 
 1. [Qué problema resuelve](#qué-problema-resuelve)
-2. [Arquitectura](#arquitectura)
-3. [Casos de uso](#casos-de-uso)
-4. [Limitaciones](#limitaciones)
-5. [Comparación con VPN y proveedores establecidos](#comparación-con-vpn-y-proveedores-establecidos)
-6. [Robótica](#robótica)
-7. [Requisitos](#requisitos)
-8. [Inicio rápido](#inicio-rápido)
-9. [Referencia del servidor](#referencia-del-servidor)
-10. [Referencia del cliente](#referencia-del-cliente)
-11. [Seguridad](#seguridad)
-12. [Desarrollo y pruebas](#desarrollo-y-pruebas)
+2. [Rendimiento](#rendimiento)
+3. [Arquitectura](#arquitectura)
+4. [Casos de uso](#casos-de-uso)
+5. [Limitaciones](#limitaciones)
+6. [Comparación con VPN y proveedores establecidos](#comparación-con-vpn-y-proveedores-establecidos)
+7. [Robótica](#robótica)
+8. [Requisitos](#requisitos)
+9. [Inicio rápido](#inicio-rápido)
+10. [Referencia del servidor](#referencia-del-servidor)
+11. [Referencia del cliente](#referencia-del-cliente)
+12. [Seguridad](#seguridad)
+13. [Desarrollo y pruebas](#desarrollo-y-pruebas)
 
 ---
 
@@ -30,6 +31,58 @@ Tu servicio está detrás de NAT, de un router doméstico, de un 4G o de un fire
   visitante ──https──▶ [ servidor lipstick ] ◀──https── [ cliente lipstick ] ──▶ tu servicio
              :5050                              :5051                       127.0.0.1:8082
 ```
+
+## Rendimiento
+
+Esta sección resume lo medido. Todo se midió en **una sola máquina de 16 núcleos**, con el servidor, el cliente, el servicio local y el generador de carga en el mismo equipo. Eso quita la latencia de red y reparte la CPU entre todos, así que **los números absolutos no son los de producción**. Sirven para comparar caminos entre sí y para ver dónde está el costo.
+
+### Qué cuesta el cifrado
+
+Cada visitante nuevo hace un handshake TLS. Ese handshake es la mayor parte del costo, y el perfil de CPU lo confirma: domina el intercambio de claves (ML-KEM híbrido con X25519, que Go 1.25 usa por defecto). Una conexión que se reutiliza (keep-alive) no paga el handshake otra vez.
+
+| Camino | Conexión | Peticiones/s | Latencia p50 |
+|---|---|---|---|
+| Directo al servicio local (sin túnel) | keep-alive | ~94 600 | 0.09 ms |
+| Directo al servicio local, TLS (sin túnel) | keep-alive | ~86 300 | 0.09 ms |
+| Directo al servicio local, TLS (sin túnel) | nueva por petición | ~3 950 | 2.5 ms |
+| Túnel con passthrough TLS | keep-alive | ~35 200 | 0.27 ms |
+| Túnel con passthrough TLS | nueva por petición | ~2 985 | 3.3 ms |
+| Túnel con TLS terminado en el servidor | keep-alive | ~9 600 | 1.0 ms |
+| Túnel con TLS terminado en el servidor | nueva por petición | ~1 950 | 5.1 ms |
+| Directo al servicio local, sin TLS (sin túnel) | nueva por petición | ~23 700 | 0.38 ms |
+| Túnel, sesiones multiplexadas (8 por cliente) | keep-alive | ~11 000 | 0.82 ms |
+| Túnel, sesiones multiplexadas (8 por cliente) | nueva por petición | ~2 650 | 3.7 ms |
+| Túnel, pool anterior (antes de multiplexar) | nueva por petición | ~2 050 | 4.5 ms |
+| Túnel, camino original del ticket | nueva por petición | ~1 900 | 5.1 ms |
+| Reenvío entre dos servidores (sesión persistente) | nueva por petición | ~2 500 | 4.0 ms |
+| DNS por puerto UDP de intranet | consulta única | — | 0.07 ms |
+
+Lectura de la tabla:
+- Con conexiones reutilizadas, el túnel llega a unas 11 000 a 15 000 peticiones por segundo, frente a unas 95 000 directas. La diferencia es el costo del camino por el servidor, sin handshakes.
+- Con una conexión nueva por visitante, el túnel llega a unas 2 500 peticiones por segundo, y el acceso directo a unas 23 700. Casi toda la diferencia es el handshake del visitante, que el túnel no puede quitar porque el visitante lo hace con el servidor.
+- La multiplexación redujo el costo de conexiones nuevas frente al pool, porque cada visitante ya no abre una conexión TLS hacia el cliente.
+- El reenvío entre dos servidores casi no agrega costo: 2 500 contra 2 700 peticiones por segundo directas, con conexión nueva.
+
+### Cómo reducir el costo en producción
+
+Estas son las palancas que existen, de mayor a menor efecto en la práctica:
+
+1. **Reutilizar conexiones.** Un cliente que mantiene keep-alive paga el handshake una vez. Es lo que más reduce el costo, y está en tu mano como diseño de la aplicación.
+2. **Passthrough por dominio** (`passthrough: true`). El servidor no hace handshake ni cifra para ese dominio. Medido con el mismo método, frente al TLS terminado en el servidor: con keep-alive pasa de unas 9 600 a unas 35 200 peticiones por segundo, y con conexión nueva de unas 1 950 a unas 2 985. Tiene el costo de no ver el tráfico, que se describe en [Passthrough TLS por dominio](#passthrough-tls-por-dominio).
+3. **Reanudación de sesión TLS** en el cliente. Reconectar al mismo servidor reanuda la sesión sin el intercambio de claves completo. Mejora poco en esta medición, porque el handshake que más pesa es el del visitante.
+4. **Más sesiones multiplexadas** por cliente, para repartir las peticiones entre conexiones TLS. Con 2 sesiones el keep-alive bajaba un 40%; con 8 se recupera.
+5. **Servidores cerca de los visitantes y del servicio.** En red real, la latencia de cada salto domina a estos números locales.
+
+### Lo que no está medido
+
+- Tráfico sostenido durante horas, con varios clientes y varios dominios a la vez.
+- Máquinas separadas, con latencia y pérdida de paquetes reales.
+- Cuánto cuesta la CPU del servidor por cada 1 000 peticiones, en producción.
+- Passthrough con tráfico de varios dominios a la vez.
+
+Antes de declarar un rendimiento para producción, conviene medir en la red real donde va a correr. Los métodos y los datos completos están en `revision.md` (puntos 40 a 44).
+
+---
 
 ## Arquitectura
 

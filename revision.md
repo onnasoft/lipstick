@@ -488,6 +488,17 @@ Lipstick exposes local ports to the internet through a reverse tunnel. The main 
 - **Trade-offs (accepted):** no HTTP request log and no panel data for those domains; the server's certificate does not cover them.
 - **Not verified:** more than one domain on passthrough; clients on different machines.
 
+### 50. Passthrough measured against terminated TLS (performance)
+- **Method:** one machine, load generator in Go (same tool as entries 40 to 44), 10 workers, 8 seconds per run. The service is a Go HTTPS server with its own certificate, the same in every run. The client has `proxy_pass` in `https://`, so the service gets TLS in both modes. Each mode was measured twice; the two runs agree within about 2%.
+- **Results:**
+  - Terminated at the server, new connection per request: 2 001 and 1 859 req/s (p50 4.9 and 5.3 ms).
+  - Terminated at the server, keep-alive: 9 669 and 9 547 req/s (p50 1.0 ms).
+  - Passthrough, new connection per request: 2 999 and 2 970 req/s (p50 3.3 ms).
+  - Passthrough, keep-alive: 35 370 and 35 029 req/s (p50 0.27 ms).
+  - Direct TLS to the service, no tunnel: 3 950 req/s new connection (p50 2.5 ms); 86 261 req/s keep-alive (p50 0.09 ms).
+- **What it means:** passthrough removes one TLS layer from every byte and the server's handshake from every new connection. With keep-alive it is about 3.7 times faster than terminated and about 40% of direct TLS. The remaining cost is the tunnel's own encryption between server and client, and the service's TLS.
+- **Limits of the measurement:** one machine, loopback, one domain, one service, no packet loss. Production numbers need a real network.
+
 ## Recommended order
 
 1. Items 1, 2, 3, and 4: authentication, unpredictable tickets, TLS verification, and admin API hardening.
