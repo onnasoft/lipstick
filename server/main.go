@@ -21,6 +21,7 @@ import (
 	"github.com/OnnaSoft/lipstick/server/auth"
 	"github.com/OnnaSoft/lipstick/server/config"
 	"github.com/OnnaSoft/lipstick/server/db"
+	"github.com/OnnaSoft/lipstick/server/limits"
 	"github.com/OnnaSoft/lipstick/server/manager"
 )
 
@@ -121,6 +122,10 @@ func main() {
 	admin.SetRequestSource(manager.RecentRequests)
 	// Every change is recorded before it is made; without this, changes are refused.
 	admin.SetAudit(audit.NewStore(conn))
+	// Visitor limits (per address and per domain, connections) and the admin request limit.
+	limitSettings := limits.Settings(conf.Limits)
+	manager.ConfigureLimits(limitSettings)
+	admin.SetRateLimit(limits.AdminLimiter(limitSettings, nil))
 	checks := map[string]func() error{
 		"database": func() error {
 			sqlDB, err := conn.DB()

@@ -30,6 +30,7 @@ func configureRouter(admin *Admin) {
 	router := &router{admin: admin}
 	r := gin.New()
 	// Every route except the public ones needs a session; see sessionGate.
+	r.Use(router.addressRateGate())
 	r.Use(router.sessionGate())
 
 	r.GET("/health", router.health)

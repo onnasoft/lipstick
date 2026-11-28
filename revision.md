@@ -643,6 +643,16 @@ Lipstick exposes local ports to the internet through a reverse tunnel. The main 
 - **Verified:** store tests (pending then completed, filters, unknown entry, limit); API tests (field names only, no key value in the log, failed changes recorded, refusal when the log cannot be written, no change at all without a log, logins recorded without the password, the query is superuser-only and rejects bad limits).
 - **Not done:** no retention or archive policy yet; the table can be edited by anyone with database access, so the production database user should be allowed to insert and read this table but not update or delete it.
 
+### 66. Rate limits per address and per domain, and connection limits (feature)
+- **What:** visitor connections are limited per IP address and per domain, both as new connections per second (token buckets) and as connections open at the same time. The admin API is limited per IP address in requests per second. Limits are in `limits` in `config.yml`; 0 disables one.
+- **Where:** `server/limits` (buckets, concurrency, admission order, bounded tables), `server/manager/limits.go` (admission and the 429 answer, with throttled logging of refusals), `helper.RemoteConn` (the close hook that frees a slot once), `addressRateGate` in `server/admin/admin.go`, which runs before the session check.
+- **Admission order:** address rate, domain rate, address connections, domain connections. A refusal reserves nothing it does not keep.
+- **Passthrough:** admitted only when the connection is certainly served here, so a connection passed on to TLS termination is not counted twice.
+- **Stated limit:** requests inside one keep-alive connection are not counted, because the server does not parse each request on the raw path. The rate limits count connections; the connection limits bound how many stay open.
+- **Fail closed:** when the table of addresses is full and idle entries cannot make room, a new address is refused rather than left unlimited.
+- **Verified:** limits package tests (burst then refill with an injected clock, independent keys, disabled limits, bounded table, concurrency with double release, admission order and reasons, shared domain rate); manager tests (a refused visitor gets 429 with Retry-After, a slot frees when the visitor closes, an admitted connection is not counted twice); admin test (the third request from one address gets 429); config test (negative values refused).
+- **Not verified:** a real attack or load test; the numbers are defaults chosen to be far above normal use, to be checked with real traffic before a sale.
+
 ## Recommended order
 
 1. Items 1, 2, 3, and 4: authentication, unpredictable tickets, TLS verification, and admin API hardening.

@@ -3,10 +3,14 @@ package admin
 import (
 	"crypto/tls"
 	"log"
+	"math"
+	"net/http"
 	"sort"
+	"strconv"
 
 	"github.com/OnnaSoft/lipstick/logger"
 	"github.com/OnnaSoft/lipstick/server/auth"
+	"github.com/OnnaSoft/lipstick/server/limits"
 	"github.com/OnnaSoft/lipstick/server/manager"
 	"github.com/gin-gonic/gin"
 )
@@ -15,8 +19,9 @@ type Admin struct {
 	engine      *gin.Engine
 	authManager auth.AuthManager
 	addr        string
-	store       adminStore // admin accounts and sessions
-	audit       auditSink  // who changed what, see audit.go
+	store       adminStore   // admin accounts and sessions
+	audit       auditSink    // who changed what, see audit.go
+	addrLimit   *limits.Rate // requests per second per address, nil = no limit
 	logins      loginLimiter
 	tlsConfig   *tls.Config
 	onChanged   func(domain string)
@@ -94,4 +99,27 @@ func (a *Admin) SetHealthChecks(checks map[string]func() error) {
 		a.health = append(a.health, healthCheck{name: name, check: fn})
 	}
 	sort.Slice(a.health, func(i, j int) bool { return a.health[i].name < a.health[j].name })
+}
+
+// SetRateLimit limits the requests each address may make to the admin API. A nil
+// limiter means no limit.
+func (a *Admin) SetRateLimit(limiter *limits.Rate) {
+	a.addrLimit = limiter
+}
+
+// addressRateGate refuses requests from an address that exceeded its rate, with 429
+// and Retry-After. It runs before the session check, so a flood of logins is cut here.
+func (r *router) addressRateGate() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if ok, wait := r.admin.addrLimit.Allow(clientAddress(c.Request)); !ok {
+			seconds := int(math.Ceil(wait.Seconds()))
+			if seconds < 1 {
+				seconds = 1
+			}
+			c.Header("Retry-After", strconv.Itoa(seconds))
+			c.AbortWithStatusJSON(http.StatusTooManyRequests, errorResponse{Error: "too many requests from this address; wait before trying again"})
+			return
+		}
+		c.Next()
+	}
 }

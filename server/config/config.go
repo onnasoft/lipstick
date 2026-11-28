@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/OnnaSoft/lipstick/server/limits"
 	"sync"
 
 	"gopkg.in/yaml.v3"
@@ -79,6 +81,8 @@ type AppConfig struct {
 	Database       DatabaseConfig `yaml:"database"`
 	Redis          RedisConfig    `yaml:"redis"`
 	Nats           NatsConfig     `yaml:"nats"`
+	// Limits bound visitors and admin requests. Zero disables a limit; see server/limits.
+	Limits LimitsConfig `yaml:"limits"`
 
 	// IntranetPorts reserves plain-TCP ports for services that cannot speak TLS.
 	// Clients ask for a port; the server decides whether it may open it, and
@@ -208,6 +212,7 @@ func (c AppConfig) Validate() error {
 		errs = append(errs, errors.New("tls.key_path is required"))
 	}
 
+	errs = append(errs, c.Limits.validate()...)
 	return errors.Join(errs...)
 }
 
@@ -303,6 +308,7 @@ func loadConfig() (AppConfig, error) {
 	var natsURL string
 
 	defaultConfig := AppConfig{
+		Limits: LimitsConfig(limits.Defaults()),
 		Admin: AdminConfig{
 			// Loopback only: the admin API should not be reachable from the network.
 			Address: "127.0.0.1:5052",
@@ -534,6 +540,34 @@ func (p *IntranetPortsConfig) validate(seen map[string]string) []error {
 				errs = append(errs, fmt.Errorf("%s.allowed_cidrs: %q allows the whole internet; list the intranet ranges", label, cidr))
 			}
 		}
+	}
+	return errs
+}
+
+// LimitsConfig is the "limits" section. Each value is a rate or a count; 0 disables it.
+type LimitsConfig struct {
+	VisitorIPRate  float64 `yaml:"visitor_ip_rate"`
+	VisitorIPBurst int     `yaml:"visitor_ip_burst"`
+	DomainRate     float64 `yaml:"domain_rate"`
+	DomainBurst    int     `yaml:"domain_burst"`
+	ConnsPerIP     int     `yaml:"connections_per_ip"`
+	ConnsPerDomain int     `yaml:"connections_per_domain"`
+	AdminIPRate    float64 `yaml:"admin_ip_rate"`
+	AdminIPBurst   int     `yaml:"admin_ip_burst"`
+}
+
+// validateLimits refuses values that cannot mean anything, such as a negative rate, or
+// a rate with no burst to allow the first request.
+func (l LimitsConfig) validate() []error {
+	var errs []error
+	if l.VisitorIPRate < 0 || l.DomainRate < 0 || l.AdminIPRate < 0 {
+		errs = append(errs, errors.New("limits: rates cannot be negative"))
+	}
+	if l.ConnsPerIP < 0 || l.ConnsPerDomain < 0 {
+		errs = append(errs, errors.New("limits: connection limits cannot be negative"))
+	}
+	if (l.VisitorIPRate > 0 && l.VisitorIPBurst < 1) || (l.DomainRate > 0 && l.DomainBurst < 1) || (l.AdminIPRate > 0 && l.AdminIPBurst < 1) {
+		errs = append(errs, errors.New("limits: a rate needs a burst of at least 1"))
 	}
 	return errs
 }

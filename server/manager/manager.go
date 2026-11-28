@@ -15,6 +15,7 @@ import (
 	"github.com/OnnaSoft/lipstick/logger"
 	"github.com/OnnaSoft/lipstick/server/auth"
 	"github.com/OnnaSoft/lipstick/server/config"
+	"github.com/OnnaSoft/lipstick/server/limits"
 	"github.com/OnnaSoft/lipstick/server/traffic"
 	"github.com/gin-gonic/gin"
 )
@@ -70,6 +71,8 @@ type Manager struct {
 	engine         *gin.Engine
 	hubs           sync.Map
 	trafficManager *traffic.TrafficManager
+	visitors       *limits.Visitors // rate and connection limits, see limits.go
+	refusals       refusalLog
 	authManager    auth.AuthManager
 	tlsConfig      *tls.Config
 	intranet       *intranetPorts
@@ -91,6 +94,7 @@ func SetupManager(tlsConfig *tls.Config) *Manager {
 
 	manager := &Manager{
 		hubs:           sync.Map{},
+		visitors:       limits.NewVisitors(limits.Defaults(), nil),
 		authManager:    auth.MakeAuthManager(),
 		trafficManager: traffic.NewTrafficManager(64 * 1024),
 		tlsConfig:      tlsConfig,
@@ -229,6 +233,13 @@ func (manager *Manager) HandleHTTPConn(conn net.Conn, req *http.Request) {
 	host := req.Host
 	domain := strings.Split(host, ":")[0]
 
+	// Visitor limits: refused connections get 429 here and never reach the tunnel.
+	admitted, ok := manager.admitVisitor(conn, domain, true)
+	if !ok {
+		return
+	}
+	conn = admitted
+
 	rec, err := manager.authManager.GetDomain(domain)
 	if err == nil && !sourceAllowedFor(rec, conn.RemoteAddr()) {
 		refuseSource(domain, conn)
@@ -292,6 +303,12 @@ func (manager *Manager) HandleTCPConn(conn net.Conn) {
 		return
 	}
 
+	admitted, ok := manager.admitVisitor(conn, domain, false)
+	if !ok {
+		return
+	}
+	conn = admitted
+
 	hub, ok := manager.GetHub(domain)
 	if !ok && manager.cluster != nil {
 		// This server has no tunnel for the domain. Another server of the cluster may.
@@ -335,6 +352,11 @@ func (manager *Manager) RoutePassthrough(domain string, conn net.Conn, prefix []
 	if !ok {
 		return false
 	}
-	visitor := &helper.RemoteConn{Conn: helper.NewConnWithBuffer(conn, prefix), Domain: domain}
+	// Admitted only now: a connection passed on to TLS termination is admitted there.
+	admitted, ok := manager.admitVisitor(conn, domain, false)
+	if !ok {
+		return true
+	}
+	visitor := &helper.RemoteConn{Conn: helper.NewConnWithBuffer(admitted, prefix), Domain: domain}
 	return hub.takePassthrough(visitor, localPort(conn))
 }

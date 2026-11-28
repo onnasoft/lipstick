@@ -144,3 +144,14 @@ func TestValidateRejectsDuplicateListeners(t *testing.T) {
 		t.Fatalf("expected duplicate listener error, got:\n%s", msg)
 	}
 }
+
+func TestLimitsAreValidated(t *testing.T) {
+	c := validConfig()
+	c.Limits.VisitorIPRate = -1
+	c.Limits.DomainRate = 5
+	c.Limits.DomainBurst = 0
+	msg := c.Validate().Error()
+	if !strings.Contains(msg, "cannot be negative") || !strings.Contains(msg, "burst of at least 1") {
+		t.Fatalf("limits not validated: %s", msg)
+	}
+}

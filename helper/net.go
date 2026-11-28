@@ -2,6 +2,7 @@ package helper
 
 import (
 	"net"
+	"sync"
 )
 
 // CloseWrite half-closes c when the connection supports it, so the other side
@@ -24,6 +25,22 @@ func (c *ConnWithBuffer) CloseWrite() error { return CloseWrite(c.Conn) }
 type RemoteConn struct {
 	Domain string
 	net.Conn
+
+	// OnClose, when set, runs once when the connection is closed. The server uses it to
+	// release the connection slot the visitor limits reserved for it.
+	OnClose func()
+	closed  sync.Once
+}
+
+// Close closes the connection and then runs OnClose, once however often it is called.
+func (c *RemoteConn) Close() error {
+	err := c.Conn.Close()
+	c.closed.Do(func() {
+		if c.OnClose != nil {
+			c.OnClose()
+		}
+	})
+	return err
 }
 
 type ConnWithBuffer struct {

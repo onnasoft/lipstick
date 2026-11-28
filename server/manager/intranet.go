@@ -8,7 +8,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/OnnaSoft/lipstick/helper"
 	"github.com/OnnaSoft/lipstick/logger"
 )
 
@@ -194,7 +193,11 @@ func (m *Manager) handleIntranet(conn net.Conn, domain string, allowed []*net.IP
 		return
 	}
 
-	if !hub.submitVisitor(&helper.RemoteConn{Conn: conn, Domain: domain}) {
+	admitted, ok := m.admitVisitor(conn, domain, false)
+	if !ok {
+		return
+	}
+	if !hub.submitVisitor(admitted) {
 		rejectVisitor(conn)
 	}
 }

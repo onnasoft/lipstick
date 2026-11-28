@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/OnnaSoft/lipstick/server/limits"
 )
 
 func postLogin(a *Admin, body string) *httptest.ResponseRecorder {
@@ -77,5 +79,18 @@ func TestAuthorizedAnswersWithBearerChallenge(t *testing.T) {
 	rec := do(a, http.MethodPost, "/domains", "")
 	if rec.Code != http.StatusUnauthorized || !strings.HasPrefix(rec.Header().Get("WWW-Authenticate"), "Bearer") {
 		t.Fatalf("got %d, challenge %q", rec.Code, rec.Header().Get("WWW-Authenticate"))
+	}
+}
+
+// The admin API limits the requests of one address: beyond its rate it answers 429.
+func TestAdminAddressRateLimit(t *testing.T) {
+	a := newTestAdmin(testKey)
+	a.SetRateLimit(limits.NewRate(1, 2, 100, nil))
+	var last *httptest.ResponseRecorder
+	for i := 0; i < 3; i++ {
+		last = request(a, http.MethodGet, "/health", "", nil)
+	}
+	if last.Code != http.StatusTooManyRequests || last.Header().Get("Retry-After") == "" {
+		t.Fatalf("third request from one address: %d, Retry-After %q", last.Code, last.Header().Get("Retry-After"))
 	}
 }

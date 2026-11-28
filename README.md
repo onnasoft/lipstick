@@ -615,6 +615,23 @@ swag init -g swagger.go -d server/admin --output server/admin/docs --outputTypes
 
 La prueba `server/admin/swagger_test.go` comprueba que la especificación declara la clave en las rutas que cambian datos y no la declara en las de lectura.
 
+## Límites de uso
+
+El servidor limita a los visitantes y a la admin API para que un cliente o un atacante no pueda saturarlo. Los valores están en la sección `limits` de `config.yml`; `0` desactiva un límite.
+
+| Límite | Qué cuenta | Al superarlo |
+|--------|------------|--------------|
+| `visitor_ip_rate` / `visitor_ip_burst` | conexiones nuevas por segundo desde una IP | `429` con `Retry-After` (HTTP), o cierre (TCP y passthrough) |
+| `domain_rate` / `domain_burst` | conexiones nuevas por segundo hacia un dominio | igual |
+| `connections_per_ip` | conexiones de visitante abiertas a la vez desde una IP | igual |
+| `connections_per_domain` | conexiones de visitante abiertas a la vez hacia un dominio | igual |
+| `admin_ip_rate` / `admin_ip_burst` | peticiones por segundo a la admin API desde una IP | `429` con `Retry-After` |
+
+- **Lo que no cuenta:** las peticiones dentro de una conexión HTTP que se mantiene abierta. El servidor reenvía los bytes sin leer cada petición, así que el límite de tasa cuenta conexiones. Un visitante que haga muchas peticiones por una sola conexión no se limita por esa vía.
+- **Por servidor:** en un cluster, cada servidor aplica sus propios límites. Un visitante que reparta sus conexiones entre servidores puede superar el límite combinado.
+- **Memoria acotada:** la tabla de IP y de dominios tiene un máximo. Si está llena y no libera claves inactivas, una IP nueva se rechaza.
+- **Registro de rechazos:** a lo sumo una línea por segundo, con cuántos se rechazaron y por qué motivo, para que un ataque no llene el log.
+
 ## Estado compartido en un cluster
 
 Todo lo que el panel muestra del estado sale de la base de datos, así que cualquier servidor del cluster responde lo mismo:

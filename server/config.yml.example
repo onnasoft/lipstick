@@ -55,3 +55,15 @@ nats:
 #     - name: "robot-42.example.com"
 #       allowed_cidrs:
 #         - "10.20.0.0/16"
+
+# Límites de visitantes y de la admin API. 0 desactiva un límite. Tasas por segundo.
+# Las tasas cuentan conexiones nuevas, no peticiones dentro de una conexión abierta.
+limits:
+  visitor_ip_rate: 50           # conexiones nuevas por segundo desde una IP
+  visitor_ip_burst: 100         # ráfaga permitida por IP
+  domain_rate: 500              # conexiones nuevas por segundo hacia un dominio
+  domain_burst: 1000
+  connections_per_ip: 512       # conexiones abiertas a la vez desde una IP
+  connections_per_domain: 4096  # conexiones abiertas a la vez hacia un dominio
+  admin_ip_rate: 20             # peticiones por segundo a la admin API desde una IP
+  admin_ip_burst: 60
