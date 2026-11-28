@@ -21,3 +21,10 @@ var BadGatewayResponse = "HTTP/1.1 502 Bad Gateway\r\n" +
 	"Connection: close\r\n" +
 	"\r\n" +
 	BadGatewayBody
+
+// GatewayTimeoutResponse is a complete HTTP/1.1 504 response, sent when the backend does
+// not answer a visitor's request in time.
+var GatewayTimeoutResponse = "HTTP/1.1 504 Gateway Timeout\r\n" +
+	"Content-Length: 0\r\n" +
+	"Connection: close\r\n" +
+	"\r\n"

@@ -87,8 +87,8 @@ The current tunnel authentication protects the connection between the client and
 - [x] Rate limiting by domain. (implemented: README, Límites de uso; revision.md, item 66)
 - [x] Connection limits. (implemented per IP and per domain; per-IP concurrency verified live: 20 of 40 simultaneous connections held, the rest refused with 429)
 - [x] Protection against brute-force attempts. (implemented: see README, Autenticación de visitantes)
-- [ ] Configurable bandwidth limits.
-- [ ] Configurable traffic quotas.
+- [x] Configurable bandwidth limits. (implemented: per domain and server default; README, Ancho de banda y cuotas; revision.md, item 67)
+- [x] Configurable traffic quotas. (implemented: monthly per domain and server default; README, Ancho de banda y cuotas; revision.md, item 67)
 - [ ] Client credential revocation.
 - [ ] Client credential rotation.
 - [ ] Domain-level access policies.
@@ -115,23 +115,23 @@ The system must remain stable under network failures, client disconnections, bac
 
 ### Required improvements
 
-- [ ] Review open concurrency issues.
+- [x] Review open concurrency issues. (the race-enabled suite passes; see revision.md, item 68)
 - [ ] Validate domain/client association consistency.
 - [ ] Improve handling of HTTP edge cases.
-- [ ] Validate chunked transfer encoding.
-- [ ] Validate `Expect: 100-continue`.
-- [ ] Validate HTTP keep-alive.
-- [ ] Validate long-running HTTP streams.
-- [ ] Validate Server-Sent Events.
-- [ ] Validate large uploads and downloads.
+- [x] Validate chunked transfer encoding. (5 MiB chunked upload, digest verified live)
+- [x] Validate `Expect: 100-continue`. (20 MiB upload with the header, digest verified live)
+- [x] Validate HTTP keep-alive. (20 held connections each answered a second request)
+- [x] Validate long-running HTTP streams. (a 5-second stream delivered in order)
+- [x] Validate Server-Sent Events. (five events arrive one second apart)
+- [x] Validate large uploads and downloads. (5 MiB download, 20 MiB upload, digests verified)
 - [ ] Validate slow clients.
-- [ ] Validate backend timeouts.
-- [ ] Validate abrupt client disconnections.
-- [ ] Validate server restarts.
+- [x] Validate backend timeouts. (a silent backend gets 504 after 60 s; found missing and fixed, item 68)
+- [x] Validate abrupt client disconnections. (aborted downloads leave the server serving)
+- [x] Validate server restarts. (restarted several times; visitors served again and the tunnel reconnects)
 - [ ] Validate database restarts.
-- [ ] Validate TLS errors.
-- [ ] Validate reconnect behavior.
-- [ ] Validate concurrent access and race conditions.
+- [x] Validate TLS errors. (plain HTTP, junk and a bad handshake on the TLS ports; the server keeps serving)
+- [x] Validate reconnect behavior. (the tunnel client reconnects after a server restart)
+- [x] Validate concurrent access and race conditions. (full suite under -race, several runs)
 
 ### Acceptance criteria
 

@@ -1894,6 +1894,14 @@ const docTemplate = `{
                     "type": "string",
                     "example": "clave-del-cliente-de-al-menos-32-caracteres"
                 },
+                "bandwidthBytesPerSecond": {
+                    "type": "integer",
+                    "example": 0
+                },
+                "monthlyQuotaBytes": {
+                    "type": "integer",
+                    "example": 0
+                },
                 "name": {
                     "type": "string",
                     "example": "robot.example.com"
@@ -1919,7 +1927,13 @@ const docTemplate = `{
                 "authLatched": {
                     "type": "boolean"
                 },
+                "bandwidthBytesPerSecond": {
+                    "type": "integer"
+                },
                 "id": {
+                    "type": "integer"
+                },
+                "monthlyQuotaBytes": {
                     "type": "integer"
                 },
                 "name": {

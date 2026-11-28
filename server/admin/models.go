@@ -70,6 +70,8 @@ type domainCreateBody struct {
 	AllowMultipleConnections bool     `json:"allowMultipleConnections" example:"true"`
 	Passthrough              bool     `json:"passthrough" example:"false"`
 	AllowedCIDRs             []string `json:"allowedCidrs" example:"10.0.0.0/8,192.168.1.7"`
+	BandwidthBytesPerSecond  int64    `json:"bandwidthBytesPerSecond" example:"0"`
+	MonthlyQuotaBytes        int64    `json:"monthlyQuotaBytes" example:"0"`
 }
 
 // domainChangeBody is the body of PATCH /domains/{domainName}. Send only the fields to change.

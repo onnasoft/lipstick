@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/OnnaSoft/lipstick/logger"
+	"github.com/OnnaSoft/lipstick/server/auth"
 	"github.com/OnnaSoft/lipstick/server/db"
 	"github.com/OnnaSoft/lipstick/server/limits"
 	"gorm.io/gorm"
@@ -73,7 +74,7 @@ func (q *quotaState) monthlyUsage(domain string) int64 {
 // is the start of the next calendar month.
 func (manager *Manager) quotaRefusal(domain string) *limits.Refusal {
 	quota := manager.settings.DomainMonthlyQuota
-	if rec, err := manager.authManager.GetDomain(domain); err == nil && rec.MonthlyQuotaBytes > 0 {
+	if rec, ok := manager.domainRecord(domain); ok && rec.MonthlyQuotaBytes > 0 {
 		quota = rec.MonthlyQuotaBytes
 	}
 	if quota <= 0 {
@@ -90,8 +91,18 @@ func (manager *Manager) quotaRefusal(domain string) *limits.Refusal {
 // bandwidthFor returns the bytes per second for domain: its own setting, else the server
 // default. 0 is unlimited.
 func (manager *Manager) bandwidthFor(domain string) int64 {
-	if rec, err := manager.authManager.GetDomain(domain); err == nil && rec.BandwidthBytesPerSecond > 0 {
+	if rec, ok := manager.domainRecord(domain); ok && rec.BandwidthBytesPerSecond > 0 {
 		return rec.BandwidthBytesPerSecond
 	}
 	return manager.settings.DomainBandwidth
+}
+
+// domainRecord returns the domain's record. It reports false when there is no record or
+// no store, in which case the server defaults apply.
+func (manager *Manager) domainRecord(domain string) (*auth.Domain, bool) {
+	if manager.authManager == nil {
+		return nil, false
+	}
+	rec, err := manager.authManager.GetDomain(domain)
+	return rec, err == nil && rec != nil
 }

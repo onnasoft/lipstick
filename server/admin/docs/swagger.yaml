@@ -87,6 +87,12 @@ definitions:
       apiKey:
         example: clave-del-cliente-de-al-menos-32-caracteres
         type: string
+      bandwidthBytesPerSecond:
+        example: 0
+        type: integer
+      monthlyQuotaBytes:
+        example: 0
+        type: integer
       name:
         example: robot.example.com
         type: string
@@ -104,7 +110,11 @@ definitions:
         type: array
       authLatched:
         type: boolean
+      bandwidthBytesPerSecond:
+        type: integer
       id:
+        type: integer
+      monthlyQuotaBytes:
         type: integer
       name:
         type: string

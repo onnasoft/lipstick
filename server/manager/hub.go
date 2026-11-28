@@ -3,6 +3,8 @@ package manager
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"github.com/OnnaSoft/lipstick/server/limits"
 	"net"
 	"strconv"
@@ -184,6 +186,12 @@ func (hub *NetworkHub) syncConnections(pipe net.Conn, destination net.Conn) {
 	var originToDest int64
 	toTunnel := make(chan struct{})
 
+	// requestAt is when the visitor last sent data; answered is set once the backend has
+	// sent a reply to it. A request that gets no reply within backendResponseTimeout is
+	// answered with 504 by the reply loop below.
+	var requestAt atomic.Int64
+	var answered atomic.Bool
+
 	// visitor -> tunnel
 	go func() {
 		defer close(toTunnel)
@@ -191,6 +199,8 @@ func (hub *NetworkHub) syncConnections(pipe net.Conn, destination net.Conn) {
 		for {
 			n, err := pipe.Read(buffer)
 			if n > 0 {
+				requestAt.Store(time.Now().UnixNano())
+				answered.Store(false)
 				hub.pace(n)
 				written, werr := destination.Write(buffer[:n])
 				originToDest += int64(written)
@@ -207,12 +217,15 @@ func (hub *NetworkHub) syncConnections(pipe net.Conn, destination net.Conn) {
 		helper.CloseWrite(destination)
 	}()
 
-	// tunnel -> visitor
+	// tunnel -> visitor. The read wakes every backendPollInterval to check whether the
+	// backend has answered the visitor's last request in time.
 	var destToOrigin int64
 	buffer := make([]byte, 4096)
 	for {
+		destination.SetReadDeadline(time.Now().Add(backendPollInterval))
 		n, err := destination.Read(buffer)
 		if n > 0 {
+			answered.Store(true)
 			hub.pace(n)
 			written, werr := pipe.Write(buffer[:n])
 			destToOrigin += int64(written)
@@ -222,9 +235,18 @@ func (hub *NetworkHub) syncConnections(pipe net.Conn, destination net.Conn) {
 			}
 		}
 		if err != nil {
+			if isTimeout(err) && !answered.Load() && time.Since(time.Unix(0, requestAt.Load())) > backendResponseTimeout {
+				logger.Default.Info("backend did not answer within", backendResponseTimeout, "for hub:", hub.HubName)
+				fmt.Fprint(pipe, helper.GatewayTimeoutResponse)
+				break
+			}
+			if isTimeout(err) {
+				continue
+			}
 			break
 		}
 	}
+	destination.SetReadDeadline(time.Time{})
 
 	// The client finished its reply: tell the visitor, and give it a bounded
 	// time to finish sending before the session is closed.
@@ -549,4 +571,18 @@ func (hub *NetworkHub) Stats(timeout time.Duration) (HubStats, bool) {
 	case <-time.After(timeout):
 		return HubStats{}, false
 	}
+}
+
+// Backend response timing. A visitor request that gets no reply within backendResponseTimeout
+// is answered with 504. Once a reply has started, nothing is cut: streams and long downloads
+// run as long as they send. The poll interval bounds how late the 504 can be.
+var (
+	backendResponseTimeout = 60 * time.Second
+	backendPollInterval    = time.Second
+)
+
+// isTimeout reports whether err is a read deadline passing, not a broken connection.
+func isTimeout(err error) bool {
+	var ne net.Error
+	return errors.As(err, &ne) && ne.Timeout()
 }

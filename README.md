@@ -627,6 +627,13 @@ El servidor limita a los visitantes y a la admin API para que un cliente o un at
 | `connections_per_domain` | conexiones de visitante abiertas a la vez hacia un dominio | igual |
 | `admin_ip_rate` / `admin_ip_burst` | peticiones por segundo a la admin API desde una IP | `429` con `Retry-After` |
 
+### Ancho de banda y cuotas
+
+- **Ancho de banda** (`bytes por segundo` por dominio): los datos de los visitantes de un dominio se frenan a esa tasa. Cada dominio puede tener la suya (`bandwidthBytesPerSecond` en la API); con `0`, se usa `domain_bandwidth_bytes_per_second` de `limits`.
+- **Cuota mensual** (bytes por mes por dominio): cuando el tráfico del mes llega a la cuota, las conexiones nuevas de visitantes se rechazan con `429` hasta el mes siguiente. Cada dominio puede tener la suya (`monthlyQuotaBytes` en la API); con `0`, se usa `domain_monthly_quota_bytes`.
+- El uso del mes sale de la base de datos y se cachea 10 segundos, así que todos los servidores de un cluster cuentan lo mismo, con un retraso de hasta unos 5 segundos. Si la base no responde, la cuota no se aplica y el log lo dice.
+- El ancho de banda se aplica por servidor: en un cluster, un dominio puede usar hasta su tasa en cada servidor.
+
 - **Lo que no cuenta:** las peticiones dentro de una conexión HTTP que se mantiene abierta. El servidor reenvía los bytes sin leer cada petición, así que el límite de tasa cuenta conexiones. Un visitante que haga muchas peticiones por una sola conexión no se limita por esa vía.
 - **Por servidor:** en un cluster, cada servidor aplica sus propios límites. Un visitante que reparta sus conexiones entre servidores puede superar el límite combinado.
 - **Memoria acotada:** la tabla de IP y de dominios tiene un máximo. Si está llena y no libera claves inactivas, una IP nueva se rechaza.

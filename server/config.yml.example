@@ -67,3 +67,5 @@ limits:
   connections_per_domain: 4096  # conexiones abiertas a la vez hacia un dominio
   admin_ip_rate: 20             # peticiones por segundo a la admin API desde una IP
   admin_ip_burst: 60
+  domain_bandwidth_bytes_per_second: 0   # ancho de banda por dominio cuando no tiene el suyo; 0 = sin límite
+  domain_monthly_quota_bytes: 0         # cuota mensual por dominio cuando no tiene la suya; 0 = sin límite

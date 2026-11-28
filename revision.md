@@ -653,6 +653,21 @@ Lipstick exposes local ports to the internet through a reverse tunnel. The main 
 - **Verified:** limits package tests (burst then refill with an injected clock, independent keys, disabled limits, bounded table, concurrency with double release, admission order and reasons, shared domain rate); manager tests (a refused visitor gets 429 with Retry-After, a slot frees when the visitor closes, an admitted connection is not counted twice); admin test (the third request from one address gets 429); config test (negative values refused).
 - **Not verified:** a real attack or load test; the numbers are defaults chosen to be far above normal use, to be checked with real traffic before a sale.
 
+### 67. Configurable bandwidth limits and monthly traffic quotas (feature)
+- **Bandwidth:** each domain's visitor data is paced to a rate in bytes per second. The domain sets its own (`bandwidthBytesPerSecond`); 0 uses the server default (`limits.domain_bandwidth_bytes_per_second`). A token bucket with a one-second burst (`limits.Pacer`) makes each write wait as long as the rate requires. The hub's copy loops call it before every write in both directions.
+- **Quota:** each domain has a monthly cap in bytes (`monthlyQuotaBytes`; 0 uses `limits.domain_monthly_quota_bytes`). Once the month's usage reaches it, new visitor connections are refused with 429 and a Retry-After set to the start of the next month. Usage is read from `daily_consumptions` for the current month and cached 10 seconds per domain.
+- **Storage:** `db.Domain` gains `bandwidth_bytes_per_second` and `monthly_quota_bytes` (default 0, so existing rows change nothing). The admin API validates both as whole numbers, 0 or more, on create and update.
+- **Order:** the quota is checked first in admission, then the rate and connection limits (see item 66).
+- **Fail open on the store:** if the database cannot give the month's usage, the quota is not enforced for that check and the log says so. A visitor is not refused because the server cannot count.
+- **Stated limits:** bandwidth is per server, so a cluster allows up to the rate on each server. The quota can lag the traffic by about the 5-second flush interval and the 10-second cache. Restricted domains (the guard path) are not paced yet; the paced path is the normal relay.
+- **Verified:** pacer tests (free first second, debt and wait, refill capped at one second, disabled); manager tests on SQLite (refusal at the quota, a fresh read after more usage, server default when the domain has none, domain setting before server default, a paced write waiting about one second); admin tests (negative, fractional and non-numeric values refused, valid values accepted); the existing suite passes with the new fields.
+
+### 68. Reliability validation pass; missing backend timeout fixed (validation and fix)
+- **Found and fixed:** a visitor whose request reached a backend that never answered waited forever. The relay now answers `504 Gateway Timeout` when the backend has been silent for `backendResponseTimeout` (60 s) after the visitor's last data. A reply that has started is never cut, so streams and long downloads run as long as they send. The check wakes every second (`backendPollInterval`). Test: `TestSilentBackendGets504`; live: 504 after 60.0 s.
+- **Validated live:** server-sent events (five events one second apart), a slow backend (200 bytes at 50 ms each), a 5 MiB chunked upload and a 20 MiB upload with `Expect: 100-continue` (both digests equal to the local file), keep-alive (20 connections each answered a second request), a 5 MiB download, three aborted downloads (the server keeps serving), plain HTTP and junk on the TLS ports, server restarts with the tunnel reconnecting.
+- **Validated by the race-enabled suite:** several full runs under `-race`.
+- **Not validated yet:** domain/client association with two clients connected; slow clients that read very slowly; database restarts (needs a restart of the production PostgreSQL, so it waits for an explicit decision); a malformed `Content-Length` closes the connection without an answer, where a 400 would be better.
+
 ## Recommended order
 
 1. Items 1, 2, 3, and 4: authentication, unpredictable tickets, TLS verification, and admin API hardening.

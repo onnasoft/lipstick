@@ -191,6 +191,10 @@ func (r *router) addDomain(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, errorResponse{Error: err.Error()})
 		return
 	}
+	if domain.BandwidthBytesPerSecond < 0 || domain.MonthlyQuotaBytes < 0 {
+		c.JSON(http.StatusBadRequest, errorResponse{Error: "bandwidthBytesPerSecond and monthlyQuotaBytes cannot be negative (0 uses the server default)"})
+		return
+	}
 	var rules struct {
 		AllowedCIDRs []string `json:"allowedCidrs"`
 	}
