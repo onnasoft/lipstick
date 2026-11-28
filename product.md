@@ -261,7 +261,7 @@ The existing logs and traffic statistics should be expanded to provide sufficien
 - [x] Connection latency. (`lipstick_connection_latency_seconds`, a histogram per domain: time from a visitor's request to the first byte of the reply; see revision.md, item 74. Time to accept the TCP connection is not measured)
 - [x] Tunnel latency. (`lipstick_tunnel_latency_seconds`, a histogram per domain of each session's round trip, measured with yamux's ping every 5 seconds; it includes any wait behind data frames; see revision.md, item 75)
 - [x] HTTP response status metrics. (`lipstick_http_responses_total` by status class)
-- [ ] Connection errors. (partly: refused visitor connections are counted by reason in `lipstick_visitor_refusals_total`; failures of tunnel setup are not yet counted)
+- [x] Connection errors. (refused visitor connections by reason in `lipstick_visitor_refusals_total`; refused or failed tunnel setups by reason in `lipstick_tunnel_setup_failures_total`; see revision.md, item 76)
 - [ ] Reconnection metrics.
 - [x] Timeout metrics. (`lipstick_backend_timeouts_total`, the 504s)
 - [ ] CPU and memory information. (memory and goroutines are exported; CPU time is not)

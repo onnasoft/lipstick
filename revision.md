@@ -706,6 +706,11 @@ Lipstick exposes local ports to the internet through a reverse tunnel. The main 
 - **Not measured:** tunnels that are not mux sessions (the single-connection fallback) have no probe.
 - **Verified:** an integration test with a real client records at least three round trips in 10 seconds; live, eight round trips to localhost all fall in the 1 ms bucket.
 
+### 76. Connection errors: tunnel setup failures counted (feature)
+- **Added:** `lipstick_tunnel_setup_failures_total`, by reason: `unknown_domain`, `unauthorized` (wrong key), `hijack_failed`, `flush_failed`, `hub_stopped`, `port_refused`, `policy_refused` (passthrough or visitor-auth conflicts), and for mux sessions `mux_nonce`, `mux_proof`, `mux_replayed_nonce`, `mux_no_hub`, `mux_session`, `mux_refused`.
+- **Note on `mux_no_hub`:** after a restart the client opens its mux connections before its first upgrade has created the hub, so a few refusals appear at startup. The client retries and the count then stays still; it is not a steady error.
+- **Verified:** an integration test sends a wrong key and an unknown domain to the manager and checks each reason is counted; live, a wrong key on localhost gets 401 and `unauthorized` goes to 1.
+
 ## Recommended order
 
 1. Items 1, 2, 3, and 4: authentication, unpredictable tickets, TLS verification, and admin API hardening.

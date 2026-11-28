@@ -2,6 +2,7 @@ package manager
 
 import (
 	"runtime"
+	"sync"
 	"sync/atomic"
 
 	"github.com/OnnaSoft/lipstick/server/metrics"
@@ -20,6 +21,12 @@ var connectionLatency = metrics.NewHistogramSet("domain", []float64{
 var tunnelLatency = metrics.NewHistogramSet("domain", []float64{
 	0.0005, 0.001, 0.002, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1,
 })
+
+// tunnelSetupFailures counts tunnel setups that were refused or failed, by reason.
+var tunnelSetupFailures = newFailureCounter()
+
+// countTunnelFailure records one failed tunnel setup under its reason.
+func countTunnelFailure(reason string) { tunnelSetupFailures.Inc(reason) }
 
 var (
 	backendTimeouts atomic.Int64 // visitor requests answered 504 because the backend was silent
@@ -74,7 +81,41 @@ func (manager *Manager) Metrics() []metrics.Family {
 		{Name: "lipstick_tunnels_opened_total", Help: "Tunnel connections accepted from clients.", Type: metrics.Counter, Samples: []metrics.Sample{{Value: float64(tunnelsOpened.Load())}}},
 		{Name: "lipstick_connection_latency_seconds", Help: "Time from a visitor's request to the first byte of the reply, per domain.", Type: metrics.Histogram, Samples: connectionLatency.Samples()},
 		{Name: "lipstick_tunnel_latency_seconds", Help: "Round trip of each tunnel session, per domain, measured with a ping every few seconds.", Type: metrics.Histogram, Samples: tunnelLatency.Samples()},
+		{Name: "lipstick_tunnel_setup_failures_total", Help: "Tunnel setups refused or failed, by reason.", Type: metrics.Counter, Samples: failureSamples(tunnelSetupFailures)},
 		{Name: "lipstick_go_goroutines", Help: "Goroutines in the server process.", Type: metrics.Gauge, Samples: []metrics.Sample{{Value: float64(runtime.NumGoroutine())}}},
 		{Name: "lipstick_go_memory_alloc_bytes", Help: "Heap memory in use by the server process.", Type: metrics.Gauge, Samples: []metrics.Sample{{Value: float64(mem.HeapAlloc)}}},
 	}
+}
+
+// failureCounter counts events by a short reason label.
+type failureCounter struct {
+	mu     sync.Mutex
+	counts map[string]int64
+}
+
+func newFailureCounter() *failureCounter { return &failureCounter{counts: map[string]int64{}} }
+
+// Inc adds one to the reason's count.
+func (f *failureCounter) Inc(reason string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.counts[reason]++
+}
+
+// Count returns how many times the reason was counted.
+func (f *failureCounter) Count(reason string) int64 {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.counts[reason]
+}
+
+// failureSamples turns the counts into samples labelled by reason.
+func failureSamples(f *failureCounter) []metrics.Sample {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]metrics.Sample, 0, len(f.counts))
+	for reason, n := range f.counts {
+		out = append(out, metrics.Sample{Labels: map[string]string{"reason": reason}, Value: float64(n)})
+	}
+	return out
 }

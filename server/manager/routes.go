@@ -50,6 +50,7 @@ func (r *router) upgrade(c *gin.Context) {
 	domain, err := r.manager.authManager.GetDomain(domainName)
 	if err != nil {
 		logger.Default.Error("Unable to get domain:", domainName, "Error:", err)
+		countTunnelFailure("unknown_domain")
 		c.JSON(http.StatusNotFound, gin.H{"error": "Domain not found"})
 		return
 	}
@@ -59,6 +60,7 @@ func (r *router) upgrade(c *gin.Context) {
 	providedKey := c.GetHeader("Authorization")
 	if domain.ApiKey == "" || subtle.ConstantTimeCompare([]byte(providedKey), []byte(domain.ApiKey)) != 1 {
 		logger.Default.Error("Unauthorized tunnel client for domain:", domainName)
+		countTunnelFailure("unauthorized")
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 		return
 	}
@@ -74,6 +76,7 @@ func (r *router) upgrade(c *gin.Context) {
 	conn, rw, err := hijacker.Hijack()
 	if err != nil {
 		logger.Default.Error("Failed to hijack connection:", err)
+		countTunnelFailure("hijack_failed")
 		http.Error(w, "Failed to hijack connection", http.StatusInternalServerError)
 		return
 	}
@@ -140,6 +143,7 @@ func (r *router) upgrade(c *gin.Context) {
 	rw.WriteString("\r\n")
 	if err := rw.Flush(); err != nil {
 		logger.Default.Error("Error flushing headers for upgrade:", err)
+		countTunnelFailure("flush_failed")
 		return
 	}
 
@@ -154,6 +158,7 @@ func (r *router) upgrade(c *gin.Context) {
 
 	if !hub.registerClient(notification) {
 		logger.Default.Error("hub stopped before the client could register:", domain.Name)
+		countTunnelFailure("hub_stopped")
 		conn.Close()
 	}
 }
@@ -166,6 +171,7 @@ const visitorAuthHeader = "X-Lipstick-Visitor-Auth"
 
 // writeReason answers the upgrade with a status line that carries the reason, and closes.
 func writeReason(rw *bufio.ReadWriter, conn net.Conn, status string) {
+	countTunnelFailure("policy_refused")
 	rw.WriteString("HTTP/1.1 " + status + "\r\n")
 	rw.WriteString("Content-Length: 0\r\n\r\n")
 	rw.Flush()
@@ -178,6 +184,7 @@ const intranetUDPPortHeader = "X-Lipstick-Intranet-UDP-Port"
 // writeRefusal answers a request that the policy does not allow, with the
 // status the client can read, and closes the connection.
 func writeRefusal(rw *bufio.ReadWriter, conn net.Conn, err error) {
+	countTunnelFailure("port_refused")
 	status := "403 Forbidden"
 	if errors.Is(err, ErrPortTaken) {
 		status = "409 Conflict"

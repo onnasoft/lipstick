@@ -78,28 +78,33 @@ func (manager *Manager) handleMux(conn net.Conn, req *http.Request) {
 
 	if _, ok := helper.MuxNonceTime(nonce, now); !ok {
 		logger.Default.Error("Mux connection with an expired or malformed nonce for domain:", domainName)
+		countTunnelFailure("mux_nonce")
 		conn.Close()
 		return
 	}
 	record, err := manager.authManager.GetDomain(domainName)
 	if err != nil || !helper.VerifyMuxProof(record.ApiKey, nonce, req.Header.Get(helper.ProofHeader)) {
 		logger.Default.Error("Mux connection without a valid proof for domain:", domainName)
+		countTunnelFailure("mux_proof")
 		conn.Close()
 		return
 	}
 	if !manager.nonces.take(nonce, now) {
 		logger.Default.Error("Mux connection with a replayed nonce for domain:", domainName)
+		countTunnelFailure("mux_replayed_nonce")
 		conn.Close()
 		return
 	}
 
 	hub, ok := manager.GetHub(domainName)
 	if !ok {
+		countTunnelFailure("mux_no_hub")
 		conn.Close()
 		return
 	}
 	session, err := yamux.Server(conn, muxConfig())
 	if err != nil {
+		countTunnelFailure("mux_session")
 		conn.Close()
 		return
 	}
@@ -109,6 +114,7 @@ func (manager *Manager) handleMux(conn net.Conn, req *http.Request) {
 		passthrough: req.Header.Get(helper.PassthroughHeader) == "1",
 	}
 	if !hub.addMux(ms) {
+		countTunnelFailure("mux_refused")
 		session.Close()
 		return
 	}
