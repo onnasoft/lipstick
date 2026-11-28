@@ -526,6 +526,14 @@ Lipstick exposes local ports to the internet through a reverse tunnel. The main 
 - **Verified:** `go test -race ./...` passes. The integration scenarios pass three times in a row under `-race`. The cluster scenario passes repeatedly: a visit that enters one server reaches the client on the other.
 - **Not covered by the tests:** PostgreSQL-specific SQL (the SQL used is portable, but the production database is PostgreSQL); the real NATS server and its failure modes; a cluster across machines.
 
+### 54. Per-domain CIDR access rules (feature)
+- **Where:** `helper/cidr.go` (parsing, validation, the check), `server/db/models.go` (`AllowedCIDRs`, column `allowed_cidrs`), `server/manager/guard.go` (`sourceAllowedFor`, `refuseSource`), `server/manager/manager.go` (HTTP and TCP entry, passthrough), `server/manager/dtls_proxy.go`, `server/admin/routes.go` (`allowedCidrs` on create and update).
+- **Behavior:** a domain lists the networks its visitors may come from. Empty means no restriction. Single addresses are accepted (`/32` or `/128`). An invalid rule is refused with 400 and not stored. A visitor outside the rules gets 403 before anything reaches the tunnel, on HTTP, TLS-terminated HTTP, TCP, passthrough and DTLS.
+- **Design choice:** the check uses the TCP or UDP source address only. `X-Forwarded-For` is not trusted: trusting it would let any visitor claim any address. A deployment behind a load balancer sees the balancer's address, and that is documented.
+- **Fail-closed:** a stored rule that cannot be read refuses every visitor of the domain, so a corrupt rule never opens it.
+- **Verified:** unit tests for parsing (networks, single addresses, IPv6, invalid items, canonical form, nil addresses). Database round-trip on SQLite. Integration scenarios: outside the networks gets 403, inside gets 200, a single-address rule, passthrough obeys the rule, DTLS obeys the rule. Live, on the running server: a rule that excludes the visitor gives 403; an invalid rule gives 400; an IPv4 rule admits IPv4 and refuses IPv6; clearing the rules restores access.
+- **Not covered:** intranet ports still use their own policy from the server configuration, not the domain's rules; the cluster does not share rules across servers beyond the shared database.
+
 ## Recommended order
 
 1. Items 1, 2, 3, and 4: authentication, unpredictable tickets, TLS verification, and admin API hardening.

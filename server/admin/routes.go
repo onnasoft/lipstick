@@ -1,9 +1,13 @@
 package admin
 
 import (
+	"encoding/json"
+	"strings"
+
 	"crypto/subtle"
 	"errors"
 	"fmt"
+	"github.com/OnnaSoft/lipstick/helper"
 	"net/http"
 	"strconv"
 	"time"
@@ -53,11 +57,12 @@ func configureRouter(admin *Admin) {
 // domainView is what the admin API returns for a domain. It leaves out the
 // tunnel API key, which is write-only: it can be set, but never read back.
 type domainView struct {
-	ID                       uint   `json:"id"`
-	Name                     string `json:"name"`
-	AllowMultipleConnections bool   `json:"allowMultipleConnections"`
-	Passthrough              bool   `json:"passthrough"`
-	AuthLatched              bool   `json:"authLatched"`
+	ID                       uint     `json:"id"`
+	Name                     string   `json:"name"`
+	AllowMultipleConnections bool     `json:"allowMultipleConnections"`
+	Passthrough              bool     `json:"passthrough"`
+	AuthLatched              bool     `json:"authLatched"`
+	AllowedCIDRs             []string `json:"allowedCidrs"`
 }
 
 func toDomainView(d *auth.Domain) domainView {
@@ -67,6 +72,7 @@ func toDomainView(d *auth.Domain) domainView {
 		AllowMultipleConnections: d.AllowMultipleConnections,
 		Passthrough:              d.Passthrough,
 		AuthLatched:              d.AuthLatched,
+		AllowedCIDRs:             splitRules(d.AllowedCIDRs),
 	}
 }
 
@@ -139,7 +145,23 @@ func (r *router) addDomain(c *gin.Context) {
 	// Multiple connections are allowed unless the request says otherwise. The
 	// default is set before binding, so an omitted field keeps it.
 	domain := &auth.Domain{AllowMultipleConnections: true}
-	if err := c.BindJSON(domain); err != nil {
+	raw, err := c.GetRawData()
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if err := json.Unmarshal(raw, domain); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	var rules struct {
+		AllowedCIDRs []string `json:"allowedCidrs"`
+	}
+	if err := json.Unmarshal(raw, &rules); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "allowedCidrs must be a list of strings"})
+		return
+	}
+	if domain.AllowedCIDRs, err = helper.NormalizeAccessRules(rules.AllowedCIDRs); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
@@ -198,6 +220,28 @@ func (r *router) updateDomain(c *gin.Context) {
 			return
 		}
 		record.Passthrough = pass
+	}
+	if raw, ok := domain["allowedCidrs"]; ok {
+		list, isList := raw.([]interface{})
+		if !isList {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "allowedCidrs must be a list of addresses or networks"})
+			return
+		}
+		items := make([]string, 0, len(list))
+		for _, item := range list {
+			text, isText := item.(string)
+			if !isText {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "allowedCidrs must be a list of strings"})
+				return
+			}
+			items = append(items, text)
+		}
+		normalized, err := helper.NormalizeAccessRules(items)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		record.AllowedCIDRs = normalized
 	}
 	if raw, ok := domain["authLatched"]; ok {
 		// Clients set the restricted mode by asking for it. An admin can only clear it.
@@ -508,4 +552,12 @@ func (r *router) revokeVisitorToken(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+}
+
+// splitRules turns the stored comma-separated rules into the list the API shows.
+func splitRules(stored string) []string {
+	if stored == "" {
+		return []string{}
+	}
+	return strings.Split(stored, ",")
 }

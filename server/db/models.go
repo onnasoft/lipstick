@@ -13,6 +13,9 @@ type Domain struct {
 	// AuthLatched is set when a client asks for visitor authentication. Once set,
 	// the domain stays restricted until an admin clears it.
 	AuthLatched bool `gorm:"not null;default:false"`
+	// AllowedCIDRs lists the networks visitors may come from, comma-separated. Empty
+	// means no restriction.
+	AllowedCIDRs string `gorm:"column:allowed_cidrs;not null;default:''"`
 }
 
 // VisitorUser is a username and password that can access a restricted domain.

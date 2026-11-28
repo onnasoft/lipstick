@@ -543,3 +543,70 @@ func mustAtoi(t *testing.T, s string) int {
 	}
 	return n
 }
+
+// Scenario: access rules. A visitor outside the domain's networks gets 403 before the
+// tunnel; one inside gets 200. The same rule holds for passthrough and DTLS.
+func TestIntegrationAccessRules(t *testing.T) {
+	t.Run("outside the networks gets 403", func(t *testing.T) {
+		st := startStack(t, stackOptions{allowed: "10.0.0.0/8"})
+		defer st.close()
+		st.runClient(clientConfig{ProxyPass: localHTTP(t)})
+		resp, _ := getBody(t, st.visitorClient(t, st.caFile), "/hello")
+		if resp.StatusCode != 403 {
+			t.Fatalf("got %d, want 403", resp.StatusCode)
+		}
+	})
+	t.Run("inside the networks gets 200", func(t *testing.T) {
+		st := startStack(t, stackOptions{allowed: "127.0.0.0/8, 10.0.0.0/8"})
+		defer st.close()
+		st.runClient(clientConfig{ProxyPass: localHTTP(t)})
+		resp, body := getBody(t, st.visitorClient(t, st.caFile), "/hello")
+		if resp.StatusCode != 200 || body != "hello from the local service" {
+			t.Fatalf("got %d %q", resp.StatusCode, body)
+		}
+	})
+	t.Run("a single address rule", func(t *testing.T) {
+		st := startStack(t, stackOptions{allowed: "127.0.0.1"})
+		defer st.close()
+		st.runClient(clientConfig{ProxyPass: localHTTP(t)})
+		if resp, _ := getBody(t, st.visitorClient(t, st.caFile), "/hello"); resp.StatusCode != 200 {
+			t.Fatalf("127.0.0.1 rule refused 127.0.0.1: %d", resp.StatusCode)
+		}
+	})
+	t.Run("passthrough domain obeys the rule", func(t *testing.T) {
+		addr, servicePEM := tlsService(t, echoHTTP(t).Handler)
+		st := startStack(t, stackOptions{passthrough: true, allowed: "10.0.0.0/8", extraTrust: []string{servicePEM}})
+		defer st.close()
+		st.runClient(clientConfig{ProxyPass: addr, Passthrough: true})
+		resp, _ := getBody(t, st.visitorClient(t, st.serverCA), "/hello")
+		if resp.StatusCode != 403 {
+			t.Fatalf("got %d, want 403", resp.StatusCode)
+		}
+	})
+	t.Run("DTLS proxy obeys the rule", func(t *testing.T) {
+		echo := udpEcho(t)
+		st := startStack(t, stackOptions{allowed: "10.0.0.0/8"})
+		defer st.close()
+		st.runClient(clientConfig{ProxyPass: localHTTP(t), UDPTarget: echo})
+		// A DTLS visitor from outside the rules never gets its handshake through.
+		pool := x509.NewCertPool()
+		pem, _ := os.ReadFile(st.caFile)
+		pool.AppendCertsFromPEM(pem)
+		raddr, _ := net.ResolveUDPAddr("udp", st.dtlsAddr)
+		conn, err := dtls.DialWithOptions("udp", raddr, dtls.WithRootCAs(pool), dtls.WithServerName(testDomain))
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		if err := conn.HandshakeContext(ctx); err == nil {
+			conn.SetDeadline(time.Now().Add(2 * time.Second))
+			conn.Write([]byte("x"))
+			buf := make([]byte, 64)
+			if n, err := conn.Read(buf); err == nil {
+				t.Fatalf("an outside DTLS visitor got an answer: %q", buf[:n])
+			}
+		}
+	})
+}

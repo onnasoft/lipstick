@@ -489,6 +489,25 @@ Un dominio puede exigir credenciales a sus visitantes: un usuario con contraseñ
 
 **Lo que no cubre todavía.** Un WebSocket se verifica en su petición de upgrade, y después pasa sin verificar cada mensaje. Los usuarios no tienen permisos por ruta: cualquier usuario válido accede a todo el dominio. Las credenciales no se cachean, así que cada petición Basic paga la verificación de argon2id.
 
+## Reglas de acceso por red (CIDR)
+
+Cada dominio puede limitar desde qué redes llegan sus visitantes. Es una lista de redes CIDR o direcciones sueltas, y si está vacía, el dominio no tiene restricción.
+
+```bash
+ADMIN=$(sed -n 's/^admin_secret_key: "\(.*\)"/\1/p' server/config.yml)
+curl -sk -X PATCH https://127.0.0.1:5052/domains/mi-dominio \
+  -H "Authorization: $ADMIN" -H 'Content-Type: application/json' \
+  -d '{"allowedCidrs": ["10.0.0.0/8", "192.168.1.7"]}'
+```
+
+- Una dirección suelta es esa dirección exacta (IPv4 se guarda como `/32`, IPv6 como `/128`).
+- Una regla inválida responde `400` y no se guarda. `[]` quita todas las reglas.
+- La regla se aplica a la dirección TCP real del visitante, en HTTP y HTTPS (con TLS terminado en el servidor), en passthrough y en el proxy DTLS. Un visitante fuera de la lista recibe `403` y no llega al túnel.
+- Un dominio restringido por reglas no cambia el comportamiento de los puertos de intranet, que tienen su propia política de redes en la configuración del servidor.
+- Un cambio de reglas desconecta al cliente del dominio, que se reconecta en unos segundos, como con cualquier otro cambio del dominio.
+- **Importante con IPv6:** `localhost` puede resolverse a `::1`. Si tu regla es solo IPv4 (`127.0.0.1`), las visitas por `localhost` vía IPv6 responden `403`. Incluye `::1` si lo necesitas.
+- **Detrás de un proxy o balanceador** las reglas ven la dirección del balanceador, no la del visitante original. Esta versión no lee `X-Forwarded-For`, a propósito: confiar en esa cabecera permitiría falsificar el origen.
+
 ## Cluster (varios servidores)
 
 Varios servidores pueden servir los mismos dominios. Todos usan la misma base de datos, el mismo NATS y el mismo certificado (o certificados firmados por la misma CA, indicada en `cluster.ca_file`).
@@ -645,6 +664,7 @@ Los flags reemplazan al archivo. Una clave desconocida es un error.
 - **TLS obligatorio** hacia visitantes, clientes y admin API. La única excepción son los puertos de `intranet_ports`: opcionales, en una interfaz de la intranet, un dominio por puerto y redes permitidas por la política (ver [Puertos sin TLS](#puertos-sin-tls-para-la-intranet)).
 - **Claves de dominio** comparadas en tiempo constante. Una clave vacía nunca autoriza.
 - **Tickets** de 128 bits aleatorios, de un solo uso.
+- **Reglas de acceso por red (CIDR)** por dominio. Ver [Reglas de acceso por red](#reglas-de-acceso-por-red-cidr).
 - **Autenticación de visitantes** por dominio, con usuarios y tokens, opcional y restringida una vez activada. Ver [Autenticación de visitantes](#autenticación-de-visitantes).
 - **Sesiones autenticadas.** Cada conexión que el cliente abre hacia el servidor (`GET /<ticket>` o `GET /mux`) lleva una prueba `X-Lipstick-Proof`: HMAC-SHA256 de la clave del dominio. Para un ticket, la prueba cubre el ticket. Para una sesión de multiplexación, cubre un nonce de un solo uso que contiene la hora, y el servidor rechaza un nonce repetido o con más de dos minutos de diferencia con su reloj. La clave nunca viaja en esas conexiones, y una conexión sin prueba válida se cierra sin responder. Dentro de una sesión autenticada, el servidor abre streams y el cliente los acepta: solo el cliente que abrió la sesión recibe tráfico por ella. Un cliente anterior a estos cambios no sirve tráfico: hay que actualizar servidor y clientes juntos.
 - **Admin API** solo en loopback por defecto. Las lecturas (`GET`) no piden clave; crear, cambiar o borrar dominios sí, con la clave de admin. Si expones el puerto 5052 fuera de la máquina, cualquiera podrá ver dominios y tráfico.

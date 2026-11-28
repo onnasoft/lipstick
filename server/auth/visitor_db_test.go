@@ -133,3 +133,15 @@ func TestPassthroughFlagIsStored(t *testing.T) {
 		t.Fatal("passthrough not stored")
 	}
 }
+
+func TestAllowedCIDRsAreStored(t *testing.T) {
+	a := newTestAuth(t)
+	d, _ := a.GetDomain("robot.example.com")
+	d.AllowedCIDRs = "10.0.0.0/8,192.168.1.7/32"
+	if err := a.UpdateDomain(d); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := a.GetDomain("robot.example.com"); got.AllowedCIDRs != "10.0.0.0/8,192.168.1.7/32" {
+		t.Fatalf("rules stored as %q", got.AllowedCIDRs)
+	}
+}

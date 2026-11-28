@@ -123,7 +123,8 @@ func (m *Manager) ServeDTLSProxy(pc net.PacketConn, tlsConf *tls.Config, port in
 				continue
 			}
 			// DTLS carries no HTTP, so a restricted domain cannot be checked over it.
-			if rec, err := m.authManager.GetDomain(domain); err != nil || rec.AuthLatched {
+			rec, err := m.authManager.GetDomain(domain)
+			if err != nil || rec.AuthLatched || !sourceAllowedFor(rec, src) {
 				continue
 			}
 			p = newPeerPacketConn(pc, src, func() {

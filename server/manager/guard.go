@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/OnnaSoft/lipstick/helper"
 	"github.com/OnnaSoft/lipstick/logger"
 	"github.com/OnnaSoft/lipstick/server/auth"
 )
@@ -480,4 +481,22 @@ func (c *countingReader) Read(p []byte) (int, error) {
 		c.count(int64(n))
 	}
 	return n, err
+}
+
+// sourceAllowedFor reports whether a visitor from addr may reach the domain. A
+// domain with no rules admits everyone. A rule list that cannot be read refuses
+// everyone, so a broken rule never opens a domain.
+func sourceAllowedFor(rec *auth.Domain, addr net.Addr) bool {
+	rules, err := helper.ParseAccessRules(rec.AllowedCIDRs)
+	if err != nil {
+		logger.Default.Error("Domain", rec.Name, "has unreadable access rules; refusing its visitors:", err)
+		return false
+	}
+	return helper.SourceAllowed(helper.RemoteIP(addr), rules)
+}
+
+// refuseSource answers 403 to a visitor whose address is outside the domain's rules.
+func refuseSource(domain string, conn net.Conn) {
+	logger.Default.Info(fmt.Sprintf("visitor from %s refused by the access rules of domain %s", conn.RemoteAddr(), domain))
+	writeStatus(conn, 403, "")
 }

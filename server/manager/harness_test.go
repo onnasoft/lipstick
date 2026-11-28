@@ -169,6 +169,7 @@ type stackOptions struct {
 	extraTrust  []string    // PEM files the client must trust in addition to the server certificate
 	db          *gorm.DB    // shared database (cluster tests); nil means a new one
 	bus         PresenceBus // presence bus (cluster tests); nil means a cluster is not started
+	allowed     string      // visitor access rules for the domain (CIDRs, comma-separated)
 	clusterName string      // advertise name for the cluster, the manager's address is appended
 }
 
@@ -191,6 +192,7 @@ func startStack(t *testing.T, opts stackOptions) *stack {
 			ApiKey:                   st.apiKey,
 			AllowMultipleConnections: true,
 			Passthrough:              opts.passthrough,
+			AllowedCIDRs:             opts.allowed,
 		}); err != nil {
 			t.Fatal(err)
 		}

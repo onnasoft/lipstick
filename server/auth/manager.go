@@ -15,6 +15,7 @@ type Domain struct {
 	AllowMultipleConnections bool   `json:"allowMultipleConnections"`
 	Passthrough              bool   `json:"passthrough"`
 	AuthLatched              bool   `json:"authLatched"`
+	AllowedCIDRs             string `json:"-"` // exposed as a list by the admin API
 }
 
 type AuthManager interface {

@@ -224,8 +224,13 @@ func (manager *Manager) HandleHTTPConn(conn net.Conn, req *http.Request) {
 	host := req.Host
 	domain := strings.Split(host, ":")[0]
 
+	rec, err := manager.authManager.GetDomain(domain)
+	if err == nil && !sourceAllowedFor(rec, conn.RemoteAddr()) {
+		refuseSource(domain, conn)
+		return
+	}
 	// A restricted domain checks every request on the connection, so it has its own path.
-	if rec, err := manager.authManager.GetDomain(domain); err == nil && rec.AuthLatched {
+	if err == nil && rec.AuthLatched {
 		manager.serveRestricted(domain, conn)
 		return
 	}
@@ -272,6 +277,10 @@ func (manager *Manager) HandleTCPConn(conn net.Conn) {
 		return
 	}
 
+	if rec, err := manager.authManager.GetDomain(domain); err == nil && !sourceAllowedFor(rec, conn.RemoteAddr()) {
+		refuseSource(domain, conn)
+		return
+	}
 	if rec, err := manager.authManager.GetDomain(domain); err == nil && rec.AuthLatched {
 		// Only HTTP can be checked. Other traffic to a restricted domain is refused.
 		writeStatus(conn, 403, "")
@@ -314,7 +323,7 @@ func (manager *Manager) HandleTCPConn(conn net.Conn) {
 // the connection is then ended here as usual. prefix holds the bytes already read.
 func (manager *Manager) RoutePassthrough(domain string, conn net.Conn, prefix []byte) bool {
 	record, err := manager.authManager.GetDomain(domain)
-	if err != nil || !record.Passthrough || record.AuthLatched {
+	if err != nil || !record.Passthrough || record.AuthLatched || !sourceAllowedFor(record, conn.RemoteAddr()) {
 		return false
 	}
 	hub, ok := manager.GetHub(domain)
