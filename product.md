@@ -264,7 +264,7 @@ The existing logs and traffic statistics should be expanded to provide sufficien
 - [x] Connection errors. (refused visitor connections by reason in `lipstick_visitor_refusals_total`; refused or failed tunnel setups by reason in `lipstick_tunnel_setup_failures_total`; see revision.md, item 76)
 - [x] Reconnection metrics. (`lipstick_tunnel_reconnections_total` and `lipstick_tunnel_losses_total`, per domain: a domain's tunnel is lost when its last client leaves, and a reconnection is the tunnel coming back; counted within this process only, see revision.md, item 77)
 - [x] Timeout metrics. (`lipstick_backend_timeouts_total`, the 504s)
-- [ ] CPU and memory information. (memory and goroutines are exported; CPU time is not)
+- [x] CPU and memory information. (`lipstick_process_cpu_seconds_total`, user and system time from getrusage, on Unix; `lipstick_go_memory_alloc_bytes` for heap in use; `lipstick_go_goroutines`; see revision.md, item 78)
 - [ ] Structured logging.
 - [x] Health checks. (`/health`, which checks the database and reports 503 when it is down)
 - [ ] Readiness checks.

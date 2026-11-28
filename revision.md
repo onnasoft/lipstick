@@ -716,6 +716,11 @@ Lipstick exposes local ports to the internet through a reverse tunnel. The main 
 - **Limit:** the memory is per process. A restart resets it, so the clients that reconnect after a server restart are not counted as reconnections; they show as a new start. Each domain counts once however many sessions its client opens, since the count is per tunnel, not per mux session.
 - **Verified:** an integration test kills a client and starts it again, and checks one loss and one reconnection; live, killing and restarting the local test client gave one loss and one reconnection, and a visitor was served.
 
+### 78. CPU and memory information (feature)
+- **Added:** `lipstick_process_cpu_seconds_total`, the CPU time of the process (user and system), from `getrusage` on Unix. On other systems it reports 0; the build still compiles there. Heap in use and goroutines were already exported.
+- **Not exported:** the memory the process holds from the operating system (resident size) and the garbage collector's totals.
+- **Verified:** a test checks the CPU time grows after work; the suite passes with `-race`; live, the counter grew between two readings (0.048 s, then 0.053 s).
+
 ## Recommended order
 
 1. Items 1, 2, 3, and 4: authentication, unpredictable tickets, TLS verification, and admin API hardening.

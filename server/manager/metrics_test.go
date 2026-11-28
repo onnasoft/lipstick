@@ -61,3 +61,15 @@ func TestConnectionLatencyIsAHistogram(t *testing.T) {
 		}
 	}
 }
+
+func TestCPUTimeGrowsWithWork(t *testing.T) {
+	before := processCPUSeconds()
+	x := 0.0
+	for i := 0; i < 30_000_000; i++ {
+		x += float64(i) * 1.0000001
+	}
+	_ = x
+	if after := processCPUSeconds(); after <= before {
+		t.Fatalf("CPU time did not grow: %v then %v", before, after)
+	}
+}

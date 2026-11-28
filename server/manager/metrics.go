@@ -130,6 +130,7 @@ func (manager *Manager) Metrics() []metrics.Family {
 		{Name: "lipstick_tunnel_setup_failures_total", Help: "Tunnel setups refused or failed, by reason.", Type: metrics.Counter, Samples: failureSamples(tunnelSetupFailures)},
 		{Name: "lipstick_tunnel_reconnections_total", Help: "Times a domain's tunnel came back after it had been connected in this process, per domain.", Type: metrics.Counter, Samples: tunnelEvents.samples(tunnelEvents.reconnects)},
 		{Name: "lipstick_tunnel_losses_total", Help: "Times a domain lost its tunnel because its last client left, per domain.", Type: metrics.Counter, Samples: tunnelEvents.samples(tunnelEvents.losses)},
+		{Name: "lipstick_process_cpu_seconds_total", Help: "CPU time used by the server process, user and system together.", Type: metrics.Counter, Samples: []metrics.Sample{{Value: processCPUSeconds()}}},
 		{Name: "lipstick_go_goroutines", Help: "Goroutines in the server process.", Type: metrics.Gauge, Samples: []metrics.Sample{{Value: float64(runtime.NumGoroutine())}}},
 		{Name: "lipstick_go_memory_alloc_bytes", Help: "Heap memory in use by the server process.", Type: metrics.Gauge, Samples: []metrics.Sample{{Value: float64(mem.HeapAlloc)}}},
 	}
