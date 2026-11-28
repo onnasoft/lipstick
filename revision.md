@@ -534,6 +534,24 @@ Lipstick exposes local ports to the internet through a reverse tunnel. The main 
 - **Verified:** unit tests for parsing (networks, single addresses, IPv6, invalid items, canonical form, nil addresses). Database round-trip on SQLite. Integration scenarios: outside the networks gets 403, inside gets 200, a single-address rule, passthrough obeys the rule, DTLS obeys the rule. Live, on the running server: a rule that excludes the visitor gives 403; an invalid rule gives 400; an IPv4 rule admits IPv4 and refuses IPv6; clearing the rules restores access.
 - **Not covered:** intranet ports still use their own policy from the server configuration, not the domain's rules; the cluster does not share rules across servers beyond the shared database.
 
+### 55. Admin API reference (Swagger / OpenAPI)
+- **Where:** `server/admin/swagger.go` (general information and the key scheme), annotations above each handler in `server/admin/routes.go`, generated `server/admin/docs/` (`docs.go`, `swagger.json`, `swagger.yaml`), `server/admin/swagger_test.go`.
+- **Served at:** `/swagger/index.html` (UI) and `/swagger/doc.json` (spec), on the admin port.
+- **Authentication documented:** an `AdminKey` apiKey scheme in the `Authorization` header, raw value with no `Bearer` prefix, matching the code. Routes that change data and the visitor user and token lists declare it. Domain, stats, health, request-log and traffic reads do not.
+- **Verified:** a test reads the spec and checks each protected route declares the key and each read route does not; a test checks the UI is served. Live: `/swagger/index.html` and `/swagger/doc.json` return 200.
+- **Caveat:** the read routes are unauthenticated by design. If the admin port is ever bound to a non-loopback address, those reads become public; the description says so.
+- **Tooling:** swag v1.16.4 (CLI and library), gin-swagger v1.6.0, swaggo/files v1.0.1.
+
+### 56. Visitor users sign requests with HMAC instead of passwords (change)
+- **Replaces:** the HTTP Basic users of entry 51 (argon2id password hashes). Entry 51's API tokens are unchanged.
+- **Why:** a password sent on every request, even over TLS, is a secret the visitor sends each time; a per-user secret used to sign each request is never sent.
+- **Where:** `helper/visitorsig.go` (signing, parsing, verifying, shared with tests), `server/manager/guard.go` (`checkSignedRequest`, `signedNonceCache`), `server/auth/visitor.go` (`AddVisitorUser` returns the secret, `RotateVisitorUser`, `VisitorUserSecret`), `server/db/models.go` (`VisitorUser.Secret`), `server/db/manager.go` (drops `password_hash`), `server/admin/routes.go` (create returns the secret once; rotate route).
+- **Scheme:** `Authorization: LipstickHMAC user, ts, nonce, sig`. The signature is HMAC-SHA256 with the user's secret over the method, request target, Host, user, timestamp and nonce. Window ±2 minutes. A nonce is refused for the whole window (replay). The signature is checked before the nonce is recorded, so only holders of the secret can fill the cache. Bad signatures count toward the existing limiter.
+- **Trade-off, stated:** the server must hold each user's secret to verify signatures, so the secret is stored (not hashed). Anyone with read access to the database can impersonate the users. Argon2 is gone, so verification costs one HMAC, not one argon2id run per request.
+- **Not signed:** the request body. TLS protects it; the signature does not.
+- **Migration:** users created before this change have no secret and cannot sign requests. Create them again. The `password_hash` column is dropped at startup.
+- **Verified:** helper tests (valid, each covered field tampered, malformed headers, username rules, a vector computed by the README's Python example); manager tests (replay, skew, wrong secret, moved path, unknown user, limiter, nonce expiry); an integration scenario with the real client binary (signed 200, replay 401, rotation invalidates the old secret, bearer still works); auth tests on SQLite.
+
 ## Recommended order
 
 1. Items 1, 2, 3, and 4: authentication, unpredictable tickets, TLS verification, and admin API hardening.

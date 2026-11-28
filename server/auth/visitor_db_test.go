@@ -29,37 +29,44 @@ func newTestAuth(t *testing.T) AuthManager {
 
 func TestVisitorUserLifecycle(t *testing.T) {
 	a := newTestAuth(t)
-	if err := a.AddVisitorUser("robot.example.com", "alice", "short"); err != ErrWeakPassword {
-		t.Fatalf("short password: %v", err)
-	}
-	if err := a.AddVisitorUser("robot.example.com", "bad name", "correct-horse-battery"); err != ErrInvalidUsername {
+	if _, err := a.AddVisitorUser("robot.example.com", "bad name"); err != ErrInvalidUsername {
 		t.Fatalf("username with a space: %v", err)
 	}
-	if err := a.AddVisitorUser("robot.example.com", "alice", "correct-horse-battery"); err != nil {
-		t.Fatal(err)
+	secret, err := a.AddVisitorUser("robot.example.com", "alice")
+	if err != nil || secret == "" {
+		t.Fatalf("create: %v", err)
 	}
-	if err := a.AddVisitorUser("robot.example.com", "alice", "another-password-here"); err != ErrUserExists {
+	if _, err := a.AddVisitorUser("robot.example.com", "alice"); err != ErrUserExists {
 		t.Fatalf("duplicate user: %v", err)
 	}
-	ok, err := a.VerifyVisitorUser("robot.example.com", "alice", "correct-horse-battery")
-	if err != nil || !ok {
-		t.Fatalf("right password: %v %v", ok, err)
+	got, err := a.VisitorUserSecret("robot.example.com", "alice")
+	if err != nil || got != secret {
+		t.Fatalf("stored secret does not match the one shown: %v", err)
 	}
-	if ok, _ := a.VerifyVisitorUser("robot.example.com", "alice", "wrong-password-here"); ok {
-		t.Fatal("wrong password accepted")
-	}
-	if ok, _ := a.VerifyVisitorUser("robot.example.com", "nobody", "correct-horse-battery"); ok {
-		t.Fatal("unknown user accepted")
+	if _, err := a.VisitorUserSecret("robot.example.com", "nobody"); err != ErrUserNotFound {
+		t.Fatalf("unknown user: %v", err)
 	}
 	names, _ := a.ListVisitorUsers("robot.example.com")
 	if len(names) != 1 || names[0] != "alice" {
-		t.Fatalf("users %v; passwords must not be listed", names)
+		t.Fatalf("users %v; secrets must not be listed", names)
 	}
+
+	rotated, err := a.RotateVisitorUser("robot.example.com", "alice")
+	if err != nil || rotated == secret || rotated == "" {
+		t.Fatalf("rotate: %v", err)
+	}
+	if now, _ := a.VisitorUserSecret("robot.example.com", "alice"); now != rotated {
+		t.Fatal("rotation not stored")
+	}
+	if _, err := a.RotateVisitorUser("robot.example.com", "nobody"); err != ErrUserNotFound {
+		t.Fatalf("rotate unknown user: %v", err)
+	}
+
 	if err := a.DeleteVisitorUser("robot.example.com", "alice"); err != nil {
 		t.Fatal(err)
 	}
-	if ok, _ := a.VerifyVisitorUser("robot.example.com", "alice", "correct-horse-battery"); ok {
-		t.Fatal("deleted user still accepted")
+	if _, err := a.VisitorUserSecret("robot.example.com", "alice"); err != ErrUserNotFound {
+		t.Fatalf("deleted user still has a secret: %v", err)
 	}
 	if err := a.DeleteVisitorUser("robot.example.com", "alice"); err != ErrUserNotFound {
 		t.Fatalf("second delete: %v", err)
@@ -102,7 +109,7 @@ func TestCredentialCountAndLatch(t *testing.T) {
 	if n, _ := a.CountVisitorCredentials("robot.example.com"); n != 0 {
 		t.Fatalf("new domain has %d credentials", n)
 	}
-	a.AddVisitorUser("robot.example.com", "alice", "correct-horse-battery")
+	a.AddVisitorUser("robot.example.com", "alice")
 	a.AddVisitorToken("robot.example.com", "reader", []string{"GET"}, nil)
 	if n, _ := a.CountVisitorCredentials("robot.example.com"); n != 2 {
 		t.Fatalf("count %d, want 2", n)

@@ -2,28 +2,13 @@ package auth
 
 import "testing"
 
-func TestPasswordHashVerifies(t *testing.T) {
-	h, err := hashPassword("correct horse battery")
-	if err != nil {
-		t.Fatal(err)
+func TestSecretsAreUniquePerUser(t *testing.T) {
+	a, b := newSecretOrFail(t), newSecretOrFail(t)
+	if a == b {
+		t.Fatal("two secrets are equal")
 	}
-	if !verifyPassword(h, "correct horse battery") {
-		t.Fatal("right password rejected")
-	}
-	if verifyPassword(h, "correct horse batterY") {
-		t.Fatal("wrong password accepted")
-	}
-	// The stored value is a hash, never the password.
-	if containsSubstring(h, "correct horse") {
-		t.Fatal("password visible in the stored hash")
-	}
-}
-
-func TestVerifyPasswordRefusesMalformedHash(t *testing.T) {
-	for _, h := range []string{"", "plain", "argon2id$!!$!!", "bcrypt$x$y"} {
-		if verifyPassword(h, "anything") {
-			t.Errorf("malformed hash %q accepted", h)
-		}
+	if len(a) < 40 {
+		t.Fatalf("secret too short: %d characters", len(a))
 	}
 }
 
@@ -36,11 +21,11 @@ func TestTokenHashIsStableAndNotTheToken(t *testing.T) {
 	}
 }
 
-func containsSubstring(s, sub string) bool {
-	for i := 0; i+len(sub) <= len(s); i++ {
-		if s[i:i+len(sub)] == sub {
-			return true
-		}
+func newSecretOrFail(t *testing.T) string {
+	t.Helper()
+	s, err := newSecret()
+	if err != nil {
+		t.Fatal(err)
 	}
-	return false
+	return s
 }

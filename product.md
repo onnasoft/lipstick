@@ -79,7 +79,7 @@ The current tunnel authentication protects the connection between the client and
 ### Required improvements
 
 - [x] Visitor authentication. (implemented: see README, Autenticación de visitantes)
-- [x] Configurable HTTP Basic Authentication. (implemented: see README, Autenticación de visitantes)
+- [x] Visitor authentication with per-user HMAC signatures (implemented: see README, Autenticación de visitantes)
 - [x] Token-based access control. (implemented: see README, Autenticación de visitantes)
 - [x] IP allowlisting. (implemented: README, Reglas de acceso por red)
 - [x] CIDR-based access rules. (implemented: README, Reglas de acceso por red)

@@ -26,9 +26,10 @@ type AuthManager interface {
 	DelDomain(id uint) error
 
 	// Visitor authentication. See visitor.go.
-	AddVisitorUser(domain, username, password string) error
+	AddVisitorUser(domain, username string) (string, error)
+	RotateVisitorUser(domain, username string) (string, error)
 	DeleteVisitorUser(domain, username string) error
-	VerifyVisitorUser(domain, username, password string) (bool, error)
+	VisitorUserSecret(domain, username string) (string, error)
 	ListVisitorUsers(domain string) ([]string, error)
 	AddVisitorToken(domain, name string, methods, prefixes []string) (string, error)
 	RevokeVisitorToken(domain string, id uint) error

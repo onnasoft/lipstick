@@ -26,9 +26,10 @@ func (fakeAuth) GetDomain(name string) (*auth.Domain, error) {
 func (fakeAuth) AddDomain(*auth.Domain) error                               { return nil }
 func (fakeAuth) UpdateDomain(*auth.Domain) error                            { return nil }
 func (fakeAuth) DelDomain(uint) error                                       { return nil }
-func (fakeAuth) AddVisitorUser(d, u, p string) error                        { return nil }
+func (fakeAuth) AddVisitorUser(d, u string) (string, error)                 { return "", nil }
+func (fakeAuth) RotateVisitorUser(d, u string) (string, error)              { return "", nil }
 func (fakeAuth) DeleteVisitorUser(d, u string) error                        { return nil }
-func (fakeAuth) VerifyVisitorUser(d, u, p string) (bool, error)             { return false, nil }
+func (fakeAuth) VisitorUserSecret(d, u string) (string, error)              { return "", nil }
 func (fakeAuth) ListVisitorUsers(d string) ([]string, error)                { return nil, nil }
 func (fakeAuth) AddVisitorToken(d, n string, m, p []string) (string, error) { return "", nil }
 func (fakeAuth) RevokeVisitorToken(d string, id uint) error                 { return nil }

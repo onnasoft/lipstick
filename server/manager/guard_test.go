@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/OnnaSoft/lipstick/helper"
 	"github.com/OnnaSoft/lipstick/server/auth"
 )
 
@@ -198,12 +199,114 @@ func TestFailureLimiterLocksAfterFreeAttempts(t *testing.T) {
 	}
 }
 
-func TestParseBasic(t *testing.T) {
-	user, pass, ok := parseBasic("YWxpY2U6c2VjcmV0") // alice:secret
-	if !ok || user != "alice" || pass != "secret" {
-		t.Fatalf("got %q %q %v", user, pass, ok)
+// signedRequest builds a request to the domain, signed by user with secret at now.
+func signedRequest(t *testing.T, method, target, user, secret string, now time.Time) *http.Request {
+	t.Helper()
+	req, err := http.NewRequest(method, "https://robot.example.com"+target, nil)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if _, _, ok := parseBasic("!!!"); ok {
-		t.Fatal("garbage accepted")
+	if err := helper.SignRequest(req, user, secret, now); err != nil {
+		t.Fatal(err)
+	}
+	return req
+}
+
+func signedManager(secrets map[string]string) *Manager {
+	m := &Manager{authManager: &fakeAuth{secrets: secrets}}
+	m.visitorNonces = signedNonceCache{}
+	return m
+}
+
+const aliceSecret = "alice-secret-value-for-tests"
+
+func TestSignedRequestPasses(t *testing.T) {
+	m := signedManager(map[string]string{"robot.example.com|alice": aliceSecret})
+	req := signedRequest(t, "GET", "/hello", "alice", aliceSecret, time.Now())
+	if status, _ := m.visitorCheck("robot.example.com")(req, "10.0.0.9:1"); status != 0 {
+		t.Fatalf("valid signature got %d", status)
+	}
+}
+
+// A captured request must not work twice inside its window.
+func TestSignedRequestCannotBeReplayed(t *testing.T) {
+	m := signedManager(map[string]string{"robot.example.com|alice": aliceSecret})
+	check := m.visitorCheck("robot.example.com")
+	req := signedRequest(t, "POST", "/order", "alice", aliceSecret, time.Now())
+	if status, _ := check(req, "10.0.0.9:1"); status != 0 {
+		t.Fatalf("first use got %d", status)
+	}
+	replay := req.Clone(req.Context())
+	replay.Header = req.Header.Clone()
+	if status, _ := check(replay, "10.0.0.9:1"); status != 401 {
+		t.Fatalf("replay got %d, want 401", status)
+	}
+}
+
+func TestSignedRequestOutsideWindowIsRefused(t *testing.T) {
+	m := signedManager(map[string]string{"robot.example.com|alice": aliceSecret})
+	old := time.Now().Add(-10 * time.Minute)
+	req := signedRequest(t, "GET", "/hello", "alice", aliceSecret, old)
+	if status, _ := m.visitorCheck("robot.example.com")(req, "10.0.0.9:1"); status != 401 {
+		t.Fatalf("stale request got %d, want 401", status)
+	}
+}
+
+func TestSignedRequestWithWrongSecretIsRefused(t *testing.T) {
+	m := signedManager(map[string]string{"robot.example.com|alice": aliceSecret})
+	req := signedRequest(t, "GET", "/hello", "alice", "not-alices-secret", time.Now())
+	if status, _ := m.visitorCheck("robot.example.com")(req, "10.0.0.9:1"); status != 401 {
+		t.Fatalf("wrong secret got %d", status)
+	}
+}
+
+// The signature covers the path: a request signed for one path cannot be sent to another.
+func TestSignatureDoesNotMoveToAnotherPath(t *testing.T) {
+	m := signedManager(map[string]string{"robot.example.com|alice": aliceSecret})
+	req := signedRequest(t, "GET", "/public", "alice", aliceSecret, time.Now())
+	req.URL.Path = "/admin"
+	req.URL.RawPath = ""
+	if status, _ := m.visitorCheck("robot.example.com")(req, "10.0.0.9:1"); status != 401 {
+		t.Fatalf("moved signature got %d", status)
+	}
+}
+
+func TestUnknownUserIsRefusedLikeAWrongSecret(t *testing.T) {
+	m := signedManager(map[string]string{"robot.example.com|alice": aliceSecret})
+	req := signedRequest(t, "GET", "/hello", "mallory", aliceSecret, time.Now())
+	if status, _ := m.visitorCheck("robot.example.com")(req, "10.0.0.9:1"); status != 401 {
+		t.Fatalf("unknown user got %d", status)
+	}
+}
+
+// Repeated bad signatures from one user and peer get a 429 instead of more checks.
+func TestBadSignaturesAreLimited(t *testing.T) {
+	m := signedManager(map[string]string{"robot.example.com|alice": aliceSecret})
+	check := m.visitorCheck("robot.example.com")
+	limited := false
+	for i := 0; i < 20 && !limited; i++ {
+		req := signedRequest(t, "GET", "/hello", "alice", "wrong", time.Now())
+		if status, _ := check(req, "10.0.0.9:1"); status == 429 {
+			limited = true
+		}
+	}
+	if !limited {
+		t.Fatal("twenty bad signatures were never limited")
+	}
+}
+
+func TestNonceCacheRefusesReuseAndExpires(t *testing.T) {
+	var c signedNonceCache
+	if !c.take("a", time.Now().Add(time.Minute)) {
+		t.Fatal("new nonce refused")
+	}
+	if c.take("a", time.Now().Add(time.Minute)) {
+		t.Fatal("reused nonce accepted")
+	}
+	if !c.take("b", time.Now().Add(-time.Second)) {
+		t.Fatal("new nonce refused")
+	}
+	if !c.take("b", time.Now().Add(time.Minute)) {
+		t.Fatal("expired nonce still refused")
 	}
 }

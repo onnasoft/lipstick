@@ -3,7 +3,6 @@ package manager
 import (
 	"bufio"
 	"bytes"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -29,7 +28,7 @@ const (
 	maxRequestHead    = 64 << 10
 	guardCopyWait     = 30 * time.Second
 	guardResponseWait = 5 * time.Minute
-	basicRealm        = `Basic realm="lipstick"`
+	signedChallenge   = `LipstickHMAC realm="lipstick"`
 	bearerChallenge   = `Bearer realm="lipstick"`
 )
 
@@ -323,10 +322,11 @@ func writeStatus(conn net.Conn, status int, challenge string) {
 	conn.Write([]byte(b.String()))
 }
 
-// visitorCheck returns the check for a domain: a Basic user or a Bearer token.
+// visitorCheck returns the check for a domain: a signed request from a user, or a
+// Bearer API token.
 func (manager *Manager) visitorCheck(domain string) checkFunc {
 	return func(req *http.Request, peer string) (int, string) {
-		challenge := basicRealm + ", " + bearerChallenge
+		challenge := signedChallenge + ", " + bearerChallenge
 		auth := req.Header.Get("Authorization")
 		switch {
 		case strings.HasPrefix(auth, "Bearer "):
@@ -339,25 +339,51 @@ func (manager *Manager) visitorCheck(domain string) checkFunc {
 			}
 			return 0, ""
 
-		case strings.HasPrefix(auth, "Basic "):
-			user, pass, ok := parseBasic(auth[len("Basic "):])
-			if !ok {
-				return 401, basicRealm
-			}
-			key := domain + "|" + peer + "|" + user
-			if wait := manager.failures.blocked(key); wait > 0 {
-				return 429, ""
-			}
-			valid, err := manager.authManager.VerifyVisitorUser(domain, user, pass)
-			if err != nil || !valid {
-				manager.failures.fail(key)
-				return 401, basicRealm
-			}
-			manager.failures.reset(key)
-			return 0, ""
+		case strings.HasPrefix(auth, helper.VisitorSigScheme+" "):
+			return manager.checkSignedRequest(domain, peer, req)
 		}
 		return 401, challenge
 	}
+}
+
+// checkSignedRequest verifies a user's HMAC signature. The order matters: the
+// signature is checked before the nonce is recorded, so only someone who holds the
+// secret can use up nonces. A failure counts toward the limiter for this user and peer.
+func (manager *Manager) checkSignedRequest(domain, peer string, req *http.Request) (int, string) {
+	sig, ok := helper.ParseVisitorAuth(req.Header.Get("Authorization"))
+	if !ok {
+		return 401, signedChallenge
+	}
+	key := domain + "|" + peer + "|" + sig.User
+	if wait := manager.failures.blocked(key); wait > 0 {
+		return 429, ""
+	}
+	fail := func() (int, string) {
+		manager.failures.fail(key)
+		return 401, signedChallenge
+	}
+
+	ts, err := strconv.ParseInt(sig.Timestamp, 10, 64)
+	if err != nil {
+		return fail()
+	}
+	skew := time.Since(time.Unix(ts, 0))
+	if skew > helper.VisitorSigWindow || skew < -helper.VisitorSigWindow {
+		return fail()
+	}
+	secret, err := manager.authManager.VisitorUserSecret(domain, sig.User)
+	if err != nil {
+		return fail()
+	}
+	host := req.Host
+	if !helper.VerifyVisitor(secret, sig, req.Method, req.URL.RequestURI(), host) {
+		return fail()
+	}
+	if !manager.visitorNonces.take(domain+"|"+sig.User+"|"+sig.Nonce, time.Unix(ts, 0).Add(helper.VisitorSigWindow)) {
+		return fail()
+	}
+	manager.failures.reset(key)
+	return 0, ""
 }
 
 // tokenAllows reports whether a token may make this request: its method list and
@@ -379,15 +405,6 @@ func tokenAllows(rec *auth.VisitorToken, method, path string) bool {
 		}
 	}
 	return false
-}
-
-func parseBasic(encoded string) (string, string, bool) {
-	raw, err := base64.StdEncoding.DecodeString(encoded)
-	if err != nil {
-		return "", "", false
-	}
-	user, pass, ok := strings.Cut(string(raw), ":")
-	return user, pass, ok
 }
 
 // failureLimiter slows down guessing: after a few failed passwords for the same
@@ -499,4 +516,40 @@ func sourceAllowedFor(rec *auth.Domain, addr net.Addr) bool {
 func refuseSource(domain string, conn net.Conn) {
 	logger.Default.Info(fmt.Sprintf("visitor from %s refused by the access rules of domain %s", conn.RemoteAddr(), domain))
 	writeStatus(conn, 403, "")
+}
+
+// signedNonceCache remembers the nonces of accepted signed requests until their window
+// closes, so a captured request cannot be replayed inside that window.
+type signedNonceCache struct {
+	mu   sync.Mutex
+	seen map[string]time.Time
+}
+
+// maxNonces bounds memory. A full cache refuses new requests rather than forgetting
+// a nonce, which would reopen replay.
+const maxNonces = 100000
+
+// take records key until expires. It reports false if key is already recorded.
+func (c *signedNonceCache) take(key string, expires time.Time) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	now := time.Now()
+	if c.seen == nil {
+		c.seen = make(map[string]time.Time)
+	}
+	if until, ok := c.seen[key]; ok && now.Before(until) {
+		return false
+	}
+	if len(c.seen) >= maxNonces {
+		for k, until := range c.seen {
+			if !now.Before(until) {
+				delete(c.seen, k)
+			}
+		}
+		if len(c.seen) >= maxNonces {
+			return false
+		}
+	}
+	c.seen[key] = expires
+	return true
 }

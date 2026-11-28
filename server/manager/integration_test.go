@@ -20,6 +20,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/OnnaSoft/lipstick/helper"
 )
 
 // echoHTTP answers with the body of the request, and its hash in a header.
@@ -279,27 +281,71 @@ func TestIntegrationDTLSRejectsUntrustedService(t *testing.T) {
 	}
 }
 
-// Scenario: restricted domain. Without credentials 401; a user gets 200; a bad token 401.
+// Scenario: restricted domain. Without a signature 401; a signed request from a
+// user gets 200; a replayed request fails; a rotated secret stops the old one at once.
 func TestIntegrationRestrictedDomain(t *testing.T) {
 	st := startStack(t, stackOptions{})
 	defer st.close()
-	st.auth.AddVisitorUser(testDomain, "alice", "correct-horse-battery")
+	secret, err := st.auth.AddVisitorUser(testDomain, "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
 	st.runClient(clientConfig{ProxyPass: localHTTP(t), VisitorAuth: true})
 
 	c := st.visitorClient(t, st.caFile)
 	if resp, _ := getBody(t, c, "/hello"); resp.StatusCode != 401 || resp.Header.Get("WWW-Authenticate") == "" {
 		t.Fatalf("anonymous visit: %d", resp.StatusCode)
 	}
-	req, _ := http.NewRequest("GET", "https://"+testDomain+"/hello", nil)
-	req.SetBasicAuth("alice", "correct-horse-battery")
+
+	signed := func(secret string) *http.Request {
+		req, _ := http.NewRequest("GET", "https://"+testDomain+"/hello", nil)
+		if err := helper.SignRequest(req, "alice", secret, time.Now()); err != nil {
+			t.Fatal(err)
+		}
+		return req
+	}
+	req := signed(secret)
 	resp, err := c.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
 	resp.Body.Close()
 	if resp.StatusCode != 200 {
-		t.Fatalf("alice: %d", resp.StatusCode)
+		t.Fatalf("alice with her signature: %d", resp.StatusCode)
 	}
+
+	// The same signed request again: its nonce was already used.
+	again, err := c.Do(req.Clone(req.Context()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	again.Body.Close()
+	if again.StatusCode != 401 {
+		t.Fatalf("replayed request: %d, want 401", again.StatusCode)
+	}
+
+	// Rotating the secret ends the old one at once.
+	fresh, err := st.auth.RotateVisitorUser(testDomain, "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if old, err := c.Do(signed(secret)); err != nil {
+		t.Fatal(err)
+	} else {
+		old.Body.Close()
+		if old.StatusCode != 401 {
+			t.Fatalf("old secret after rotation: %d", old.StatusCode)
+		}
+	}
+	if ok, err := c.Do(signed(fresh)); err != nil {
+		t.Fatal(err)
+	} else {
+		ok.Body.Close()
+		if ok.StatusCode != 200 {
+			t.Fatalf("new secret: %d", ok.StatusCode)
+		}
+	}
+
 	req, _ = http.NewRequest("GET", "https://"+testDomain+"/hello", nil)
 	req.Header.Set("Authorization", "Bearer not-a-token")
 	if resp, err = c.Do(req); err != nil {
@@ -319,7 +365,7 @@ func TestIntegrationRestrictedDomain(t *testing.T) {
 func TestIntegrationRefusedOnPassthrough(t *testing.T) {
 	st := startStack(t, stackOptions{passthrough: true})
 	defer st.close()
-	st.auth.AddVisitorUser(testDomain, "alice", "correct-horse-battery")
+	st.auth.AddVisitorUser(testDomain, "alice")
 
 	bin := clientBinary(t)
 	cfg := writeClientConfig(t, st, clientConfig{ProxyPass: localHTTP(t), VisitorAuth: true})

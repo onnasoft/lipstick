@@ -303,7 +303,7 @@ La comparación es de enfoque, no de calidad. Cada herramienta resuelve un probl
 | Costo | Tu servidor y tu tiempo | Planes gratuitos y de pago |
 | Certificados | Los que pongas, o autofirmado | Gestionados por el proveedor |
 | Infraestructura global | Un servidor | Red de bordes en varias regiones |
-| Autenticación de visitantes (SSO, contraseña por URL) | No incluida | Incluida en varios planes |
+| Autenticación de visitantes (SSO, contraseña por URL) | Firma HMAC por usuario y tokens con permisos | Incluida en varios planes |
 | Inspección y reproducción de peticiones | No incluida | Incluida en varios planes |
 | Dominios propios | Sí, los que apunten a tu servidor | Sí, según el plan |
 | Control total de datos | Sí | Depende del contrato |
@@ -469,7 +469,7 @@ curl -sk -X POST https://127.0.0.1:5052/domains \
 
 ## Autenticación de visitantes
 
-Un dominio puede exigir credenciales a sus visitantes: un usuario con contraseña (HTTP Basic) o un token de API con permisos. Es opcional, y solo se activa si el cliente lo pide.
+Un dominio puede exigir credenciales a sus visitantes: **usuarios con firma HMAC** o **tokens de API con permisos**. Es opcional, y solo se activa si el cliente lo pide.
 
 **Cómo se activa.** El cliente pide la restricción con `visitor_auth: true` en su configuración. Desde ese momento el dominio queda **restringido para siempre**: aunque otros clientes no lo pidan, las visitas siguen exigiendo credenciales. Solo un administrador puede quitarlo (`PATCH /domains/:name` con `{"authLatched": false}`), y cada activación y cada desactivación quedan en el log.
 
@@ -478,16 +478,58 @@ Un dominio puede exigir credenciales a sus visitantes: un usuario con contraseñ
 - Un administrador no puede activar passthrough en un dominio restringido.
 - Un dominio restringido solo sirve HTTP(S). El tráfico TCP o UDP hacia ese dominio se rechaza.
 
-**Credenciales** (solo con la clave de admin):
-- `POST /domains/:name/visitor-users` con `{"username", "password"}`. La contraseña tiene al menos 12 caracteres y se guarda con argon2id.
-- `POST /domains/:name/visitor-tokens` con `{"name", "methods", "pathPrefixes"}`. El token se devuelve una sola vez; el servidor guarda solo su hash SHA-256. `methods` admite `"*"`, y `pathPrefixes` limita las rutas.
+**Usuarios con firma HMAC.** Cada usuario tiene un secreto propio. El secreto nunca viaja por la red: el visitante firma cada petición con él.
+
+Al crear el usuario (`POST /domains/:name/visitor-users` con `{"username"}`, solo con la clave de admin), la respuesta trae el secreto **una sola vez**. Guárdalo: si lo pierdes, rota el secreto con `POST /domains/:name/visitor-users/:username/rotate`. El anterior deja de funcionar al instante. El servidor necesita conocer el secreto para verificar la firma, por eso lo guarda; por eso la API nunca lo devuelve después.
+
+Cada petición lleva esta cabecera:
+
+```
+Authorization: LipstickHMAC user="alice", ts="1780000000", nonce="...", sig="..."
+```
+
+- `ts` es la hora Unix en segundos. Debe estar a menos de 2 minutos de la hora del servidor.
+- `nonce` es un valor aleatorio de un solo uso. Una petición repetida dentro de esos 2 minutos recibe `401`.
+- `sig` es HMAC-SHA256 con el secreto del usuario, en base64url sin relleno, sobre estas líneas separadas por saltos de línea:
+
+```
+LIPSTICK-HMAC-V1
+<método en mayúsculas>
+<ruta con query, tal como va en la petición>
+<Host en minúsculas>
+<usuario>
+<ts>
+<nonce>
+```
+
+Así la firma cubre el método, la ruta, el dominio y el momento. Una firma hecha para `/publico` no sirve para `/admin`. **El cuerpo de la petición no se firma**: lo protege el TLS, no la firma.
+
+Ejemplo en Python, sin dependencias:
+
+```python
+import base64, hashlib, hmac, os, time
+
+def lipstick_auth(secret, method, target, host, user):
+    ts = str(int(time.time()))
+    nonce = base64.urlsafe_b64encode(os.urandom(16)).rstrip(b"=").decode()
+    canonical = "\n".join(["LIPSTICK-HMAC-V1", method.upper(), target, host.lower(), user, ts, nonce])
+    digest = hmac.new(secret.encode(), canonical.encode(), hashlib.sha256).digest()
+    sig = base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
+    return f'LipstickHMAC user="{user}", ts="{ts}", nonce="{nonce}", sig="{sig}"'
+
+# Uso: cabecera Authorization para GET /hello en robot.example.com
+header = lipstick_auth(SECRET, "GET", "/hello", "robot.example.com", "alice")
+```
+
+**Tokens de API** (solo con la clave de admin):
+- `POST /domains/:name/visitor-tokens` con `{"name", "methods", "pathPrefixes"}`. El token se devuelve una sola vez y se usa como `Authorization: Bearer <token>`. El servidor guarda solo su hash SHA-256. `methods` admite `"*"`, y `pathPrefixes` limita las rutas. Es la opción para quien quiere el máximo rendimiento, porque no requiere firmar cada petición, o para limitar el acceso a rutas concretas.
 - `DELETE` de usuarios y tokens. La revocación es inmediata.
 
-**Cómo se verifica.** El servidor lee cada petición de la conexión, no solo la primera, porque una conexión persistente puede llevar varias. Cada petición se verifica antes de llegar al servicio. Las respuestas se devuelven en el mismo orden que las peticiones. Una petición sin credenciales válidas recibe `401`; un token sin permiso para ese método o esa ruta recibe `403`.
+**Cómo se verifica.** El servidor lee cada petición de la conexión, no solo la primera, porque una conexión persistente puede llevar varias. Cada petición se verifica antes de llegar al servicio. Las respuestas se devuelven en el mismo orden que las peticiones. Sin credenciales válidas, `401`; un token sin permiso para ese método o esa ruta, `403`.
 
-**Fuerza bruta.** Después de cinco contraseñas incorrectas para el mismo usuario, desde la misma IP, el intento espera. La espera se duplica en cada fallo y llega a 15 minutos como máximo. Mientras espera, la respuesta es `429`.
+**Fuerza bruta.** Después de cinco firmas incorrectas del mismo usuario desde la misma IP, el intento espera. La espera se duplica en cada fallo y llega a 15 minutos como máximo. Mientras espera, la respuesta es `429`.
 
-**Lo que no cubre todavía.** Un WebSocket se verifica en su petición de upgrade, y después pasa sin verificar cada mensaje. Los usuarios no tienen permisos por ruta: cualquier usuario válido accede a todo el dominio. Las credenciales no se cachean, así que cada petición Basic paga la verificación de argon2id.
+**Lo que no cubre todavía.** Un WebSocket se verifica en su petición de upgrade, y después pasa sin verificar cada mensaje. Los usuarios no tienen permisos por ruta: un usuario con firma válida accede a todo el dominio; para limitar rutas, usa un token. El cuerpo de la petición no está firmado.
 
 ## Reglas de acceso por red (CIDR)
 
@@ -507,6 +549,24 @@ curl -sk -X PATCH https://127.0.0.1:5052/domains/mi-dominio \
 - Un cambio de reglas desconecta al cliente del dominio, que se reconecta en unos segundos, como con cualquier otro cambio del dominio.
 - **Importante con IPv6:** `localhost` puede resolverse a `::1`. Si tu regla es solo IPv4 (`127.0.0.1`), las visitas por `localhost` vía IPv6 responden `403`. Incluye `::1` si lo necesitas.
 - **Detrás de un proxy o balanceador** las reglas ven la dirección del balanceador, no la del visitante original. Esta versión no lee `X-Forwarded-For`, a propósito: confiar en esa cabecera permitiría falsificar el origen.
+
+## API de administración (Swagger)
+
+La referencia completa del API de administración está en Swagger UI:
+
+- Abre **https://127.0.0.1:5052/swagger/index.html** (con la configuración de ejemplo, solo desde la misma máquina).
+- La especificación OpenAPI está en `/swagger/doc.json`.
+
+**Autenticación:** las rutas que crean, cambian o borran datos, y las listas de usuarios y tokens de visitante, piden la clave de administración en la cabecera `Authorization`, sin prefijo `Bearer`. En Swagger UI usa el botón **Authorize** y pega la `admin_secret_key` de `server/config.yml`. Las lecturas de dominios, estadísticas y el registro de peticiones no piden clave; solo son seguras mientras el puerto no sea alcanzable desde otras máquinas.
+
+**Regenerar la documentación** después de cambiar una anotación en `server/admin/routes.go`:
+
+```bash
+go install github.com/swaggo/swag/cmd/swag@v1.16.4
+swag init -g swagger.go -d server/admin --output server/admin/docs --outputTypes go,json,yaml --parseDependency --parseInternal
+```
+
+La prueba `server/admin/swagger_test.go` comprueba que la especificación declara la clave en las rutas que cambian datos y no la declara en las de lectura.
 
 ## Cluster (varios servidores)
 

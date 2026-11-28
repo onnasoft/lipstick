@@ -1,0 +1,706 @@
+basePath: /
+definitions:
+  admin.domainView:
+    properties:
+      allowMultipleConnections:
+        type: boolean
+      allowedCidrs:
+        items:
+          type: string
+        type: array
+      authLatched:
+        type: boolean
+      id:
+        type: integer
+      name:
+        type: string
+      passthrough:
+        type: boolean
+    type: object
+  admin.visitorTokenBody:
+    properties:
+      methods:
+        items:
+          type: string
+        type: array
+      name:
+        type: string
+      pathPrefixes:
+        items:
+          type: string
+        type: array
+    type: object
+  admin.visitorUserBody:
+    properties:
+      username:
+        type: string
+    type: object
+  manager.DomainStats:
+    properties:
+      activeSessions:
+        type: integer
+      bytesSinceStart:
+        type: integer
+      clients:
+        type: integer
+      domain:
+        type: string
+      intranetPorts:
+        items:
+          type: string
+        type: array
+      pendingVisitors:
+        type: integer
+      status:
+        description: '"active", "idle" or "unresponsive"'
+        type: string
+    type: object
+  manager.RequestRecord:
+    properties:
+      domain:
+        type: string
+      durationMs:
+        type: integer
+      method:
+        type: string
+      path:
+        type: string
+      port:
+        description: proxy port or an intranet port; 0 when unknown
+        type: integer
+      responseBytes:
+        type: integer
+      status:
+        type: integer
+      time:
+        type: string
+    type: object
+info:
+  contact: {}
+  description: |-
+    Administration of a Lipstick server: domains, live state, request log, visitor users and API tokens, and access rules.
+
+    The API is served over TLS. The example configuration binds it to 127.0.0.1, so only the machine itself can reach it. Reads of domains, statistics and the request log need no key, which is safe only while the port is not reachable from other machines. Every change needs the admin key.
+
+    Use the Authorize button and send the admin key from admin_secret_key in server/config.yml. It is sent as it is, without a "Bearer" prefix.
+  title: Lipstick Admin API
+  version: "1.0"
+paths:
+  /:
+    get:
+      description: HTML panel that reads /stats, /requests and the daily traffic.
+        Needs no key.
+      produces:
+      - text/html
+      responses:
+        "200":
+          description: HTML page
+          schema:
+            type: string
+      summary: Admin panel
+      tags:
+      - system
+  /domains:
+    get:
+      description: Every domain with its policies. Client keys are never returned.
+        Needs no key.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/admin.domainView'
+            type: array
+      summary: List domains
+      tags:
+      - domains
+    post:
+      consumes:
+      - application/json
+      description: Registers a domain with the key its client will use. Multiple connections
+        are allowed unless allowMultipleConnections is false. allowedCidrs is a list
+        of networks or addresses; empty means no restriction.
+      parameters:
+      - description: 'Domain: name, apiKey, allowMultipleConnections, passthrough,
+          allowedCidrs'
+        in: body
+        name: domain
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - AdminKey: []
+      summary: Create a domain
+      tags:
+      - domains
+  /domains/{domainName}:
+    delete:
+      description: Removes the domain and disconnects its clients.
+      parameters:
+      - description: Domain name
+        in: path
+        name: domainName
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - AdminKey: []
+      summary: Delete a domain
+      tags:
+      - domains
+    get:
+      description: One domain with its policies. The client key is never returned.
+        Needs no key.
+      parameters:
+      - description: Domain name
+        in: path
+        name: domainName
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/admin.domainView'
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get one domain
+      tags:
+      - domains
+    patch:
+      consumes:
+      - application/json
+      description: 'Changes any of: apiKey, allowMultipleConnections, passthrough
+        (not while the domain requires visitor auth), allowedCidrs (an empty list
+        removes the rules), authLatched (only false: clearing the restricted mode).
+        Clients of the domain are disconnected and reconnect with the new policy.'
+      parameters:
+      - description: Domain name
+        in: path
+        name: domainName
+        required: true
+        type: string
+      - description: Fields to change
+        in: body
+        name: changes
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Passthrough would conflict with visitor auth
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - AdminKey: []
+      summary: Change a domain
+      tags:
+      - domains
+  /domains/{domainName}/traffic:
+    get:
+      description: Bytes transferred per day between two dates, inclusive. Needs no
+        key.
+      parameters:
+      - description: Domain name
+        in: path
+        name: domainName
+        required: true
+        type: string
+      - description: First day, YYYY-MM-DD
+        in: query
+        name: from
+        required: true
+        type: string
+      - description: Last day, YYYY-MM-DD
+        in: query
+        name: to
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Daily traffic of a domain
+      tags:
+      - domains
+  /domains/{domainName}/visitor-tokens:
+    get:
+      description: 'Tokens of a domain without their values: id, name, methods, path
+        prefixes, creation time, and whether they are revoked.'
+      parameters:
+      - description: Domain name
+        in: path
+        name: domainName
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              additionalProperties: true
+              type: object
+            type: array
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - AdminKey: []
+      summary: List API tokens
+      tags:
+      - visitor-auth
+    post:
+      consumes:
+      - application/json
+      description: 'Creates a Bearer token with permissions: methods (or "*") and
+        path prefixes. The token value is returned once; only its SHA-256 hash is
+        stored.'
+      parameters:
+      - description: Domain name
+        in: path
+        name: domainName
+        required: true
+        type: string
+      - description: Name, methods, pathPrefixes
+        in: body
+        name: token
+        required: true
+        schema:
+          $ref: '#/definitions/admin.visitorTokenBody'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: token shown once
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - AdminKey: []
+      summary: Create an API token
+      tags:
+      - visitor-auth
+  /domains/{domainName}/visitor-tokens/{id}:
+    delete:
+      description: The token stops working at once.
+      parameters:
+      - description: Domain name
+        in: path
+        name: domainName
+        required: true
+        type: string
+      - description: Token id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - AdminKey: []
+      summary: Revoke an API token
+      tags:
+      - visitor-auth
+  /domains/{domainName}/visitor-users:
+    get:
+      description: Usernames of a domain. Passwords are never returned.
+      parameters:
+      - description: Domain name
+        in: path
+        name: domainName
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              type: string
+            type: array
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - AdminKey: []
+      summary: List visitor users
+      tags:
+      - visitor-auth
+    post:
+      consumes:
+      - application/json
+      description: 'Creates a user of a restricted domain with a secret of its own.
+        The response is the only time the secret is shown: store it, the user needs
+        it to sign requests. The user signs each request with HMAC-SHA256 and sends
+        it in the Authorization header as LipstickHMAC user, ts, nonce and sig. Usernames:
+        1 to 64 letters, digits, dots, underscores, at signs or hyphens.'
+      parameters:
+      - description: Domain name
+        in: path
+        name: domainName
+        required: true
+        type: string
+      - description: Username
+        in: body
+        name: user
+        required: true
+        schema:
+          $ref: '#/definitions/admin.visitorUserBody'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: username and secret, shown once
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - AdminKey: []
+      summary: Add a visitor user
+      tags:
+      - visitor-auth
+  /domains/{domainName}/visitor-users/{username}:
+    delete:
+      description: |-
+        Replaces the secret of a user and returns the new one, shown once. The old secret stops working at once.
+        Removes the user; their access ends at once.
+      parameters:
+      - description: Domain name
+        in: path
+        name: domainName
+        required: true
+        type: string
+      - description: Username
+        in: path
+        name: username
+        required: true
+        type: string
+      - description: Domain name
+        in: path
+        name: domainName
+        required: true
+        type: string
+      - description: Username
+        in: path
+        name: username
+        required: true
+        type: string
+      produces:
+      - application/json
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - AdminKey: []
+      - AdminKey: []
+      summary: Delete a visitor user
+      tags:
+      - visitor-auth
+      - visitor-auth
+  /domains/{domainName}/visitor-users/{username}/rotate:
+    post:
+      description: |-
+        Replaces the secret of a user and returns the new one, shown once. The old secret stops working at once.
+        Removes the user; their access ends at once.
+      parameters:
+      - description: Domain name
+        in: path
+        name: domainName
+        required: true
+        type: string
+      - description: Username
+        in: path
+        name: username
+        required: true
+        type: string
+      - description: Domain name
+        in: path
+        name: domainName
+        required: true
+        type: string
+      - description: Username
+        in: path
+        name: username
+        required: true
+        type: string
+      produces:
+      - application/json
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - AdminKey: []
+      - AdminKey: []
+      summary: Delete a visitor user
+      tags:
+      - visitor-auth
+      - visitor-auth
+  /health:
+    get:
+      description: Reports that the admin API is up. Needs no key.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Health check
+      tags:
+      - system
+  /requests:
+    get:
+      description: 'Finished HTTP requests, newest first: domain, port the visitor
+        came in on, method, path without query, status, duration and response size.
+        Headers and bodies are never stored. Without from or to, the newest requests
+        come from memory; with a time range they come from the database (kept 7 days).
+        Needs no key.'
+      parameters:
+      - description: Only this domain
+        in: query
+        name: domain
+        type: string
+      - description: 'Only this port: 5050 is the proxy, others are intranet ports'
+        in: query
+        name: port
+        type: integer
+      - default: 100
+        description: How many, 1 to 500
+        in: query
+        name: limit
+        type: integer
+      - description: 'Start of the range: RFC 3339 or YYYY-MM-DD'
+        in: query
+        name: from
+        type: string
+      - description: 'End of the range: RFC 3339 or YYYY-MM-DD (a date includes the
+          whole day)'
+        in: query
+        name: to
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/manager.RequestRecord'
+            type: array
+        "400":
+          description: Bad parameter, or a range with no database
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Recent HTTP requests
+      tags:
+      - requests
+  /stats:
+    get:
+      description: Clients, active sessions, pending visitors, bytes since start,
+        and intranet ports for each domain with a hub. Needs no key.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/manager.DomainStats'
+            type: array
+      summary: Live state of every domain
+      tags:
+      - domains
+schemes:
+- https
+securityDefinitions:
+  AdminKey:
+    description: Admin key, sent as it is (no "Bearer" prefix).
+    in: header
+    name: Authorization
+    type: apiKey
+swagger: "2.0"

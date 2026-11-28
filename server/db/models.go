@@ -18,14 +18,15 @@ type Domain struct {
 	AllowedCIDRs string `gorm:"column:allowed_cidrs;not null;default:''"`
 }
 
-// VisitorUser is a username and password that can access a restricted domain.
-// Only a hash of the password is stored.
+// VisitorUser is a user of a restricted domain. Each user has a secret of its own,
+// which the server needs to verify the user's signed requests, so it is stored.
+// The secret is shown once, when the user is created or rotated.
 type VisitorUser struct {
-	ID           uint   `gorm:"primary_key"`
-	DomainID     uint   `gorm:"not null;index:idx_visitor_user,unique,priority:1"`
-	Username     string `gorm:"not null;index:idx_visitor_user,unique,priority:2"`
-	PasswordHash string `gorm:"not null"`
-	CreatedAt    time.Time
+	ID        uint   `gorm:"primary_key"`
+	DomainID  uint   `gorm:"not null;index:idx_visitor_user,unique,priority:1"`
+	Username  string `gorm:"not null;index:idx_visitor_user,unique,priority:2"`
+	Secret    string `gorm:"not null;default:''"`
+	CreatedAt time.Time
 }
 
 // VisitorToken is an API token for a restricted domain. Only a hash of the token

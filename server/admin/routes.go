@@ -13,11 +13,14 @@ import (
 	"time"
 
 	"github.com/OnnaSoft/lipstick/logger"
+	"github.com/OnnaSoft/lipstick/server/admin/docs"
 	"github.com/OnnaSoft/lipstick/server/auth"
 	"github.com/OnnaSoft/lipstick/server/config"
 	"github.com/OnnaSoft/lipstick/server/db"
 	"github.com/OnnaSoft/lipstick/server/manager"
 	"github.com/gin-gonic/gin"
+	swaggerFiles "github.com/swaggo/files"
+	ginSwagger "github.com/swaggo/gin-swagger"
 )
 
 type router struct {
@@ -33,6 +36,9 @@ func configureRouter(admin *Admin) {
 	r.GET("/", router.ui)
 	r.GET("/ui", func(c *gin.Context) { c.Redirect(http.StatusFound, "/") })
 	r.GET("/requests", router.getRequests)
+	// The API reference and its "Authorize" button. Read-only, like the other GET routes.
+	docs.SwaggerInfo.BasePath = "/"
+	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 
 	r.GET("/domains", router.getDomains)
 	const domainNamePath = "/domains/:domainName"
@@ -46,6 +52,7 @@ func configureRouter(admin *Admin) {
 	// Visitor authentication: users and API tokens of a domain.
 	r.POST(domainNamePath+"/visitor-users", router.addVisitorUser)
 	r.GET(domainNamePath+"/visitor-users", router.listVisitorUsers)
+	r.POST(domainNamePath+"/visitor-users/:username/rotate", router.rotateVisitorUser)
 	r.DELETE(domainNamePath+"/visitor-users/:username", router.deleteVisitorUser)
 	r.POST(domainNamePath+"/visitor-tokens", router.addVisitorToken)
 	r.GET(domainNamePath+"/visitor-tokens", router.listVisitorTokens)
@@ -109,6 +116,12 @@ func writeLookupError(c *gin.Context, err error) {
 }
 
 // getDomains is read-only and needs no key; see the note on authorized.
+// @Summary List domains
+// @Description Every domain with its policies. Client keys are never returned. Needs no key.
+// @Tags domains
+// @Produce json
+// @Success 200 {array} domainView
+// @Router /domains [get]
 func (r *router) getDomains(c *gin.Context) {
 
 	domains, err := r.admin.authManager.GetDomains()
@@ -125,6 +138,14 @@ func (r *router) getDomains(c *gin.Context) {
 }
 
 // getDomain is read-only and needs no key; see the note on authorized.
+// @Summary Get one domain
+// @Description One domain with its policies. The client key is never returned. Needs no key.
+// @Tags domains
+// @Produce json
+// @Param domainName path string true "Domain name"
+// @Success 200 {object} domainView
+// @Failure 404 {object} map[string]string
+// @Router /domains/{domainName} [get]
 func (r *router) getDomain(c *gin.Context) {
 
 	domainName := c.Param("domainName")
@@ -137,6 +158,17 @@ func (r *router) getDomain(c *gin.Context) {
 	c.JSON(http.StatusOK, toDomainView(domain))
 }
 
+// @Summary Create a domain
+// @Description Registers a domain with the key its client will use. Multiple connections are allowed unless allowMultipleConnections is false. allowedCidrs is a list of networks or addresses; empty means no restriction.
+// @Tags domains
+// @Security AdminKey
+// @Accept json
+// @Produce json
+// @Param domain body object true "Domain: name, apiKey, allowMultipleConnections, passthrough, allowedCidrs"
+// @Success 200 {object} map[string]string
+// @Failure 400 {object} map[string]string
+// @Failure 401 {object} map[string]string
+// @Router /domains [post]
 func (r *router) addDomain(c *gin.Context) {
 	if !r.authorized(c) {
 		return
@@ -174,6 +206,20 @@ func (r *router) addDomain(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
 
+// @Summary Change a domain
+// @Description Changes any of: apiKey, allowMultipleConnections, passthrough (not while the domain requires visitor auth), allowedCidrs (an empty list removes the rules), authLatched (only false: clearing the restricted mode). Clients of the domain are disconnected and reconnect with the new policy.
+// @Tags domains
+// @Security AdminKey
+// @Accept json
+// @Produce json
+// @Param domainName path string true "Domain name"
+// @Param changes body object true "Fields to change"
+// @Success 200 {object} map[string]string
+// @Failure 400 {object} map[string]string
+// @Failure 401 {object} map[string]string
+// @Failure 404 {object} map[string]string
+// @Failure 409 {object} map[string]string "Passthrough would conflict with visitor auth"
+// @Router /domains/{domainName} [patch]
 func (r *router) updateDomain(c *gin.Context) {
 	if !r.authorized(c) {
 		return
@@ -264,6 +310,16 @@ func (r *router) updateDomain(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
 
+// @Summary Delete a domain
+// @Description Removes the domain and disconnects its clients.
+// @Tags domains
+// @Security AdminKey
+// @Produce json
+// @Param domainName path string true "Domain name"
+// @Success 200 {object} map[string]string
+// @Failure 401 {object} map[string]string
+// @Failure 404 {object} map[string]string
+// @Router /domains/{domainName} [delete]
 func (r *router) deleteDomain(c *gin.Context) {
 	if !r.authorized(c) {
 		return
@@ -285,6 +341,12 @@ func (r *router) deleteDomain(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
 
+// @Summary Health check
+// @Description Reports that the admin API is up. Needs no key.
+// @Tags system
+// @Produce json
+// @Success 200 {object} map[string]string
+// @Router /health [get]
 func (r *router) health(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
@@ -292,6 +354,16 @@ func (r *router) health(c *gin.Context) {
 // getTraffic returns the daily usage of one domain between two dates, both in
 // YYYY-MM-DD format. It is in the admin API because it reveals per-domain usage.
 // getTraffic is read-only and needs no key; see the note on authorized.
+// @Summary Daily traffic of a domain
+// @Description Bytes transferred per day between two dates, inclusive. Needs no key.
+// @Tags domains
+// @Produce json
+// @Param domainName path string true "Domain name"
+// @Param from query string true "First day, YYYY-MM-DD"
+// @Param to query string true "Last day, YYYY-MM-DD"
+// @Success 200 {object} map[string]interface{}
+// @Failure 400 {object} map[string]string
+// @Router /domains/{domainName}/traffic [get]
 func (r *router) getTraffic(c *gin.Context) {
 	domainName := c.Param("domainName")
 	fromParam := c.Query("from")
@@ -341,6 +413,12 @@ func (r *router) getTraffic(c *gin.Context) {
 // getStats returns the live state of every domain: clients, sessions, pending
 // visitors, bytes since start, and intranet ports.
 // getStats is read-only and needs no key; see the note on authorized.
+// @Summary Live state of every domain
+// @Description Clients, active sessions, pending visitors, bytes since start, and intranet ports for each domain with a hub. Needs no key.
+// @Tags domains
+// @Produce json
+// @Success 200 {array} manager.DomainStats
+// @Router /stats [get]
 func (r *router) getStats(c *gin.Context) {
 	if r.admin.stats == nil {
 		c.JSON(http.StatusOK, []manager.DomainStats{})
@@ -351,6 +429,12 @@ func (r *router) getStats(c *gin.Context) {
 
 // ui serves the panel. The page holds no data: it asks for the admin key and
 // then calls /stats with it, so nothing sensitive is in the HTML itself.
+// @Summary Admin panel
+// @Description HTML panel that reads /stats, /requests and the daily traffic. Needs no key.
+// @Tags system
+// @Produce html
+// @Success 200 {string} string "HTML page"
+// @Router / [get]
 func (r *router) ui(c *gin.Context) {
 	c.Header("Content-Security-Policy", "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'")
 	c.Header("X-Content-Type-Options", "nosniff")
@@ -366,6 +450,18 @@ func (r *router) ui(c *gin.Context) {
 // that whole day). Without a time range the newest requests come from memory.
 // limit defaults to 100 and is capped at 500.
 // getRequests is read-only and needs no key; see the note on authorized.
+// @Summary Recent HTTP requests
+// @Description Finished HTTP requests, newest first: domain, port the visitor came in on, method, path without query, status, duration and response size. Headers and bodies are never stored. Without from or to, the newest requests come from memory; with a time range they come from the database (kept 7 days). Needs no key.
+// @Tags requests
+// @Produce json
+// @Param domain query string false "Only this domain"
+// @Param port query int false "Only this port: 5050 is the proxy, others are intranet ports"
+// @Param limit query int false "How many, 1 to 500" default(100)
+// @Param from query string false "Start of the range: RFC 3339 or YYYY-MM-DD"
+// @Param to query string false "End of the range: RFC 3339 or YYYY-MM-DD (a date includes the whole day)"
+// @Success 200 {array} manager.RequestRecord
+// @Failure 400 {object} map[string]string "Bad parameter, or a range with no database"
+// @Router /requests [get]
 func (r *router) getRequests(c *gin.Context) {
 	q := manager.RequestQuery{Domain: c.Query("domain"), Limit: 100}
 	if raw := c.Query("port"); raw != "" {
@@ -447,9 +543,20 @@ func (r *router) visitorDomain(c *gin.Context) (string, bool) {
 
 type visitorUserBody struct {
 	Username string `json:"username"`
-	Password string `json:"password"`
 }
 
+// @Summary Add a visitor user
+// @Description Creates a user of a restricted domain with a secret of its own. The response is the only time the secret is shown: store it, the user needs it to sign requests. The user signs each request with HMAC-SHA256 and sends it in the Authorization header as LipstickHMAC user, ts, nonce and sig. Usernames: 1 to 64 letters, digits, dots, underscores, at signs or hyphens.
+// @Tags visitor-auth
+// @Security AdminKey
+// @Accept json
+// @Produce json
+// @Param domainName path string true "Domain name"
+// @Param user body visitorUserBody true "Username"
+// @Success 200 {object} map[string]string "username and secret, shown once"
+// @Failure 400 {object} map[string]string
+// @Failure 401 {object} map[string]string
+// @Router /domains/{domainName}/visitor-users [post]
 func (r *router) addVisitorUser(c *gin.Context) {
 	name, ok := r.visitorDomain(c)
 	if !ok {
@@ -460,13 +567,43 @@ func (r *router) addVisitorUser(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	if err := r.admin.authManager.AddVisitorUser(name, body.Username, body.Password); err != nil {
+	secret, err := r.admin.authManager.AddVisitorUser(name, body.Username)
+	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"status": "ok", "username": body.Username})
+	// The secret is shown only in this response.
+	c.JSON(http.StatusOK, gin.H{"status": "ok", "username": body.Username, "secret": secret})
 }
 
+// rotateVisitorUser replaces a user's secret. The old one stops working at once.
+func (r *router) rotateVisitorUser(c *gin.Context) {
+	name, ok := r.visitorDomain(c)
+	if !ok {
+		return
+	}
+	username := c.Param("username")
+	secret, err := r.admin.authManager.RotateVisitorUser(name, username)
+	if errors.Is(err, auth.ErrUserNotFound) {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "unable to rotate secret"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "ok", "username": username, "secret": secret})
+}
+
+// @Summary List visitor users
+// @Description Usernames of a domain. Passwords are never returned.
+// @Tags visitor-auth
+// @Security AdminKey
+// @Produce json
+// @Param domainName path string true "Domain name"
+// @Success 200 {array} string
+// @Failure 401 {object} map[string]string
+// @Router /domains/{domainName}/visitor-users [get]
 func (r *router) listVisitorUsers(c *gin.Context) {
 	name, ok := r.visitorDomain(c)
 	if !ok {
@@ -480,6 +617,28 @@ func (r *router) listVisitorUsers(c *gin.Context) {
 	c.JSON(http.StatusOK, users)
 }
 
+// @Summary Rotate a visitor user's secret
+// @Description Replaces the secret of a user and returns the new one, shown once. The old secret stops working at once.
+// @Tags visitor-auth
+// @Security AdminKey
+// @Produce json
+// @Param domainName path string true "Domain name"
+// @Param username path string true "Username"
+// @Success 200 {object} map[string]string "username and new secret, shown once"
+// @Failure 401 {object} map[string]string
+// @Failure 404 {object} map[string]string
+// @Router /domains/{domainName}/visitor-users/{username}/rotate [post]
+// @Summary Delete a visitor user
+// @Description Removes the user; their access ends at once.
+// @Tags visitor-auth
+// @Security AdminKey
+// @Produce json
+// @Param domainName path string true "Domain name"
+// @Param username path string true "Username"
+// @Success 200 {object} map[string]string
+// @Failure 401 {object} map[string]string
+// @Failure 404 {object} map[string]string
+// @Router /domains/{domainName}/visitor-users/{username} [delete]
 func (r *router) deleteVisitorUser(c *gin.Context) {
 	name, ok := r.visitorDomain(c)
 	if !ok {
@@ -499,6 +658,18 @@ type visitorTokenBody struct {
 }
 
 // addVisitorToken returns the token once. It is not stored and cannot be read again.
+// @Summary Create an API token
+// @Description Creates a Bearer token with permissions: methods (or "*") and path prefixes. The token value is returned once; only its SHA-256 hash is stored.
+// @Tags visitor-auth
+// @Security AdminKey
+// @Accept json
+// @Produce json
+// @Param domainName path string true "Domain name"
+// @Param token body visitorTokenBody true "Name, methods, pathPrefixes"
+// @Success 200 {object} map[string]string "token shown once"
+// @Failure 400 {object} map[string]string
+// @Failure 401 {object} map[string]string
+// @Router /domains/{domainName}/visitor-tokens [post]
 func (r *router) addVisitorToken(c *gin.Context) {
 	name, ok := r.visitorDomain(c)
 	if !ok {
@@ -517,6 +688,15 @@ func (r *router) addVisitorToken(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"name": body.Name, "token": token, "note": "shown once; store it now"})
 }
 
+// @Summary List API tokens
+// @Description Tokens of a domain without their values: id, name, methods, path prefixes, creation time, and whether they are revoked.
+// @Tags visitor-auth
+// @Security AdminKey
+// @Produce json
+// @Param domainName path string true "Domain name"
+// @Success 200 {array} map[string]interface{}
+// @Failure 401 {object} map[string]string
+// @Router /domains/{domainName}/visitor-tokens [get]
 func (r *router) listVisitorTokens(c *gin.Context) {
 	name, ok := r.visitorDomain(c)
 	if !ok {
@@ -537,6 +717,18 @@ func (r *router) listVisitorTokens(c *gin.Context) {
 	c.JSON(http.StatusOK, out)
 }
 
+// @Summary Revoke an API token
+// @Description The token stops working at once.
+// @Tags visitor-auth
+// @Security AdminKey
+// @Produce json
+// @Param domainName path string true "Domain name"
+// @Param id path int true "Token id"
+// @Success 200 {object} map[string]string
+// @Failure 400 {object} map[string]string
+// @Failure 401 {object} map[string]string
+// @Failure 404 {object} map[string]string
+// @Router /domains/{domainName}/visitor-tokens/{id} [delete]
 func (r *router) revokeVisitorToken(c *gin.Context) {
 	name, ok := r.visitorDomain(c)
 	if !ok {

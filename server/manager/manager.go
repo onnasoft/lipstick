@@ -76,8 +76,9 @@ type Manager struct {
 	reqlog         *RequestLog
 	persist        *persister
 	nonces         nonceCache
-	cluster        *cluster       // nil on a single server
-	failures       failureLimiter // failed visitor logins, see guard.go
+	cluster        *cluster         // nil on a single server
+	failures       failureLimiter   // failed visitor logins, see guard.go
+	visitorNonces  signedNonceCache // nonces of signed visitor requests, see guard.go
 }
 
 // requestLogSize is how many finished requests the admin panel keeps in memory.

@@ -3,66 +3,39 @@ package auth
 import (
 	"crypto/rand"
 	"crypto/sha256"
-	"crypto/subtle"
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
-	"fmt"
 	"strings"
 	"time"
 
+	"github.com/OnnaSoft/lipstick/helper"
 	"github.com/OnnaSoft/lipstick/server/db"
-	"golang.org/x/crypto/argon2"
 )
 
-// Visitor authentication: users with passwords and API tokens with permissions,
-// per domain. Passwords are hashed with argon2id. Tokens are 256 random bits,
-// shown once, and stored only as a SHA-256 hash.
+// Visitor authentication, per domain:
+//   - users, each with a secret of its own. A signed request (see helper/visitorsig.go)
+//     proves the user knows the secret without sending it. The secret is kept because
+//     the server needs it to verify the signature.
+//   - API tokens with permissions. Only their SHA-256 hash is kept.
 
 // VisitorToken is the stored token record. The token itself is never kept.
 type VisitorToken = db.VisitorToken
 
 var (
-	ErrInvalidUsername = errors.New("username must be 1 to 64 characters with no spaces or colons")
-	ErrWeakPassword    = errors.New("password must be at least 12 characters")
+	ErrInvalidUsername = errors.New("username must be 1 to 64 letters, digits, dots, underscores, at signs or hyphens")
 	ErrUserExists      = errors.New("a visitor user with that name already exists")
 	ErrUserNotFound    = errors.New("visitor user not found")
 	ErrTokenNotFound   = errors.New("visitor token not found")
 )
 
-// Argon2id parameters follow the OWASP minimum for argon2id.
-const (
-	argonTime    = 2
-	argonMemory  = 19 * 1024
-	argonThreads = 1
-	argonKeyLen  = 32
-	argonSaltLen = 16
-)
-
-func hashPassword(password string) (string, error) {
-	salt := make([]byte, argonSaltLen)
-	if _, err := rand.Read(salt); err != nil {
+// newSecret returns a fresh 256-bit secret, base64url encoded.
+func newSecret() (string, error) {
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
 		return "", err
 	}
-	key := argon2.IDKey([]byte(password), salt, argonTime, argonMemory, argonThreads, argonKeyLen)
-	return fmt.Sprintf("argon2id$%s$%s", base64.RawStdEncoding.EncodeToString(salt), base64.RawStdEncoding.EncodeToString(key)), nil
-}
-
-func verifyPassword(encoded, password string) bool {
-	parts := strings.Split(encoded, "$")
-	if len(parts) != 3 || parts[0] != "argon2id" {
-		return false
-	}
-	salt, err := base64.RawStdEncoding.DecodeString(parts[1])
-	if err != nil {
-		return false
-	}
-	want, err := base64.RawStdEncoding.DecodeString(parts[2])
-	if err != nil {
-		return false
-	}
-	got := argon2.IDKey([]byte(password), salt, argonTime, argonMemory, argonThreads, uint32(len(want)))
-	return subtle.ConstantTimeCompare(got, want) == 1
+	return base64.RawURLEncoding.EncodeToString(raw), nil
 }
 
 // HashToken returns the value stored for a token.
@@ -79,27 +52,46 @@ func (p *PostgresAuthManager) domainID(domain string) (uint, error) {
 	return d.ID, nil
 }
 
-// AddVisitorUser creates a user for a domain, with a hashed password.
-func (p *PostgresAuthManager) AddVisitorUser(domain, username, password string) error {
-	if username == "" || len(username) > 64 || strings.ContainsAny(username, " :") {
-		return ErrInvalidUsername
-	}
-	if len(password) < 12 {
-		return ErrWeakPassword
+// AddVisitorUser creates a user for a domain with a new secret, and returns the
+// secret. The caller must show it now: the user needs it to sign requests.
+func (p *PostgresAuthManager) AddVisitorUser(domain, username string) (string, error) {
+	if !helper.ValidVisitorUsername(username) {
+		return "", ErrInvalidUsername
 	}
 	id, err := p.domainID(domain)
 	if err != nil {
-		return err
+		return "", err
 	}
-	hash, err := hashPassword(password)
+	secret, err := newSecret()
 	if err != nil {
-		return err
+		return "", err
 	}
-	u := db.VisitorUser{DomainID: id, Username: username, PasswordHash: hash, CreatedAt: time.Now()}
+	u := db.VisitorUser{DomainID: id, Username: username, Secret: secret, CreatedAt: time.Now()}
 	if err := p.db.Create(&u).Error; err != nil {
-		return ErrUserExists
+		return "", ErrUserExists
 	}
-	return nil
+	return secret, nil
+}
+
+// RotateVisitorUser replaces a user's secret and returns the new one. The old
+// secret stops working at once.
+func (p *PostgresAuthManager) RotateVisitorUser(domain, username string) (string, error) {
+	id, err := p.domainID(domain)
+	if err != nil {
+		return "", err
+	}
+	secret, err := newSecret()
+	if err != nil {
+		return "", err
+	}
+	res := p.db.Model(&db.VisitorUser{}).Where("domain_id = ? AND username = ?", id, username).Update("secret", secret)
+	if res.Error != nil {
+		return "", res.Error
+	}
+	if res.RowsAffected == 0 {
+		return "", ErrUserNotFound
+	}
+	return secret, nil
 }
 
 // DeleteVisitorUser removes a user. Its access ends at once.
@@ -118,20 +110,21 @@ func (p *PostgresAuthManager) DeleteVisitorUser(domain, username string) error {
 	return nil
 }
 
-// VerifyVisitorUser reports whether the username and password match a user of the domain.
-func (p *PostgresAuthManager) VerifyVisitorUser(domain, username, password string) (bool, error) {
+// VisitorUserSecret returns the secret of a user of the domain. It is used to
+// verify signatures and is never sent to a visitor or returned by the API.
+func (p *PostgresAuthManager) VisitorUserSecret(domain, username string) (string, error) {
 	id, err := p.domainID(domain)
 	if err != nil {
-		return false, err
+		return "", err
 	}
 	var u db.VisitorUser
 	if err := p.db.Where("domain_id = ? AND username = ?", id, username).First(&u).Error; err != nil {
-		return false, nil
+		return "", ErrUserNotFound
 	}
-	return verifyPassword(u.PasswordHash, password), nil
+	return u.Secret, nil
 }
 
-// ListVisitorUsers returns the usernames of a domain. Passwords are never returned.
+// ListVisitorUsers returns the usernames of a domain. Secrets are never returned.
 func (p *PostgresAuthManager) ListVisitorUsers(domain string) ([]string, error) {
 	id, err := p.domainID(domain)
 	if err != nil {

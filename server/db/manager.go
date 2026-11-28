@@ -73,4 +73,12 @@ func Migrate(conf config.DatabaseConfig) {
 	if err := connection.AutoMigrate(&Domain{}, &DailyConsumption{}, &RequestLogEntry{}, &VisitorUser{}, &VisitorToken{}); err != nil {
 		log.Fatal(err.Error())
 	}
+	// Visitor users used to hold a password hash. That scheme is gone: the column is
+	// dropped, and users created before this change have no secret, so they cannot
+	// sign requests until they are created again.
+	if connection.Migrator().HasColumn(&VisitorUser{}, "password_hash") {
+		if err := connection.Migrator().DropColumn(&VisitorUser{}, "password_hash"); err != nil {
+			log.Fatal(err.Error())
+		}
+	}
 }
