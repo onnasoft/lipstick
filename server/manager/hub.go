@@ -26,6 +26,9 @@ const (
 
 	// expireInterval is how often the hub checks for timed-out visitors.
 	expireInterval = 5 * time.Second
+	// usageFlushInterval bounds how long bytes wait in memory before they reach the
+	// daily total. Without it, a day of small requests never reaches the threshold.
+	usageFlushInterval = 5 * time.Second
 
 	// rejectWriteTimeout bounds how long a 502 may block on a dead socket.
 	rejectWriteTimeout = 5 * time.Second
@@ -232,6 +235,16 @@ func (hub *NetworkHub) syncConnections(pipe net.Conn, destination net.Conn) {
 	)
 }
 
+// flushUsage hands the bytes waiting in memory to the daily total.
+func (hub *NetworkHub) flushUsage() {
+	hub.mu.Lock()
+	defer hub.mu.Unlock()
+	if hub.dataUsageAccumulator > 0 {
+		hub.trafficManager.AddTraffic(hub.HubName, hub.dataUsageAccumulator)
+		hub.dataUsageAccumulator = 0
+	}
+}
+
 func (hub *NetworkHub) addDataUsage(bytes int64) {
 	hub.mu.Lock()
 	defer hub.mu.Unlock()
@@ -249,6 +262,8 @@ func (hub *NetworkHub) addDataUsage(bytes int64) {
 func (hub *NetworkHub) listen() {
 	expire := time.NewTicker(expireInterval)
 	defer expire.Stop()
+	flush := time.NewTicker(usageFlushInterval)
+	defer flush.Stop()
 
 	for {
 		select {
@@ -264,7 +279,10 @@ func (hub *NetworkHub) listen() {
 			reply <- hub.snapshot()
 		case now := <-expire.C:
 			hub.expirePendingVisitors(now)
+		case <-flush.C:
+			hub.flushUsage()
 		case <-hub.done:
+			hub.flushUsage()
 			hub.handleShutdown()
 			return
 		}

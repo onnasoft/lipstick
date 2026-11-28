@@ -627,6 +627,13 @@ Lipstick exposes local ports to the internet through a reverse tunnel. The main 
 - **Verified:** the admin package tests pass; the translation test; the logo served as `image/png` without a session.
 - **Not verified in a browser here:** the menu and the language switch were not clicked through.
 
+### 64. Daily traffic counted small requests (bug)
+- **Symptom:** "Traffic today" showed 0 B while requests were being served; the request log had them.
+- **Cause:** each hub counted bytes in memory and wrote them to the daily total only when they reached the 64 KB threshold. Small responses never got there, and anything still in memory was lost on restart.
+- **Fix:** the hub also flushes its bytes every 5 seconds (`usageFlushInterval`) and on shutdown (`flushUsage`).
+- **Verified:** unit test (bytes below the threshold leave memory on flush, the total since start is kept, a flush with nothing waiting writes nothing). Live: 20 requests of 261 bytes produced 5,220 bytes in `daily_consumptions` within 12 seconds, where before the fix the total stayed at 0.
+- **Note:** the 5-second window means the daily total can lag by up to 5 seconds, and bytes waiting in memory are lost only if the process is killed hard.
+
 ## Recommended order
 
 1. Items 1, 2, 3, and 4: authentication, unpredictable tickets, TLS verification, and admin API hardening.
