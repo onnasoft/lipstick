@@ -40,6 +40,11 @@ func main() {
 		os.Exit(1)
 	}
 
+	if err := logger.Default.SetFormat(conf.Logging.Format); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+
 	if conf.AdminSecretKey != "" {
 		log.Println("note: admin_secret_key is no longer used. It only protected the admin API, which now uses accounts (lipstick-server admin create). Tunnel clients are not affected: they authenticate with the key of their domain. You can delete the line from config.yml.")
 	}

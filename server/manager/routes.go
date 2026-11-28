@@ -59,7 +59,7 @@ func (r *router) upgrade(c *gin.Context) {
 	// An empty ApiKey must never match, so a misconfigured domain stays closed.
 	providedKey := c.GetHeader("Authorization")
 	if domain.ApiKey == "" || subtle.ConstantTimeCompare([]byte(providedKey), []byte(domain.ApiKey)) != 1 {
-		logger.Default.Error("Unauthorized tunnel client for domain:", domainName)
+		logger.Default.With("domain", domainName, "reason", "unauthorized").Error("tunnel setup refused")
 		countTunnelFailure("unauthorized")
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 		return
@@ -148,7 +148,7 @@ func (r *router) upgrade(c *gin.Context) {
 	}
 
 	tunnelsOpened.Add(1)
-	logger.Default.Info("Connection upgraded for domain:", domain.Name)
+	logger.Default.With("domain", domain.Name, "client", c.Request.RemoteAddr).Info("tunnel connected")
 	notification := &ProxyNotificationConn{
 		Domain:                   domain.Name,
 		conn:                     conn,

@@ -83,6 +83,8 @@ type AppConfig struct {
 	Nats           NatsConfig     `yaml:"nats"`
 	// Limits bound visitors and admin requests. Zero disables a limit; see server/limits.
 	Limits LimitsConfig `yaml:"limits"`
+	// Logging chooses the log format. See logger.
+	Logging LoggingConfig `yaml:"logging"`
 
 	// IntranetPorts reserves plain-TCP ports for services that cannot speak TLS.
 	// Clients ask for a port; the server decides whether it may open it, and
@@ -213,6 +215,9 @@ func (c AppConfig) Validate() error {
 	}
 
 	errs = append(errs, c.Limits.validate()...)
+	if err := c.Logging.validate(); err != nil {
+		errs = append(errs, err)
+	}
 	return errors.Join(errs...)
 }
 
@@ -308,7 +313,8 @@ func loadConfig() (AppConfig, error) {
 	var natsURL string
 
 	defaultConfig := AppConfig{
-		Limits: LimitsConfig(limits.Defaults()),
+		Limits:  LimitsConfig(limits.Defaults()),
+		Logging: LoggingConfig{Format: "text"},
 		Admin: AdminConfig{
 			// Loopback only: the admin API should not be reachable from the network.
 			Address: "127.0.0.1:5052",
@@ -577,4 +583,18 @@ func (l LimitsConfig) validate() []error {
 		errs = append(errs, errors.New("limits: a rate needs a burst of at least 1"))
 	}
 	return errs
+}
+
+// LoggingConfig is the "logging" section. Format is "text" (default, for a terminal) or
+// "json" (one object per line, for a log collector).
+type LoggingConfig struct {
+	Format string `yaml:"format"`
+}
+
+func (l LoggingConfig) validate() error {
+	switch l.Format {
+	case "", "text", "json": // empty means text
+		return nil
+	}
+	return fmt.Errorf("logging.format must be text or json, not %q", l.Format)
 }

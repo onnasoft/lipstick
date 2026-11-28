@@ -239,7 +239,7 @@ func (hub *NetworkHub) syncConnections(pipe net.Conn, destination net.Conn) {
 		}
 		if err != nil {
 			if isTimeout(err) && !answered.Load() && time.Since(time.Unix(0, requestAt.Load())) > backendResponseTimeout {
-				logger.Default.Info("backend did not answer within", backendResponseTimeout, "for hub:", hub.HubName)
+				logger.Default.With("domain", hub.HubName, "timeout", backendResponseTimeout.String()).Info("backend did not answer in time; visitor gets 504")
 				backendTimeouts.Add(1)
 				fmt.Fprint(pipe, helper.GatewayTimeoutResponse)
 				break
@@ -358,7 +358,7 @@ func (hub *NetworkHub) handleUnregisterProxyNotificationConn(ws *ProxyNotificati
 
 	// No clients left: the hub has nothing to do, so it stops and the manager
 	// forgets it. A later client creates a new hub.
-	logger.Default.Info("No tunnel clients left, stopping hub:", hub.HubName)
+	logger.Default.With("domain", hub.HubName).Info("tunnel lost: no clients left, hub stopped")
 	if hub.onIdle != nil {
 		hub.onIdle()
 	}

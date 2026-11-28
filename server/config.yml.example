@@ -58,6 +58,11 @@ nats:
 
 # Límites de visitantes y de la admin API. 0 desactiva un límite. Tasas por segundo.
 # Las tasas cuentan conexiones nuevas, no peticiones dentro de una conexión abierta.
+# Formato de los logs: text (para la terminal, por defecto) o json (un objeto por línea,
+# para un colector de logs).
+logging:
+  format: text
+
 limits:
   visitor_ip_rate: 50           # conexiones nuevas por segundo desde una IP
   visitor_ip_burst: 100         # ráfaga permitida por IP

@@ -84,7 +84,7 @@ func (manager *Manager) handleMux(conn net.Conn, req *http.Request) {
 	}
 	record, err := manager.authManager.GetDomain(domainName)
 	if err != nil || !helper.VerifyMuxProof(record.ApiKey, nonce, req.Header.Get(helper.ProofHeader)) {
-		logger.Default.Error("Mux connection without a valid proof for domain:", domainName)
+		logger.Default.With("domain", domainName, "reason", "mux_proof").Error("tunnel setup refused")
 		countTunnelFailure("mux_proof")
 		conn.Close()
 		return

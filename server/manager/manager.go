@@ -135,7 +135,7 @@ func (m *Manager) getOrCreateHub(domain string) *NetworkHub {
 	}
 	tunnelEvents.connected(domain)
 	go hub.listen()
-	logger.Default.Info("New hub created for domain:", domain)
+	logger.Default.With("domain", domain).Info("tunnel hub created")
 	return hub
 }
 
