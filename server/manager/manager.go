@@ -124,6 +124,7 @@ func (m *Manager) getOrCreateHub(domain string) *NetworkHub {
 	// When the hub stops for lack of clients, forget it. CompareAndDelete leaves
 	// a newer hub for the same domain alone.
 	hub.onIdle = func() {
+		tunnelEvents.lost(domain)
 		m.hubs.CompareAndDelete(domain, hub)
 		m.releaseIntranetPorts(domain)
 	}
@@ -132,6 +133,7 @@ func (m *Manager) getOrCreateHub(domain string) *NetworkHub {
 	if loaded {
 		return actual.(*NetworkHub)
 	}
+	tunnelEvents.connected(domain)
 	go hub.listen()
 	logger.Default.Info("New hub created for domain:", domain)
 	return hub

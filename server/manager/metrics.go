@@ -28,6 +28,52 @@ var tunnelSetupFailures = newFailureCounter()
 // countTunnelFailure records one failed tunnel setup under its reason.
 func countTunnelFailure(reason string) { tunnelSetupFailures.Inc(reason) }
 
+// tunnelEvents counts, per domain, when a domain's tunnel comes back (a reconnection) and
+// when it is lost (its last client left). "Back" means a hub is created again for a domain
+// that had one earlier in this process. A restart resets the memory, so the clients that
+// reconnect after a restart are not counted as reconnections.
+var tunnelEvents = &domainEvents{seen: map[string]bool{}, reconnects: map[string]int64{}, losses: map[string]int64{}}
+
+type domainEvents struct {
+	mu         sync.Mutex
+	seen       map[string]bool
+	reconnects map[string]int64
+	losses     map[string]int64
+}
+
+func (d *domainEvents) connected(domain string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.seen[domain] {
+		d.reconnects[domain]++
+	}
+	d.seen[domain] = true
+}
+
+func (d *domainEvents) lost(domain string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.losses[domain]++
+}
+
+// value returns the count for a domain in one of the maps, read under the lock.
+func (d *domainEvents) value(which map[string]int64, domain string) int64 {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return which[domain]
+}
+
+// samples returns one family's samples: the counts of one map, labelled by domain.
+func (d *domainEvents) samples(which map[string]int64) []metrics.Sample {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	out := make([]metrics.Sample, 0, len(which))
+	for domain, n := range which {
+		out = append(out, metrics.Sample{Labels: map[string]string{"domain": domain}, Value: float64(n)})
+	}
+	return out
+}
+
 var (
 	backendTimeouts atomic.Int64 // visitor requests answered 504 because the backend was silent
 	tunnelsOpened   atomic.Int64 // tunnel connections accepted from clients
@@ -82,6 +128,8 @@ func (manager *Manager) Metrics() []metrics.Family {
 		{Name: "lipstick_connection_latency_seconds", Help: "Time from a visitor's request to the first byte of the reply, per domain.", Type: metrics.Histogram, Samples: connectionLatency.Samples()},
 		{Name: "lipstick_tunnel_latency_seconds", Help: "Round trip of each tunnel session, per domain, measured with a ping every few seconds.", Type: metrics.Histogram, Samples: tunnelLatency.Samples()},
 		{Name: "lipstick_tunnel_setup_failures_total", Help: "Tunnel setups refused or failed, by reason.", Type: metrics.Counter, Samples: failureSamples(tunnelSetupFailures)},
+		{Name: "lipstick_tunnel_reconnections_total", Help: "Times a domain's tunnel came back after it had been connected in this process, per domain.", Type: metrics.Counter, Samples: tunnelEvents.samples(tunnelEvents.reconnects)},
+		{Name: "lipstick_tunnel_losses_total", Help: "Times a domain lost its tunnel because its last client left, per domain.", Type: metrics.Counter, Samples: tunnelEvents.samples(tunnelEvents.losses)},
 		{Name: "lipstick_go_goroutines", Help: "Goroutines in the server process.", Type: metrics.Gauge, Samples: []metrics.Sample{{Value: float64(runtime.NumGoroutine())}}},
 		{Name: "lipstick_go_memory_alloc_bytes", Help: "Heap memory in use by the server process.", Type: metrics.Gauge, Samples: []metrics.Sample{{Value: float64(mem.HeapAlloc)}}},
 	}

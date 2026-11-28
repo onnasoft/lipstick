@@ -711,6 +711,11 @@ Lipstick exposes local ports to the internet through a reverse tunnel. The main 
 - **Note on `mux_no_hub`:** after a restart the client opens its mux connections before its first upgrade has created the hub, so a few refusals appear at startup. The client retries and the count then stays still; it is not a steady error.
 - **Verified:** an integration test sends a wrong key and an unknown domain to the manager and checks each reason is counted; live, a wrong key on localhost gets 401 and `unauthorized` goes to 1.
 
+### 77. Reconnection metrics (feature)
+- **Added:** `lipstick_tunnel_losses_total` (a domain's tunnel went down because its last client left) and `lipstick_tunnel_reconnections_total` (the tunnel came back for a domain that had one earlier), per domain.
+- **Limit:** the memory is per process. A restart resets it, so the clients that reconnect after a server restart are not counted as reconnections; they show as a new start. Each domain counts once however many sessions its client opens, since the count is per tunnel, not per mux session.
+- **Verified:** an integration test kills a client and starts it again, and checks one loss and one reconnection; live, killing and restarting the local test client gave one loss and one reconnection, and a visitor was served.
+
 ## Recommended order
 
 1. Items 1, 2, 3, and 4: authentication, unpredictable tickets, TLS verification, and admin API hardening.
