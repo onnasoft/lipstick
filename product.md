@@ -311,6 +311,26 @@ This milestone should not be a prerequisite for the initial stable release.
 
 ---
 
+## 3.7 Commercial Readiness
+
+The administration API and panel are functional and tested, but they are not yet fit for a paid production product. Gaps in priority order:
+
+1. [ ] **Audit log.** Every change (domains, keys, accounts, visitor users and secrets, access rules) records who did it, when, and from where. Queryable by superusers.
+2. [ ] **Encryption at rest.** Client keys (`api_key`) and visitor secrets are stored in clear text today. Encrypt them with a key held outside the database.
+3. [ ] **Two-factor authentication for superusers.** A compromised superuser controls the whole tunnel; a password alone is not enough for a commercial product.
+4. [ ] **Versioned migrations.** Replace startup `AutoMigrate` (which can drop columns) with explicit, reviewed migrations and a backup step before them.
+5. [ ] **Tests on real PostgreSQL and NATS.** The cluster state, the request history and the health checks are proven on SQLite and an in-memory bus. Add PostgreSQL and NATS to the test suite, including failure cases.
+6. [ ] **Cluster-wide change propagation.** A domain change reaches the clients of the server that received it only. Publish the change on NATS so every server disconnects its own clients.
+7. [ ] **External security review and dependency scan.** Penetration test by a third party, and `govulncheck` in the release pipeline.
+8. [ ] **Operator documentation.** TLS with a real certificate, backups and restore, what to do when the database or NATS fails, key rotation, and upgrade steps.
+
+Less urgent: idle session timeout and a "sign out everywhere" action; permissions per domain instead of two general roles; metrics for a monitoring system; the configuration reset, still awaiting a decision on what it deletes.
+
+### Acceptance criteria
+- Every item above is checked off, with a test or a documented procedure that proves it.
+- A security review by someone outside the project has no open high-severity findings.
+- A restore from backup has been performed on a copy of the production database.
+
 # 4. Productization Roadmap
 
 ## Milestone 1 — Security Hardening
