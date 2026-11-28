@@ -560,6 +560,19 @@ Lipstick exposes local ports to the internet through a reverse tunnel. The main 
 - **Verified:** a test fails if any response is a generic object or the rotate route is missing. Live, the field names of health, domains, domain, stats, traffic and tokens match the documented schemas exactly.
 - **Known gap:** the create-token response has no `id`; the id comes from the list. Adding it means changing `AddVisitorToken` to return the id as well.
 
+### 58. Admin accounts and session tokens replace the admin key (change)
+- **Replaces:** the shared `admin_secret_key` that every write request sent in the Authorization header.
+- **Why:** one key shared by everyone cannot say who changed what, and it is hard to rotate without breaking every client. Accounts give each person their own password, and sessions expire.
+- **Accounts:** created, reset, disabled and enabled only from the console on the server machine: `lipstick-server admin create|reset-password|disable|enable|list`. The password is typed in a terminal without echo; the command refuses when standard input is not a terminal, so no password comes from a pipe or a script. No port is opened and no key is needed.
+- **Login:** `POST /login` checks the password (argon2id) and returns a token. The token is 256 random bits; only its SHA-256 hash is stored. It lasts 12 hours and `POST /logout` ends it. Writes need `Authorization: Bearer <token>`.
+- **Brute force:** five wrong passwords lock the account for 15 minutes (429 with Retry-After). The answer never says whether the user or the password was wrong.
+- **Revocation:** disabling an account or resetting its password ends all its sessions at once.
+- **Code:** `server/db/models.go` (`AdminUser`, `AdminSession`), `server/auth/admin_users.go` (store), `server/admin/sessions.go` (login, logout, bearer check, limiter), `server/admin/console.go` (commands), `server/main.go` (the `admin` subcommand, detected after the config flags).
+- **Config:** `admin_secret_key` is no longer required or used. It is still accepted so existing files load, and the server warns about it at startup. The `-admin-secret` flag is removed.
+- **Roles:** stored (`admin`, `operator`) but both have the same access to the write API for now. Finer permissions are pending.
+- **Not done:** a reset of the whole configuration. It would delete data, so it waits for an explicit decision.
+- **Verified:** store tests on SQLite (login, sessions, disable, password reset, expiry, hashes stored, input rules); API tests (token accepted, wrong password, lock after five failures, bearer challenge); console tests (two matching passwords, short password, missing username, unknown command, disable and enable, list without secrets); live: `admin list` reads the real database and `admin create` refuses without a terminal.
+
 ## Recommended order
 
 1. Items 1, 2, 3, and 4: authentication, unpredictable tickets, TLS verification, and admin API hardening.

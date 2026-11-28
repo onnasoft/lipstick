@@ -29,7 +29,7 @@ func TestStatsNeedsNoKey(t *testing.T) {
 
 func TestStatsReturnsLiveState(t *testing.T) {
 	a := statsAdmin()
-	rec := do(a, http.MethodGet, "/stats", testKey)
+	rec := do(a, http.MethodGet, "/stats", "Bearer "+testKey)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("got %d, want 200", rec.Code)
 	}
@@ -45,7 +45,7 @@ func TestStatsReturnsLiveState(t *testing.T) {
 // Without a source the endpoint answers an empty list, not an error.
 func TestStatsWithoutSourceIsEmpty(t *testing.T) {
 	a := newTestAdmin(testKey)
-	rec := do(a, http.MethodGet, "/stats", testKey)
+	rec := do(a, http.MethodGet, "/stats", "Bearer "+testKey)
 	if rec.Code != http.StatusOK || strings.TrimSpace(rec.Body.String()) != "[]" {
 		t.Fatalf("got %d %q, want 200 []", rec.Code, rec.Body.String())
 	}

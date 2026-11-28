@@ -1,10 +1,12 @@
 package admin
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/OnnaSoft/lipstick/server/auth"
 )
@@ -38,8 +40,32 @@ func (fakeAuth) ListVisitorTokens(d string) ([]auth.VisitorToken, error)    { re
 func (fakeAuth) CountVisitorCredentials(d string) (int, error)              { return 0, nil }
 func (fakeAuth) SetAuthLatched(d string, l bool) error                      { return nil }
 
-func newTestAdmin(key string) *Admin {
-	a := &Admin{authManager: fakeAuth{}, adminKey: key}
+// fakeSessions accepts one session token, for every test. It stands in for the
+// account store.
+type fakeSessions struct{ valid string }
+
+var errFakeLogin = errors.New("invalid username or password")
+
+func (f fakeSessions) Login(username, password string) (uint, error) {
+	if username == "tester" && password == "tester-password-long" {
+		return 1, nil
+	}
+	return 0, errFakeLogin
+}
+func (f fakeSessions) NewSession(uint) (string, time.Time, error) {
+	return f.valid, time.Now().Add(time.Hour), nil
+}
+func (f fakeSessions) Authenticate(token string) (string, error) {
+	if token != "" && token == f.valid {
+		return "tester", nil
+	}
+	return "", errFakeLogin
+}
+func (f fakeSessions) Logout(string) error { return nil }
+
+// newTestAdmin builds the API. token is the only session token it accepts.
+func newTestAdmin(token string) *Admin {
+	a := &Admin{authManager: fakeAuth{}, store: fakeSessions{valid: token}}
 	configureRouter(a)
 	return a
 }
@@ -54,27 +80,29 @@ func do(a *Admin, method, path, authHeader string) *httptest.ResponseRecorder {
 	return rec
 }
 
-// Writes still need the key. Reads do not (see TestAdminReadsNeedNoKey). The
-// unauthorized path returns before touching the database, so no database is needed.
-func TestAdminRejectsMissingOrWrongKey(t *testing.T) {
+// Writes need a session token in a Bearer header. The unauthorized path returns
+// before touching the database, so no database is needed.
+func TestAdminRejectsMissingOrWrongSession(t *testing.T) {
 	a := newTestAdmin(testKey)
-	for _, h := range []string{"", "wrong", testKey + "x", "Bearer " + testKey} {
+	for _, h := range []string{"", "wrong", "Bearer wrong", "Bearer " + testKey + "x", testKey} {
 		if rec := do(a, http.MethodDelete, "/domains/app.example.com", h); rec.Code != http.StatusUnauthorized {
 			t.Errorf("header %q: got %d, want 401", h, rec.Code)
 		}
 	}
 }
 
-func TestAdminEmptyKeyNeverAuthorizes(t *testing.T) {
+func TestAdminEmptySessionNeverAuthorizes(t *testing.T) {
 	a := newTestAdmin("")
-	if rec := do(a, http.MethodDelete, "/domains/app.example.com", ""); rec.Code != http.StatusUnauthorized {
-		t.Errorf("empty configured key authorized an empty header: got %d", rec.Code)
+	for _, h := range []string{"", "Bearer ", "Bearer"} {
+		if rec := do(a, http.MethodDelete, "/domains/app.example.com", h); rec.Code != http.StatusUnauthorized {
+			t.Errorf("header %q authorized with no session: got %d", h, rec.Code)
+		}
 	}
 }
 
 func TestAdminListsDomainsWithoutApiKey(t *testing.T) {
 	a := newTestAdmin(testKey)
-	rec := do(a, http.MethodGet, "/domains", testKey)
+	rec := do(a, http.MethodGet, "/domains", "Bearer "+testKey)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("correct key: got %d, want 200", rec.Code)
 	}
@@ -89,7 +117,7 @@ func TestAdminListsDomainsWithoutApiKey(t *testing.T) {
 
 func TestAdminGetDomainWithoutApiKey(t *testing.T) {
 	a := newTestAdmin(testKey)
-	rec := do(a, http.MethodGet, "/domains/app.example.com", testKey)
+	rec := do(a, http.MethodGet, "/domains/app.example.com", "Bearer "+testKey)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("got %d, want 200", rec.Code)
 	}
@@ -107,7 +135,7 @@ func TestAdminHealthIsPublic(t *testing.T) {
 
 func TestTrafficValidatesDatesBeforeDatabase(t *testing.T) {
 	a := newTestAdmin(testKey)
-	rec := do(a, http.MethodGet, "/domains/app.example.com/traffic?from=bad&to=2026-01-31", testKey)
+	rec := do(a, http.MethodGet, "/domains/app.example.com/traffic?from=bad&to=2026-01-31", "Bearer "+testKey)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("invalid from: got %d, want 400", rec.Code)
 	}
@@ -115,7 +143,7 @@ func TestTrafficValidatesDatesBeforeDatabase(t *testing.T) {
 
 func patch(a *Admin, path, body string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(http.MethodPatch, path, strings.NewReader(body))
-	req.Header.Set("Authorization", testKey)
+	req.Header.Set("Authorization", "Bearer "+testKey)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	a.engine.ServeHTTP(rec, req)
@@ -163,7 +191,7 @@ func (r *recordingAuth) AddDomain(d *auth.Domain) error {
 
 func postDomain(a *Admin, body string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(http.MethodPost, "/domains", strings.NewReader(body))
-	req.Header.Set("Authorization", testKey)
+	req.Header.Set("Authorization", "Bearer "+testKey)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	a.engine.ServeHTTP(rec, req)
@@ -174,7 +202,7 @@ func postDomain(a *Admin, body string) *httptest.ResponseRecorder {
 // false must reach the store as false.
 func TestCreateDomainMultipleConnectionsDefaults(t *testing.T) {
 	rec := &recordingAuth{}
-	a := &Admin{authManager: rec, adminKey: testKey}
+	a := &Admin{authManager: rec, store: fakeSessions{valid: testKey}}
 	configureRouter(a)
 
 	if r := postDomain(a, `{"name":"a.example.com","apiKey":"0123456789abcdef"}`); r.Code != http.StatusOK {

@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"strings"
 
-	"crypto/subtle"
 	"errors"
 	"fmt"
 	"github.com/OnnaSoft/lipstick/helper"
@@ -36,6 +35,8 @@ func configureRouter(admin *Admin) {
 	r.GET("/", router.ui)
 	r.GET("/ui", func(c *gin.Context) { c.Redirect(http.StatusFound, "/") })
 	r.GET("/requests", router.getRequests)
+	r.POST("/login", router.login)
+	r.POST("/logout", router.logout)
 	// The API reference and its "Authorize" button. Read-only, like the other GET routes.
 	docs.SwaggerInfo.BasePath = "/"
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
@@ -81,28 +82,6 @@ func toDomainView(d *auth.Domain) domainView {
 		AuthLatched:              d.AuthLatched,
 		AllowedCIDRs:             splitRules(d.AllowedCIDRs),
 	}
-}
-
-// isAuthorized compares the Authorization header with the admin key in constant
-// time, so the response time does not reveal how many characters matched. An
-// empty key never authorizes anyone.
-func isAuthorized(c *gin.Context, adminKey string) bool {
-	if adminKey == "" {
-		return false
-	}
-	provided := []byte(c.Request.Header.Get("Authorization"))
-	return subtle.ConstantTimeCompare(provided, []byte(adminKey)) == 1
-}
-
-// authorized checks the admin key. It guards every endpoint that changes data
-// (create, update, delete). Read-only endpoints do not use it: the admin port
-// listens on 127.0.0.1 only and they expose no keys.
-func (r *router) authorized(c *gin.Context) bool {
-	if isAuthorized(c, r.admin.adminKey) {
-		return true
-	}
-	c.JSON(http.StatusUnauthorized, errorResponse{Error: "Unauthorized"})
-	return false
 }
 
 // writeLookupError answers a failed domain lookup: 404 when the domain does not
@@ -163,13 +142,13 @@ func (r *router) getDomain(c *gin.Context) {
 // @Summary Create a domain
 // @Description Registers a domain with the key its client will use. Multiple connections are allowed unless allowMultipleConnections is false. allowedCidrs is a list of networks or addresses; empty means no restriction.
 // @Tags domains
-// @Security AdminKey
+// @Security BearerAuth
 // @Accept json
 // @Produce json
 // @Param domain body domainCreateBody true "Domain to create"
 // @Success 200 {object} statusResponse
 // @Failure 400 {object} errorResponse "Invalid body. The message names the field, for example 'allowedCidrs must be a list of strings' or an invalid network or address"
-// @Failure 401 {object} errorResponse "Missing or wrong admin key. Error: 'Unauthorized'"
+// @Failure 401 {object} errorResponse "Missing, expired or invalid session token. Error: 'Unauthorized'"
 // @Failure 500 {object} errorResponse "The domain could not be saved. Error: 'Unable to add domain'"
 // @Router /domains [post]
 func (r *router) addDomain(c *gin.Context) {
@@ -212,14 +191,14 @@ func (r *router) addDomain(c *gin.Context) {
 // @Summary Change a domain
 // @Description Changes any of: apiKey, allowMultipleConnections, passthrough (not while the domain requires visitor auth), allowedCidrs (an empty list removes the rules), authLatched (only false: clearing the restricted mode). Clients of the domain are disconnected and reconnect with the new policy.
 // @Tags domains
-// @Security AdminKey
+// @Security BearerAuth
 // @Accept json
 // @Produce json
 // @Param domainName path string true "Domain name"
 // @Param changes body domainChangeBody true "Fields to change; send only those"
 // @Success 200 {object} statusResponse
 // @Failure 400 {object} errorResponse "Invalid body. The message names the field, for example 'allowMultipleConnections must be true or false', 'passthrough must be true or false', 'allowedCidrs must be a list of addresses or networks', or 'authLatched can only be set to false: clients set the restricted mode'"
-// @Failure 401 {object} errorResponse "Missing or wrong admin key. Error: 'Unauthorized'"
+// @Failure 401 {object} errorResponse "Missing, expired or invalid session token. Error: 'Unauthorized'"
 // @Failure 404 {object} errorResponse "The domain does not exist. Error: 'Domain not found'"
 // @Failure 409 {object} errorResponse "Passthrough cannot be turned on for a domain that requires visitor authentication. Error: 'passthrough cannot be turned on: the domain requires visitor authentication'"
 // @Failure 500 {object} errorResponse "The domain could not be updated. Error: 'Unable to update domain'"
@@ -317,11 +296,11 @@ func (r *router) updateDomain(c *gin.Context) {
 // @Summary Delete a domain
 // @Description Removes the domain and disconnects its clients.
 // @Tags domains
-// @Security AdminKey
+// @Security BearerAuth
 // @Produce json
 // @Param domainName path string true "Domain name"
 // @Success 200 {object} statusResponse
-// @Failure 401 {object} errorResponse "Missing or wrong admin key. Error: 'Unauthorized'"
+// @Failure 401 {object} errorResponse "Missing, expired or invalid session token. Error: 'Unauthorized'"
 // @Failure 404 {object} errorResponse "The domain does not exist. Error: 'Domain not found'"
 // @Failure 500 {object} errorResponse "The domain could not be deleted. Error: 'Unable to delete domain'"
 // @Router /domains/{domainName} [delete]
@@ -433,8 +412,8 @@ func (r *router) getStats(c *gin.Context) {
 	c.JSON(http.StatusOK, r.admin.stats())
 }
 
-// ui serves the panel. The page holds no data: it asks for the admin key and
-// then calls /stats with it, so nothing sensitive is in the HTML itself.
+// ui serves the panel. The page holds no data: it reads the public read-only
+// endpoints, so nothing sensitive is in the HTML itself.
 // @Summary Admin panel
 // @Description HTML panel that reads /stats, /requests and the daily traffic. Needs no key.
 // @Tags system
@@ -535,7 +514,7 @@ func parseTimeParam(raw string, asEnd bool) (time.Time, error) {
 	return t, nil
 }
 
-// domainNameParam returns the domain named in the path, after checking the admin key.
+// domainNameParam returns the domain named in the path, after checking the session token.
 func (r *router) visitorDomain(c *gin.Context) (string, bool) {
 	if !r.authorized(c) {
 		return "", false
@@ -556,16 +535,16 @@ type visitorUserBody struct {
 
 // @Summary Add a visitor user
 // @Description Creates a user of a restricted domain with its own secret. Send the secret in the body (at least 32 characters) or omit it: then the server generates one and returns it in this response, the only time it is shown. The user signs each request with HMAC-SHA256 using that secret and sends it in the Authorization header as LipstickHMAC user, ts, nonce and sig. Usernames: 1 to 64 letters, digits, dots, underscores, at signs or hyphens.
-// @Description Example: curl -k -X POST 'https://127.0.0.1:5052/domains/localhost/visitor-users' -H 'Content-Type: application/json' -H 'Authorization: <admin_secret_key>' -d '{"username": "jtorres"}'. Without the Authorization header the answer is 401.
+// @Description Example: after logging in (see /login), curl -k -X POST 'https://127.0.0.1:5052/domains/localhost/visitor-users' -H 'Content-Type: application/json' -H 'Authorization: Bearer <token>' -d '{"username": "jtorres"}'. Without a valid token the answer is 401.
 // @Tags visitor-auth
-// @Security AdminKey
+// @Security BearerAuth
 // @Accept json
 // @Produce json
 // @Param domainName path string true "Domain name"
 // @Param user body visitorUserBody true "Username and optional secret"
 // @Success 200 {object} visitorUserResponse
 // @Failure 400 {object} errorResponse "Invalid body, or the user could not be created. Errors: 'username must be 1 to 64 letters, digits, dots, underscores, at signs or hyphens', 'secret must be at least 32 characters', 'a visitor user with that name already exists', or malformed JSON"
-// @Failure 401 {object} errorResponse "Missing or wrong admin key. Error: 'Unauthorized'"
+// @Failure 401 {object} errorResponse "Missing, expired or invalid session token. Error: 'Unauthorized'"
 // @Failure 404 {object} errorResponse "The domain does not exist. Error: 'Domain not found'"
 // @Failure 500 {object} errorResponse "The domain could not be read. Error: 'Unable to get domain'"
 // @Router /domains/{domainName}/visitor-users [post]
@@ -596,12 +575,12 @@ func (r *router) addVisitorUser(c *gin.Context) {
 // @Summary Rotate a visitor user's secret
 // @Description Replaces the secret of a user and returns the new one, shown once. The old secret stops working at once.
 // @Tags visitor-auth
-// @Security AdminKey
+// @Security BearerAuth
 // @Produce json
 // @Param domainName path string true "Domain name"
 // @Param username path string true "Username"
 // @Success 200 {object} visitorUserResponse
-// @Failure 401 {object} errorResponse "Missing or wrong admin key. Error: 'Unauthorized'"
+// @Failure 401 {object} errorResponse "Missing, expired or invalid session token. Error: 'Unauthorized'"
 // @Failure 404 {object} errorResponse "The domain or the user does not exist. Errors: 'Domain not found' or 'visitor user not found'"
 // @Failure 500 {object} errorResponse "The secret could not be rotated. Error: 'unable to rotate secret'"
 // @Router /domains/{domainName}/visitor-users/{username}/rotate [post]
@@ -626,11 +605,11 @@ func (r *router) rotateVisitorUser(c *gin.Context) {
 // @Summary List visitor users
 // @Description Usernames of a domain. Secrets are never returned.
 // @Tags visitor-auth
-// @Security AdminKey
+// @Security BearerAuth
 // @Produce json
 // @Param domainName path string true "Domain name"
 // @Success 200 {array} string
-// @Failure 401 {object} errorResponse "Missing or wrong admin key. Error: 'Unauthorized'"
+// @Failure 401 {object} errorResponse "Missing, expired or invalid session token. Error: 'Unauthorized'"
 // @Failure 404 {object} errorResponse "The domain does not exist. Error: 'Domain not found'"
 // @Failure 500 {object} errorResponse "The users could not be listed. Error: 'unable to list users'"
 // @Router /domains/{domainName}/visitor-users [get]
@@ -650,12 +629,12 @@ func (r *router) listVisitorUsers(c *gin.Context) {
 // @Summary Delete a visitor user
 // @Description Removes the user; their access ends at once.
 // @Tags visitor-auth
-// @Security AdminKey
+// @Security BearerAuth
 // @Produce json
 // @Param domainName path string true "Domain name"
 // @Param username path string true "Username"
 // @Success 200 {object} statusResponse
-// @Failure 401 {object} errorResponse "Missing or wrong admin key. Error: 'Unauthorized'"
+// @Failure 401 {object} errorResponse "Missing, expired or invalid session token. Error: 'Unauthorized'"
 // @Failure 404 {object} errorResponse "The domain or the user does not exist. Errors: 'Domain not found' or 'visitor user not found'"
 // @Failure 500 {object} errorResponse "The domain could not be read. Error: 'Unable to get domain'"
 // @Router /domains/{domainName}/visitor-users/{username} [delete]
@@ -681,14 +660,14 @@ type visitorTokenBody struct {
 // @Summary Create an API token
 // @Description Creates a Bearer token with permissions: methods (or "*") and path prefixes. The token value is returned once; only its SHA-256 hash is stored. The response has no id: list the tokens to get it.
 // @Tags visitor-auth
-// @Security AdminKey
+// @Security BearerAuth
 // @Accept json
 // @Produce json
 // @Param domainName path string true "Domain name"
 // @Param token body visitorTokenBody true "Name, methods and path prefixes"
 // @Success 200 {object} visitorTokenCreated
 // @Failure 400 {object} errorResponse "Invalid body, or the token could not be created. Errors: 'token name must be 1 to 64 characters', 'a token needs at least one method, or *', or malformed JSON"
-// @Failure 401 {object} errorResponse "Missing or wrong admin key. Error: 'Unauthorized'"
+// @Failure 401 {object} errorResponse "Missing, expired or invalid session token. Error: 'Unauthorized'"
 // @Failure 404 {object} errorResponse "The domain does not exist. Error: 'Domain not found'"
 // @Failure 500 {object} errorResponse "The domain could not be read. Error: 'Unable to get domain'"
 // @Router /domains/{domainName}/visitor-tokens [post]
@@ -713,11 +692,11 @@ func (r *router) addVisitorToken(c *gin.Context) {
 // @Summary List API tokens
 // @Description Tokens of a domain without their values: id, name, methods, path prefixes, creation time, and whether they are revoked.
 // @Tags visitor-auth
-// @Security AdminKey
+// @Security BearerAuth
 // @Produce json
 // @Param domainName path string true "Domain name"
 // @Success 200 {array} visitorTokenItem
-// @Failure 401 {object} errorResponse "Missing or wrong admin key. Error: 'Unauthorized'"
+// @Failure 401 {object} errorResponse "Missing, expired or invalid session token. Error: 'Unauthorized'"
 // @Failure 404 {object} errorResponse "The domain does not exist. Error: 'Domain not found'"
 // @Failure 500 {object} errorResponse "The tokens could not be listed. Error: 'unable to list tokens'"
 // @Router /domains/{domainName}/visitor-tokens [get]
@@ -744,13 +723,13 @@ func (r *router) listVisitorTokens(c *gin.Context) {
 // @Summary Revoke an API token
 // @Description The token stops working at once.
 // @Tags visitor-auth
-// @Security AdminKey
+// @Security BearerAuth
 // @Produce json
 // @Param domainName path string true "Domain name"
 // @Param id path int true "Token id"
 // @Success 200 {object} statusResponse
 // @Failure 400 {object} errorResponse "The id is not a number. Error: 'id must be a number'"
-// @Failure 401 {object} errorResponse "Missing or wrong admin key. Error: 'Unauthorized'"
+// @Failure 401 {object} errorResponse "Missing, expired or invalid session token. Error: 'Unauthorized'"
 // @Failure 404 {object} errorResponse "The domain or the token does not exist. Errors: 'Domain not found' or 'visitor token not found'"
 // @Failure 500 {object} errorResponse "The domain could not be read. Error: 'Unable to get domain'"
 // @Router /domains/{domainName}/visitor-tokens/{id} [delete]

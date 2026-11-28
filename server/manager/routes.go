@@ -27,7 +27,7 @@ type router struct {
 
 // The manager port is reachable by tunnel clients and must not reveal anything
 // about domains. Traffic statistics live in the admin API, which requires the
-// admin key.
+// session token.
 func configureRouter(manager *Manager) {
 	router := &router{manager: manager}
 	r := gin.New()

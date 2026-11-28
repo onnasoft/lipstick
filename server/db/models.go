@@ -66,3 +66,25 @@ type RequestLogEntry struct {
 	DurationMS    int64     `gorm:"not null"`
 	ResponseBytes int64     `gorm:"not null"`
 }
+
+// AdminUser is an account that can change the server through the admin API. Accounts
+// are created and reset from the console on the server machine. Passwords are stored
+// as argon2id hashes.
+type AdminUser struct {
+	ID           uint   `gorm:"primary_key"`
+	Username     string `gorm:"not null;uniqueIndex"`
+	PasswordHash string `gorm:"not null"`
+	Role         string `gorm:"not null;default:'admin'"`
+	Disabled     bool   `gorm:"not null;default:false"`
+	CreatedAt    time.Time
+}
+
+// AdminSession is a login token of an admin user. Only its SHA-256 hash is stored.
+type AdminSession struct {
+	ID        uint      `gorm:"primary_key"`
+	UserID    uint      `gorm:"not null;index"`
+	TokenHash string    `gorm:"not null;uniqueIndex"`
+	ExpiresAt time.Time `gorm:"not null;index"`
+	RevokedAt *time.Time
+	CreatedAt time.Time
+}

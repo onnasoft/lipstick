@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"log"
 	"net"
@@ -14,6 +15,7 @@ import (
 	"github.com/OnnaSoft/lipstick/helper"
 	"github.com/OnnaSoft/lipstick/logger"
 	"github.com/OnnaSoft/lipstick/server/admin"
+	"github.com/OnnaSoft/lipstick/server/auth"
 	"github.com/OnnaSoft/lipstick/server/config"
 	"github.com/OnnaSoft/lipstick/server/db"
 	"github.com/OnnaSoft/lipstick/server/manager"
@@ -34,9 +36,26 @@ func main() {
 		os.Exit(1)
 	}
 
+	if conf.AdminSecretKey != "" {
+		log.Println("note: admin_secret_key is no longer used. It only protected the admin API, which now uses accounts (lipstick-server admin create). Tunnel clients are not affected: they authenticate with the key of their domain. You can delete the line from config.yml.")
+	}
+
 	if config.CheckOnly() {
 		fmt.Println("configuración válida")
 		os.Exit(0)
+	}
+
+	// Console commands for admin accounts. They run here, on the server machine,
+	// and never open a network port.
+	// flag.Args holds what is left after the flags, so "-c file admin create ..." works.
+	if flag.NArg() > 0 && flag.Arg(0) == "admin" {
+		db.Migrate(conf.Database)
+		conn, err := db.GetConnection(conf.Database)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "Error de base de datos:", err)
+			os.Exit(1)
+		}
+		os.Exit(admin.RunConsole(auth.NewAdminStore(conn), flag.Args()[1:], admin.ReadTerminalPassword, os.Stdout, os.Stderr))
 	}
 
 	tlsConfig, err := conf.TLS.Prepare()
@@ -87,7 +106,7 @@ func main() {
 			log.Fatalf("cluster: %v", err)
 		}
 	}
-	admin := admin.SetupAdmin(conf.Admin.Address, conf.AdminSecretKey, tlsConfig)
+	admin := admin.SetupAdmin(conf.Admin.Address, auth.MakeAdminStore(), tlsConfig)
 	admin.SetDomainChangedHook(manager.DropHub)
 	admin.SetStatsSource(manager.Snapshot)
 	admin.SetRequestSource(manager.RecentRequests)

@@ -26,15 +26,16 @@ func TestSwaggerDocumentDescribesTheAPI(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &spec); err != nil {
 		t.Fatal(err)
 	}
-	key, ok := spec.SecurityDefinitions["AdminKey"]
+	key, ok := spec.SecurityDefinitions["BearerAuth"]
 	if !ok || key.Type != "apiKey" || key.In != "header" || key.Name != "Authorization" {
-		t.Fatalf("AdminKey scheme missing or wrong: %+v", key)
+		t.Fatalf("BearerAuth scheme missing or wrong: %+v", key)
 	}
 
 	protected := map[string][]string{
-		"/domains":                                              {"post"},
-		"/domains/{domainName}":                                 {"patch", "delete"},
-		"/domains/{domainName}/visitor-users":                   {"post", "get"},
+		"/logout":                             {"post"},
+		"/domains":                            {"post"},
+		"/domains/{domainName}":               {"patch", "delete"},
+		"/domains/{domainName}/visitor-users": {"post", "get"},
 		"/domains/{domainName}/visitor-users/{username}":        {"delete"},
 		"/domains/{domainName}/visitor-users/{username}/rotate": {"post"},
 		"/domains/{domainName}/visitor-tokens":                  {"post", "get"},

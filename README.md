@@ -404,7 +404,7 @@ El servidor lee un YAML (`-c`, por defecto `/etc/lipstick/config.yml`). Parte de
 
 | Clave | Por defecto | Descripción |
 |-------|-------------|-------------|
-| `admin_secret_key` | obligatoria | Clave de la admin API. Al menos 16 caracteres. El valor de ejemplo se rechaza. |
+| `admin_secret_key` | ya no se usa | Solo protegía la admin API, que ahora usa cuentas (`lipstick-server admin create`). No afecta a los clientes del túnel, que se autentican con la clave de su dominio. Si queda en tu archivo, el servidor avisa al arrancar y puedes borrarla. |
 | `proxy.address` | `:5050` | Listener de visitantes. |
 | `manager.address` | `:5051` | Listener de clientes. |
 | `admin.address` | `127.0.0.1:5052` | Listener de la admin API. |
@@ -433,7 +433,6 @@ Los flags reemplazan el valor del archivo cuando los escribes, y se validan igua
 -admin-addr         admin.address
 -manager-addr       manager.address
 -proxy-addr         proxy.address
--admin-secret       admin_secret_key
 -tls-cert           tls.certificate_path
 -tls-key            tls.key_path
 -db-host, -db-port, -db-user, -db-password, -db-name, -db-ssl-mode
@@ -441,9 +440,28 @@ Los flags reemplazan el valor del archivo cuando los escribes, y se validan igua
 -redis-*            valores de Redis (el servidor todavía no usa Redis)
 ```
 
+### Cuentas de administrador
+
+No hay clave de admin. Las cuentas se crean **en la máquina del servidor**, desde la consola, con una contraseña que escribes en la terminal (no se ve al escribir):
+
+```bash
+lipstick-server admin create -username jtorres          # rol admin (por defecto)
+lipstick-server admin create -username operador -role operator
+lipstick-server admin list
+lipstick-server admin reset-password -username jtorres  # cambia la contraseña y cierra sus sesiones
+lipstick-server admin disable -username jtorres         # bloquea la cuenta y cierra sus sesiones
+lipstick-server admin enable -username jtorres
+```
+
+Las contraseñas tienen al menos 12 caracteres. Los comandos no abren ningún puerto y no sirven por pipe ni desde un script: piden la contraseña en una terminal real. Si quieres usar un archivo de configuración en otra ruta, pásalo con `-c`, por ejemplo `lipstick-server -c /etc/lipstick/config.yml admin create -username jtorres`.
+
+Para entrar a la API, `POST /login` con usuario y contraseña devuelve un token. Cada cambio lleva `Authorization: Bearer <token>`. El token caduca a las 12 horas, `POST /logout` lo cierra, y cinco contraseñas incorrectas bloquean la cuenta 15 minutos (respuesta `429` con `Retry-After`).
+
+**Roles.** `admin` y `operator` se guardan en la cuenta. Hoy ambos tienen el mismo acceso a la API de cambios; la separación de permisos más fina está pendiente.
+
 ### Admin API
 
-Las rutas de escritura (`POST`, `PATCH`, `DELETE`) requieren la clave de admin en el header `Authorization`, tal cual, sin prefijo `Bearer`. Las de lectura (`GET`) y `/health` no la piden, y solo son accesibles desde loopback.
+Las rutas de escritura (`POST`, `PATCH`, `DELETE`) requieren un token de sesión en `Authorization: Bearer <token>`, obtenido con `POST /login`. Las de lectura (`GET`) y `/health` no lo piden, y solo son accesibles desde loopback. Sin token válido responden `401`.
 
 | Método y ruta | Descripción |
 |---------------|-------------|
@@ -455,15 +473,17 @@ Las rutas de escritura (`POST`, `PATCH`, `DELETE`) requieren la clave de admin e
 | `DELETE /domains/:name` | Borra el dominio. Desconecta sus clientes. |
 | `GET /domains/:name/traffic?from=YYYY-MM-DD&to=YYYY-MM-DD` | Bytes transferidos por día. |
 | `GET /stats` | Estado en vivo de cada dominio: estado, clientes, sesiones activas, visitantes en espera, bytes desde el arranque y puertos de intranet. |
+| `POST /login` | Entra con usuario y contraseña de una cuenta de administrador y devuelve un token de sesión. |
+| `POST /logout` | Cierra la sesión del token. |
 | `GET /` | Panel web (`https://127.0.0.1:5052/`) con dominios, conexiones, tráfico y peticiones recientes. No pide clave: los endpoints de lectura son públicos solo dentro del puerto de administración (loopback). `/ui` redirige aquí. |
 | `GET /requests?domain=&port=&limit=&from=&to=` | Peticiones HTTP terminadas (dominio, puerto de entrada, método, ruta sin query, estado, duración y tamaño de respuesta), de más reciente a más antigua. `port` filtra por puerto: `5050` es el proxy y los demás son puertos de intranet. Solo se registran peticiones HTTP; las conexiones TCP crudas de intranet no aparecen. Sin cabeceras ni cuerpos. Sin rango de fechas, devuelve las más recientes de memoria. Con `from` y/o `to` (`YYYY-MM-DD` o RFC 3339) consulta PostgreSQL, donde se guardan 7 días. Máximo 500. |
 
 Ejemplo:
 
 ```bash
-ADMIN=$(sed -n 's/^admin_secret_key: "\(.*\)"/\1/p' server/config.yml)
+TOKEN=$(curl -sk -X POST https://127.0.0.1:5052/login -H 'Content-Type: application/json' -d '{"username":"jtorres","password":"<tu contraseña>"}' | python3 -c 'import sys,json; print(json.load(sys.stdin)["token"])')
 curl -sk -X POST https://127.0.0.1:5052/domains \
-  -H "Authorization: $ADMIN" -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
   --data '{"name":"robot-42.example.com","apiKey":"<clave-larga-aleatoria>","allowMultipleConnections":false}'
 ```
 
@@ -480,7 +500,7 @@ Un dominio puede exigir credenciales a sus visitantes: **usuarios con firma HMAC
 
 **Usuarios con firma HMAC.** Cada usuario tiene un secreto propio. El secreto nunca viaja por la red: el visitante firma cada petición con él.
 
-Al crear el usuario (`POST /domains/:name/visitor-users`, solo con la clave de admin) envías el usuario y su secreto, que debe tener al menos 32 caracteres:
+Al crear el usuario (`POST /domains/:name/visitor-users`, con sesión de administrador) envías el usuario y su secreto, que debe tener al menos 32 caracteres:
 
 ```json
 {"username": "jtorres", "secret": "<al menos 32 caracteres aleatorios>"}
@@ -527,7 +547,7 @@ def lipstick_auth(secret, method, target, host, user):
 header = lipstick_auth(SECRET, "GET", "/hello", "robot.example.com", "alice")
 ```
 
-**Tokens de API** (solo con la clave de admin):
+**Tokens de API** (con sesión de administrador):
 - `POST /domains/:name/visitor-tokens` con `{"name", "methods", "pathPrefixes"}`. El token se devuelve una sola vez y se usa como `Authorization: Bearer <token>`. El servidor guarda solo su hash SHA-256. `methods` admite `"*"`, y `pathPrefixes` limita las rutas. Es la opción para quien quiere el máximo rendimiento, porque no requiere firmar cada petición, o para limitar el acceso a rutas concretas.
 - `DELETE` de usuarios y tokens. La revocación es inmediata.
 
@@ -542,9 +562,9 @@ header = lipstick_auth(SECRET, "GET", "/hello", "robot.example.com", "alice")
 Cada dominio puede limitar desde qué redes llegan sus visitantes. Es una lista de redes CIDR o direcciones sueltas, y si está vacía, el dominio no tiene restricción.
 
 ```bash
-ADMIN=$(sed -n 's/^admin_secret_key: "\(.*\)"/\1/p' server/config.yml)
+TOKEN=$(curl -sk -X POST https://127.0.0.1:5052/login -H 'Content-Type: application/json' -d '{"username":"jtorres","password":"<tu contraseña>"}' | python3 -c 'import sys,json; print(json.load(sys.stdin)["token"])')
 curl -sk -X PATCH https://127.0.0.1:5052/domains/mi-dominio \
-  -H "Authorization: $ADMIN" -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
   -d '{"allowedCidrs": ["10.0.0.0/8", "192.168.1.7"]}'
 ```
 
@@ -563,7 +583,7 @@ La referencia completa del API de administración está en Swagger UI:
 - Abre **https://127.0.0.1:5052/swagger/index.html** (con la configuración de ejemplo, solo desde la misma máquina).
 - La especificación OpenAPI está en `/swagger/doc.json`.
 
-**Autenticación:** las rutas que crean, cambian o borran datos, y las listas de usuarios y tokens de visitante, piden la clave de administración en la cabecera `Authorization`, sin prefijo `Bearer`. En Swagger UI usa el botón **Authorize** y pega la `admin_secret_key` de `server/config.yml`. Las lecturas de dominios, estadísticas y el registro de peticiones no piden clave; solo son seguras mientras el puerto no sea alcanzable desde otras máquinas.
+**Autenticación:** las rutas que crean, cambian o borran datos, y las listas de usuarios y tokens de visitante, piden un token de sesión de administrador (`Authorization: Bearer <token>`, obtenido con `POST /login`). En Swagger UI pulsa **Authorize**, pega el token y prueba los endpoints desde ahí. Las lecturas de dominios, estadísticas y el registro de peticiones no piden sesión; solo son seguras mientras el puerto no sea alcanzable desde otras máquinas.
 
 **Regenerar la documentación** después de cambiar una anotación en `server/admin/routes.go`:
 
@@ -733,7 +753,7 @@ Los flags reemplazan al archivo. Una clave desconocida es un error.
 - **Reglas de acceso por red (CIDR)** por dominio. Ver [Reglas de acceso por red](#reglas-de-acceso-por-red-cidr).
 - **Autenticación de visitantes** por dominio, con usuarios y tokens, opcional y restringida una vez activada. Ver [Autenticación de visitantes](#autenticación-de-visitantes).
 - **Sesiones autenticadas.** Cada conexión que el cliente abre hacia el servidor (`GET /<ticket>` o `GET /mux`) lleva una prueba `X-Lipstick-Proof`: HMAC-SHA256 de la clave del dominio. Para un ticket, la prueba cubre el ticket. Para una sesión de multiplexación, cubre un nonce de un solo uso que contiene la hora, y el servidor rechaza un nonce repetido o con más de dos minutos de diferencia con su reloj. La clave nunca viaja en esas conexiones, y una conexión sin prueba válida se cierra sin responder. Dentro de una sesión autenticada, el servidor abre streams y el cliente los acepta: solo el cliente que abrió la sesión recibe tráfico por ella. Un cliente anterior a estos cambios no sirve tráfico: hay que actualizar servidor y clientes juntos.
-- **Admin API** solo en loopback por defecto. Las lecturas (`GET`) no piden clave; crear, cambiar o borrar dominios sí, con la clave de admin. Si expones el puerto 5052 fuera de la máquina, cualquiera podrá ver dominios y tráfico.
+- **Admin API** solo en loopback por defecto. Las lecturas (`GET`) no piden sesión; crear, cambiar o borrar sí, con un token de una cuenta de administrador creada desde la consola. Si expones el puerto 5052 fuera de la máquina, cualquiera podrá ver dominios y tráfico.
 - **Secretos fuera del repositorio.** `config.yml`, `client_key.txt`, `certs/` y las claves privadas están en `.gitignore`, y `.dockerignore` los excluye de la imagen.
 - **Pendiente:** ver [`revision.md`](revision.md). Incluye la clave de un certificado que estuvo en el historial del repositorio y el estado de las referencias de pull request, que GitHub no permite reescribir con un push normal.
 

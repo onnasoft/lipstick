@@ -27,7 +27,6 @@ func TestValidateAcceptsValidConfig(t *testing.T) {
 
 func TestValidateReportsAllProblems(t *testing.T) {
 	c := validConfig()
-	c.AdminSecretKey = "short"
 	c.Proxy.Address = "5050"
 	c.Database.SSLMode = "bogus"
 	c.Nats.URL = "http://localhost:4222"
@@ -35,7 +34,6 @@ func TestValidateReportsAllProblems(t *testing.T) {
 
 	msg := c.Validate().Error()
 	for _, want := range []string{
-		"admin_secret_key",
 		"proxy.address",
 		"database.ssl_mode",
 		"nats.url",
@@ -112,11 +110,16 @@ func TestValidateRequiresTLS(t *testing.T) {
 	}
 }
 
-func TestValidateRejectsExampleAdminKey(t *testing.T) {
+// The admin key is no longer needed: a configuration with or without it is valid.
+func TestValidateDoesNotRequireAdminKey(t *testing.T) {
 	c := validConfig()
+	c.AdminSecretKey = ""
+	if err := c.Validate(); err != nil {
+		t.Fatalf("no admin key refused: %v", err)
+	}
 	c.AdminSecretKey = "change-me-to-a-long-random-secret"
-	if msg := c.Validate().Error(); !strings.Contains(msg, "example value") {
-		t.Fatalf("expected example-key error, got:\n%s", msg)
+	if err := c.Validate(); err != nil {
+		t.Fatalf("old admin key makes the file invalid: %v", err)
 	}
 }
 

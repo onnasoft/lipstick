@@ -68,6 +68,9 @@ type RedisConfig struct {
 }
 
 type AppConfig struct {
+	// AdminSecretKey is no longer used: admin accounts are created from the console
+	// (lipstick-server admin create). It is still accepted so existing files load; the
+	// server warns about it.
 	AdminSecretKey string         `yaml:"admin_secret_key"`
 	Proxy          ProxyConfig    `yaml:"proxy"`
 	Manager        ManagerConfig  `yaml:"manager"`
@@ -129,12 +132,6 @@ func (c IntranetDomainConfig) DomainNetworks() []*net.IPNet {
 	return nets
 }
 
-const minAdminSecretKeyLength = 16
-
-// placeholderPrefix marks the value used in config.yml.example. Refusing it
-// stops a copied example file from starting with a public key.
-const placeholderPrefix = "change-me"
-
 var validSSLModes = map[string]bool{
 	"disable":     true,
 	"allow":       true,
@@ -148,12 +145,6 @@ var validSSLModes = map[string]bool{
 // operator can fix them all in one pass.
 func (c AppConfig) Validate() error {
 	var errs []error
-
-	if len(c.AdminSecretKey) < minAdminSecretKeyLength {
-		errs = append(errs, fmt.Errorf("admin_secret_key is required and must be at least %d characters", minAdminSecretKeyLength))
-	} else if strings.HasPrefix(c.AdminSecretKey, placeholderPrefix) {
-		errs = append(errs, errors.New("admin_secret_key still has the example value; generate one with: openssl rand -hex 24"))
-	}
 
 	listeners := []struct{ name, addr string }{
 		{"proxy.address", c.Proxy.Address},
@@ -304,7 +295,7 @@ func CheckOnly() bool { return checkOnly }
 
 func loadConfig() (AppConfig, error) {
 	var configPath string
-	var adminAddress, managerAddress, proxyAddress, adminSecretKey, tlsCert, tlsKey string
+	var adminAddress, managerAddress, proxyAddress, tlsCert, tlsKey string
 	var redisHost, redisPassword string
 	var redisPort, redisDatabase, redisPoolSize, redisMinIdleConns, redisPoolTimeout int
 	var dbHost, dbUser, dbPassword, dbName, dbSSLMode string
@@ -354,7 +345,6 @@ func loadConfig() (AppConfig, error) {
 	flag.StringVar(&adminAddress, "admin-addr", "", "Address for the admin API (overrides admin.address)")
 	flag.StringVar(&managerAddress, "manager-addr", "", "Address for tunnel client connections (overrides manager.address)")
 	flag.StringVar(&proxyAddress, "proxy-addr", "", "Address for visitors (overrides proxy.address)")
-	flag.StringVar(&adminSecretKey, "admin-secret", "", "Admin API key (overrides admin_secret_key)")
 	flag.StringVar(&tlsCert, "tls-cert", "", "Path to the TLS certificate (overrides tls.certificate_path)")
 	flag.StringVar(&tlsKey, "tls-key", "", "Path to the TLS key (overrides tls.key_path)")
 	flag.StringVar(&redisHost, "redis-host", "", "Redis host (overrides redis.host)")
@@ -388,9 +378,6 @@ func loadConfig() (AppConfig, error) {
 		}
 		if set["proxy-addr"] {
 			cfg.Proxy.Address = proxyAddress
-		}
-		if set["admin-secret"] {
-			cfg.AdminSecretKey = adminSecretKey
 		}
 		if set["tls-cert"] {
 			cfg.TLS.CertificatePath = tlsCert

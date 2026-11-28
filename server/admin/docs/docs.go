@@ -66,7 +66,7 @@ const docTemplate = `{
             "post": {
                 "security": [
                     {
-                        "AdminKey": []
+                        "BearerAuth": []
                     }
                 ],
                 "description": "Registers a domain with the key its client will use. Multiple connections are allowed unless allowMultipleConnections is false. allowedCidrs is a list of networks or addresses; empty means no restriction.",
@@ -105,7 +105,7 @@ const docTemplate = `{
                         }
                     },
                     "401": {
-                        "description": "Missing or wrong admin key. Error: 'Unauthorized'",
+                        "description": "Missing, expired or invalid session token. Error: 'Unauthorized'",
                         "schema": {
                             "$ref": "#/definitions/admin.errorResponse"
                         }
@@ -162,7 +162,7 @@ const docTemplate = `{
             "delete": {
                 "security": [
                     {
-                        "AdminKey": []
+                        "BearerAuth": []
                     }
                 ],
                 "description": "Removes the domain and disconnects its clients.",
@@ -190,7 +190,7 @@ const docTemplate = `{
                         }
                     },
                     "401": {
-                        "description": "Missing or wrong admin key. Error: 'Unauthorized'",
+                        "description": "Missing, expired or invalid session token. Error: 'Unauthorized'",
                         "schema": {
                             "$ref": "#/definitions/admin.errorResponse"
                         }
@@ -212,7 +212,7 @@ const docTemplate = `{
             "patch": {
                 "security": [
                     {
-                        "AdminKey": []
+                        "BearerAuth": []
                     }
                 ],
                 "description": "Changes any of: apiKey, allowMultipleConnections, passthrough (not while the domain requires visitor auth), allowedCidrs (an empty list removes the rules), authLatched (only false: clearing the restricted mode). Clients of the domain are disconnected and reconnect with the new policy.",
@@ -258,7 +258,7 @@ const docTemplate = `{
                         }
                     },
                     "401": {
-                        "description": "Missing or wrong admin key. Error: 'Unauthorized'",
+                        "description": "Missing, expired or invalid session token. Error: 'Unauthorized'",
                         "schema": {
                             "$ref": "#/definitions/admin.errorResponse"
                         }
@@ -343,7 +343,7 @@ const docTemplate = `{
             "get": {
                 "security": [
                     {
-                        "AdminKey": []
+                        "BearerAuth": []
                     }
                 ],
                 "description": "Tokens of a domain without their values: id, name, methods, path prefixes, creation time, and whether they are revoked.",
@@ -374,7 +374,7 @@ const docTemplate = `{
                         }
                     },
                     "401": {
-                        "description": "Missing or wrong admin key. Error: 'Unauthorized'",
+                        "description": "Missing, expired or invalid session token. Error: 'Unauthorized'",
                         "schema": {
                             "$ref": "#/definitions/admin.errorResponse"
                         }
@@ -396,7 +396,7 @@ const docTemplate = `{
             "post": {
                 "security": [
                     {
-                        "AdminKey": []
+                        "BearerAuth": []
                     }
                 ],
                 "description": "Creates a Bearer token with permissions: methods (or \"*\") and path prefixes. The token value is returned once; only its SHA-256 hash is stored. The response has no id: list the tokens to get it.",
@@ -442,7 +442,7 @@ const docTemplate = `{
                         }
                     },
                     "401": {
-                        "description": "Missing or wrong admin key. Error: 'Unauthorized'",
+                        "description": "Missing, expired or invalid session token. Error: 'Unauthorized'",
                         "schema": {
                             "$ref": "#/definitions/admin.errorResponse"
                         }
@@ -466,7 +466,7 @@ const docTemplate = `{
             "delete": {
                 "security": [
                     {
-                        "AdminKey": []
+                        "BearerAuth": []
                     }
                 ],
                 "description": "The token stops working at once.",
@@ -507,7 +507,7 @@ const docTemplate = `{
                         }
                     },
                     "401": {
-                        "description": "Missing or wrong admin key. Error: 'Unauthorized'",
+                        "description": "Missing, expired or invalid session token. Error: 'Unauthorized'",
                         "schema": {
                             "$ref": "#/definitions/admin.errorResponse"
                         }
@@ -531,7 +531,7 @@ const docTemplate = `{
             "get": {
                 "security": [
                     {
-                        "AdminKey": []
+                        "BearerAuth": []
                     }
                 ],
                 "description": "Usernames of a domain. Secrets are never returned.",
@@ -562,7 +562,7 @@ const docTemplate = `{
                         }
                     },
                     "401": {
-                        "description": "Missing or wrong admin key. Error: 'Unauthorized'",
+                        "description": "Missing, expired or invalid session token. Error: 'Unauthorized'",
                         "schema": {
                             "$ref": "#/definitions/admin.errorResponse"
                         }
@@ -584,10 +584,10 @@ const docTemplate = `{
             "post": {
                 "security": [
                     {
-                        "AdminKey": []
+                        "BearerAuth": []
                     }
                 ],
-                "description": "Creates a user of a restricted domain with its own secret. Send the secret in the body (at least 32 characters) or omit it: then the server generates one and returns it in this response, the only time it is shown. The user signs each request with HMAC-SHA256 using that secret and sends it in the Authorization header as LipstickHMAC user, ts, nonce and sig. Usernames: 1 to 64 letters, digits, dots, underscores, at signs or hyphens.\nExample: curl -k -X POST 'https://127.0.0.1:5052/domains/localhost/visitor-users' -H 'Content-Type: application/json' -H 'Authorization: \u003cadmin_secret_key\u003e' -d '{\"username\": \"jtorres\"}'. Without the Authorization header the answer is 401.",
+                "description": "Creates a user of a restricted domain with its own secret. Send the secret in the body (at least 32 characters) or omit it: then the server generates one and returns it in this response, the only time it is shown. The user signs each request with HMAC-SHA256 using that secret and sends it in the Authorization header as LipstickHMAC user, ts, nonce and sig. Usernames: 1 to 64 letters, digits, dots, underscores, at signs or hyphens.\nExample: after logging in (see /login), curl -k -X POST 'https://127.0.0.1:5052/domains/localhost/visitor-users' -H 'Content-Type: application/json' -H 'Authorization: Bearer \u003ctoken\u003e' -d '{\"username\": \"jtorres\"}'. Without a valid token the answer is 401.",
                 "consumes": [
                     "application/json"
                 ],
@@ -630,7 +630,7 @@ const docTemplate = `{
                         }
                     },
                     "401": {
-                        "description": "Missing or wrong admin key. Error: 'Unauthorized'",
+                        "description": "Missing, expired or invalid session token. Error: 'Unauthorized'",
                         "schema": {
                             "$ref": "#/definitions/admin.errorResponse"
                         }
@@ -654,7 +654,7 @@ const docTemplate = `{
             "delete": {
                 "security": [
                     {
-                        "AdminKey": []
+                        "BearerAuth": []
                     }
                 ],
                 "description": "Removes the user; their access ends at once.",
@@ -689,7 +689,7 @@ const docTemplate = `{
                         }
                     },
                     "401": {
-                        "description": "Missing or wrong admin key. Error: 'Unauthorized'",
+                        "description": "Missing, expired or invalid session token. Error: 'Unauthorized'",
                         "schema": {
                             "$ref": "#/definitions/admin.errorResponse"
                         }
@@ -713,7 +713,7 @@ const docTemplate = `{
             "post": {
                 "security": [
                     {
-                        "AdminKey": []
+                        "BearerAuth": []
                     }
                 ],
                 "description": "Replaces the secret of a user and returns the new one, shown once. The old secret stops working at once.",
@@ -748,7 +748,7 @@ const docTemplate = `{
                         }
                     },
                     "401": {
-                        "description": "Missing or wrong admin key. Error: 'Unauthorized'",
+                        "description": "Missing, expired or invalid session token. Error: 'Unauthorized'",
                         "schema": {
                             "$ref": "#/definitions/admin.errorResponse"
                         }
@@ -783,6 +783,101 @@ const docTemplate = `{
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/admin.statusResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/login": {
+            "post": {
+                "description": "Checks an admin account and returns a session token. Send the token on every change as \"Authorization: Bearer \u003ctoken\u003e\". The token expires after 12 hours. Five wrong passwords lock the account for 15 minutes. Accounts are created on the server machine with: lipstick-server admin create -username NAME.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "session"
+                ],
+                "summary": "Log in",
+                "parameters": [
+                    {
+                        "description": "Account name and password",
+                        "name": "credentials",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/admin.loginBody"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/admin.loginResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Body is not JSON with username and password",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Invalid username or password. The message does not say which of the two was wrong",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Too many failed logins; the Retry-After header says how long to wait",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "The session could not be created",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/logout": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Ends the session of the token sent in the Authorization header. The token stops working at once.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "session"
+                ],
+                "summary": "Log out",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/admin.statusResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Missing, expired or invalid session token. Error: 'Unauthorized'",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "The session could not be ended",
+                        "schema": {
+                            "$ref": "#/definitions/admin.errorResponse"
                         }
                     }
                 }
@@ -1001,6 +1096,35 @@ const docTemplate = `{
                 }
             }
         },
+        "admin.loginBody": {
+            "type": "object",
+            "properties": {
+                "password": {
+                    "type": "string",
+                    "example": "a-long-password"
+                },
+                "username": {
+                    "type": "string",
+                    "example": "jtorres"
+                }
+            }
+        },
+        "admin.loginResponse": {
+            "type": "object",
+            "properties": {
+                "expiresAt": {
+                    "type": "string"
+                },
+                "token": {
+                    "type": "string",
+                    "example": "q8Vx2nqT1sK9wEZl0cHjR3pYb7LmUo4aGdNfXiTr5Ys"
+                },
+                "username": {
+                    "type": "string",
+                    "example": "jtorres"
+                }
+            }
+        },
         "admin.statusResponse": {
             "type": "object",
             "properties": {
@@ -1189,8 +1313,8 @@ const docTemplate = `{
         }
     },
     "securityDefinitions": {
-        "AdminKey": {
-            "description": "Admin key, sent as it is (no \"Bearer\" prefix).",
+        "BearerAuth": {
+            "description": "Session token from /login, sent as \"Bearer \u003ctoken\u003e\".",
             "type": "apiKey",
             "name": "Authorization",
             "in": "header"
@@ -1205,7 +1329,7 @@ var SwaggerInfo = &swag.Spec{
 	BasePath:         "/",
 	Schemes:          []string{"https"},
 	Title:            "Lipstick Admin API",
-	Description:      "Administration of a Lipstick server: domains, live state, request log, visitor users and API tokens, and access rules.\n\nThe API is served over TLS. The example configuration binds it to 127.0.0.1, so only the machine itself can reach it. Reads of domains, statistics and the request log need no key, which is safe only while the port is not reachable from other machines. Every change needs the admin key.\n\nUse the Authorize button and send the admin key from admin_secret_key in server/config.yml. It is sent as it is, without a \"Bearer\" prefix.\n\nExample with curl. The certificate is self-signed, so use -k. Replace the key with admin_secret_key from server/config.yml:\n\n`curl -k -X POST 'https://127.0.0.1:5052/domains/localhost/visitor-users' -H 'Content-Type: application/json' -H 'Authorization: <admin_secret_key>' -d '{\"username\": \"jtorres\"}'`\n\nWithout the Authorization header the answer is 401 Unauthorized.",
+	Description:      "Administration of a Lipstick server: domains, live state, request log, visitor users and API tokens, and access rules.\n\nThe API is served over TLS. The example configuration binds it to 127.0.0.1, so only the machine itself can reach it. Reads of domains, statistics and the request log need no key. Every change needs a session token.\n\n**Accounts.** Admin accounts are created on the server machine, from the console, with a password typed in the terminal: `lipstick-server admin create -username NAME`. There is no key to configure. Without an account no change is possible. Other console commands: `admin list`, `admin reset-password -username NAME`, `admin disable -username NAME`, `admin enable -username NAME`.\n\n**Sessions.** `POST /login` with the account's username and password returns a token. Send it on each change as `Authorization: Bearer <token>`. It expires after 12 hours; `POST /logout` ends it. Five wrong passwords lock the account for 15 minutes.\n\n**Example with curl.** The certificate is self-signed, so use -k:\n\n`curl -k -X POST 'https://127.0.0.1:5052/login' -H 'Content-Type: application/json' -d '{\"username\": \"jtorres\", \"password\": \"<your password>\"}'`\n\nCopy the token from the answer, then:\n\n`curl -k -X POST 'https://127.0.0.1:5052/domains/localhost/visitor-users' -H 'Content-Type: application/json' -H 'Authorization: Bearer <token>' -d '{\"username\": \"jtorres\"}'`\n\nWithout a valid token the answer is 401 Unauthorized.",
 	InfoInstanceName: "swagger",
 	SwaggerTemplate:  docTemplate,
 	LeftDelim:        "{{",

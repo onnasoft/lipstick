@@ -1,8 +1,8 @@
 package admin
 
 // panelHTML is the admin panel. It reads the read-only admin endpoints, which
-// need no key: the admin port listens on 127.0.0.1 only. Changing domains still
-// requires the admin key, and the panel never asks for it. All values from the
+// need no login: the admin port listens on 127.0.0.1 only. Changing anything
+// requires a session token from /login, and the panel never asks for one. All values from the
 // server are written as text, never as HTML, so a domain name cannot inject markup.
 const panelHTML = `<!DOCTYPE html>
 <html lang="es">

@@ -17,7 +17,7 @@ CONFIG="$SERVER_DIR/config.yml"
 
 if [[ ! -f "$CONFIG" ]]; then
   echo "No existe $CONFIG" >&2
-  echo "Crea server/config.yml con admin_secret_key, database, nats y tls (revisa los nombres de las claves en server/config/config.go)." >&2
+  echo "Crea server/config.yml con database, nats y tls (revisa los nombres de las claves en server/config/config.go)." >&2
   exit 1
 fi
 

@@ -82,6 +82,26 @@ definitions:
         example: message describing what went wrong
         type: string
     type: object
+  admin.loginBody:
+    properties:
+      password:
+        example: a-long-password
+        type: string
+      username:
+        example: jtorres
+        type: string
+    type: object
+  admin.loginResponse:
+    properties:
+      expiresAt:
+        type: string
+      token:
+        example: q8Vx2nqT1sK9wEZl0cHjR3pYb7LmUo4aGdNfXiTr5Ys
+        type: string
+      username:
+        example: jtorres
+        type: string
+    type: object
   admin.statusResponse:
     properties:
       status:
@@ -215,15 +235,21 @@ info:
   description: |-
     Administration of a Lipstick server: domains, live state, request log, visitor users and API tokens, and access rules.
 
-    The API is served over TLS. The example configuration binds it to 127.0.0.1, so only the machine itself can reach it. Reads of domains, statistics and the request log need no key, which is safe only while the port is not reachable from other machines. Every change needs the admin key.
+    The API is served over TLS. The example configuration binds it to 127.0.0.1, so only the machine itself can reach it. Reads of domains, statistics and the request log need no key. Every change needs a session token.
 
-    Use the Authorize button and send the admin key from admin_secret_key in server/config.yml. It is sent as it is, without a "Bearer" prefix.
+    **Accounts.** Admin accounts are created on the server machine, from the console, with a password typed in the terminal: `lipstick-server admin create -username NAME`. There is no key to configure. Without an account no change is possible. Other console commands: `admin list`, `admin reset-password -username NAME`, `admin disable -username NAME`, `admin enable -username NAME`.
 
-    Example with curl. The certificate is self-signed, so use -k. Replace the key with admin_secret_key from server/config.yml:
+    **Sessions.** `POST /login` with the account's username and password returns a token. Send it on each change as `Authorization: Bearer <token>`. It expires after 12 hours; `POST /logout` ends it. Five wrong passwords lock the account for 15 minutes.
 
-    `curl -k -X POST 'https://127.0.0.1:5052/domains/localhost/visitor-users' -H 'Content-Type: application/json' -H 'Authorization: <admin_secret_key>' -d '{"username": "jtorres"}'`
+    **Example with curl.** The certificate is self-signed, so use -k:
 
-    Without the Authorization header the answer is 401 Unauthorized.
+    `curl -k -X POST 'https://127.0.0.1:5052/login' -H 'Content-Type: application/json' -d '{"username": "jtorres", "password": "<your password>"}'`
+
+    Copy the token from the answer, then:
+
+    `curl -k -X POST 'https://127.0.0.1:5052/domains/localhost/visitor-users' -H 'Content-Type: application/json' -H 'Authorization: Bearer <token>' -d '{"username": "jtorres"}'`
+
+    Without a valid token the answer is 401 Unauthorized.
   title: Lipstick Admin API
   version: "1.0"
 paths:
@@ -287,7 +313,7 @@ paths:
           schema:
             $ref: '#/definitions/admin.errorResponse'
         "401":
-          description: 'Missing or wrong admin key. Error: ''Unauthorized'''
+          description: 'Missing, expired or invalid session token. Error: ''Unauthorized'''
           schema:
             $ref: '#/definitions/admin.errorResponse'
         "500":
@@ -295,7 +321,7 @@ paths:
           schema:
             $ref: '#/definitions/admin.errorResponse'
       security:
-      - AdminKey: []
+      - BearerAuth: []
       summary: Create a domain
       tags:
       - domains
@@ -316,7 +342,7 @@ paths:
           schema:
             $ref: '#/definitions/admin.statusResponse'
         "401":
-          description: 'Missing or wrong admin key. Error: ''Unauthorized'''
+          description: 'Missing, expired or invalid session token. Error: ''Unauthorized'''
           schema:
             $ref: '#/definitions/admin.errorResponse'
         "404":
@@ -329,7 +355,7 @@ paths:
           schema:
             $ref: '#/definitions/admin.errorResponse'
       security:
-      - AdminKey: []
+      - BearerAuth: []
       summary: Delete a domain
       tags:
       - domains
@@ -394,7 +420,7 @@ paths:
           schema:
             $ref: '#/definitions/admin.errorResponse'
         "401":
-          description: 'Missing or wrong admin key. Error: ''Unauthorized'''
+          description: 'Missing, expired or invalid session token. Error: ''Unauthorized'''
           schema:
             $ref: '#/definitions/admin.errorResponse'
         "404":
@@ -413,7 +439,7 @@ paths:
           schema:
             $ref: '#/definitions/admin.errorResponse'
       security:
-      - AdminKey: []
+      - BearerAuth: []
       summary: Change a domain
       tags:
       - domains
@@ -477,7 +503,7 @@ paths:
               $ref: '#/definitions/admin.visitorTokenItem'
             type: array
         "401":
-          description: 'Missing or wrong admin key. Error: ''Unauthorized'''
+          description: 'Missing, expired or invalid session token. Error: ''Unauthorized'''
           schema:
             $ref: '#/definitions/admin.errorResponse'
         "404":
@@ -489,7 +515,7 @@ paths:
           schema:
             $ref: '#/definitions/admin.errorResponse'
       security:
-      - AdminKey: []
+      - BearerAuth: []
       summary: List API tokens
       tags:
       - visitor-auth
@@ -525,7 +551,7 @@ paths:
           schema:
             $ref: '#/definitions/admin.errorResponse'
         "401":
-          description: 'Missing or wrong admin key. Error: ''Unauthorized'''
+          description: 'Missing, expired or invalid session token. Error: ''Unauthorized'''
           schema:
             $ref: '#/definitions/admin.errorResponse'
         "404":
@@ -537,7 +563,7 @@ paths:
           schema:
             $ref: '#/definitions/admin.errorResponse'
       security:
-      - AdminKey: []
+      - BearerAuth: []
       summary: Create an API token
       tags:
       - visitor-auth
@@ -567,7 +593,7 @@ paths:
           schema:
             $ref: '#/definitions/admin.errorResponse'
         "401":
-          description: 'Missing or wrong admin key. Error: ''Unauthorized'''
+          description: 'Missing, expired or invalid session token. Error: ''Unauthorized'''
           schema:
             $ref: '#/definitions/admin.errorResponse'
         "404":
@@ -580,7 +606,7 @@ paths:
           schema:
             $ref: '#/definitions/admin.errorResponse'
       security:
-      - AdminKey: []
+      - BearerAuth: []
       summary: Revoke an API token
       tags:
       - visitor-auth
@@ -603,7 +629,7 @@ paths:
               type: string
             type: array
         "401":
-          description: 'Missing or wrong admin key. Error: ''Unauthorized'''
+          description: 'Missing, expired or invalid session token. Error: ''Unauthorized'''
           schema:
             $ref: '#/definitions/admin.errorResponse'
         "404":
@@ -615,7 +641,7 @@ paths:
           schema:
             $ref: '#/definitions/admin.errorResponse'
       security:
-      - AdminKey: []
+      - BearerAuth: []
       summary: List visitor users
       tags:
       - visitor-auth
@@ -624,7 +650,7 @@ paths:
       - application/json
       description: |-
         Creates a user of a restricted domain with its own secret. Send the secret in the body (at least 32 characters) or omit it: then the server generates one and returns it in this response, the only time it is shown. The user signs each request with HMAC-SHA256 using that secret and sends it in the Authorization header as LipstickHMAC user, ts, nonce and sig. Usernames: 1 to 64 letters, digits, dots, underscores, at signs or hyphens.
-        Example: curl -k -X POST 'https://127.0.0.1:5052/domains/localhost/visitor-users' -H 'Content-Type: application/json' -H 'Authorization: <admin_secret_key>' -d '{"username": "jtorres"}'. Without the Authorization header the answer is 401.
+        Example: after logging in (see /login), curl -k -X POST 'https://127.0.0.1:5052/domains/localhost/visitor-users' -H 'Content-Type: application/json' -H 'Authorization: Bearer <token>' -d '{"username": "jtorres"}'. Without a valid token the answer is 401.
       parameters:
       - description: Domain name
         in: path
@@ -652,7 +678,7 @@ paths:
           schema:
             $ref: '#/definitions/admin.errorResponse'
         "401":
-          description: 'Missing or wrong admin key. Error: ''Unauthorized'''
+          description: 'Missing, expired or invalid session token. Error: ''Unauthorized'''
           schema:
             $ref: '#/definitions/admin.errorResponse'
         "404":
@@ -664,7 +690,7 @@ paths:
           schema:
             $ref: '#/definitions/admin.errorResponse'
       security:
-      - AdminKey: []
+      - BearerAuth: []
       summary: Add a visitor user
       tags:
       - visitor-auth
@@ -690,7 +716,7 @@ paths:
           schema:
             $ref: '#/definitions/admin.statusResponse'
         "401":
-          description: 'Missing or wrong admin key. Error: ''Unauthorized'''
+          description: 'Missing, expired or invalid session token. Error: ''Unauthorized'''
           schema:
             $ref: '#/definitions/admin.errorResponse'
         "404":
@@ -703,7 +729,7 @@ paths:
           schema:
             $ref: '#/definitions/admin.errorResponse'
       security:
-      - AdminKey: []
+      - BearerAuth: []
       summary: Delete a visitor user
       tags:
       - visitor-auth
@@ -730,7 +756,7 @@ paths:
           schema:
             $ref: '#/definitions/admin.visitorUserResponse'
         "401":
-          description: 'Missing or wrong admin key. Error: ''Unauthorized'''
+          description: 'Missing, expired or invalid session token. Error: ''Unauthorized'''
           schema:
             $ref: '#/definitions/admin.errorResponse'
         "404":
@@ -744,7 +770,7 @@ paths:
           schema:
             $ref: '#/definitions/admin.errorResponse'
       security:
-      - AdminKey: []
+      - BearerAuth: []
       summary: Rotate a visitor user's secret
       tags:
       - visitor-auth
@@ -761,6 +787,74 @@ paths:
       summary: Health check
       tags:
       - system
+  /login:
+    post:
+      consumes:
+      - application/json
+      description: 'Checks an admin account and returns a session token. Send the
+        token on every change as "Authorization: Bearer <token>". The token expires
+        after 12 hours. Five wrong passwords lock the account for 15 minutes. Accounts
+        are created on the server machine with: lipstick-server admin create -username
+        NAME.'
+      parameters:
+      - description: Account name and password
+        in: body
+        name: credentials
+        required: true
+        schema:
+          $ref: '#/definitions/admin.loginBody'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/admin.loginResponse'
+        "400":
+          description: Body is not JSON with username and password
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
+        "401":
+          description: Invalid username or password. The message does not say which
+            of the two was wrong
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
+        "429":
+          description: Too many failed logins; the Retry-After header says how long
+            to wait
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
+        "500":
+          description: The session could not be created
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
+      summary: Log in
+      tags:
+      - session
+  /logout:
+    post:
+      description: Ends the session of the token sent in the Authorization header.
+        The token stops working at once.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/admin.statusResponse'
+        "401":
+          description: 'Missing, expired or invalid session token. Error: ''Unauthorized'''
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
+        "500":
+          description: The session could not be ended
+          schema:
+            $ref: '#/definitions/admin.errorResponse'
+      security:
+      - BearerAuth: []
+      summary: Log out
+      tags:
+      - session
   /requests:
     get:
       description: 'Finished HTTP requests, newest first: domain, port the visitor
@@ -833,8 +927,8 @@ paths:
 schemes:
 - https
 securityDefinitions:
-  AdminKey:
-    description: Admin key, sent as it is (no "Bearer" prefix).
+  BearerAuth:
+    description: Session token from /login, sent as "Bearer <token>".
     in: header
     name: Authorization
     type: apiKey

@@ -70,7 +70,7 @@ func Migrate(conf config.DatabaseConfig) {
 		log.Fatal(err)
 	}
 
-	if err := connection.AutoMigrate(&Domain{}, &DailyConsumption{}, &RequestLogEntry{}, &VisitorUser{}, &VisitorToken{}); err != nil {
+	if err := connection.AutoMigrate(&Domain{}, &DailyConsumption{}, &RequestLogEntry{}, &VisitorUser{}, &VisitorToken{}, &AdminUser{}, &AdminSession{}); err != nil {
 		log.Fatal(err.Error())
 	}
 	// Visitor users used to hold a password hash. That scheme is gone: the column is

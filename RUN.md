@@ -30,24 +30,32 @@ La primera vez se genera un certificado TLS autofirmado en `server/certs/`. El s
 
 Si el servidor no arranca, el mensaje indica qué falta: la configuración, un puerto ocupado o una base de datos o NATS sin responder.
 
-### Crear el dominio
+### Crear tu cuenta de administrador
 
-Cada dominio necesita un registro con una clave que el cliente usará. Esa clave no es la clave de admin. Créala con la admin API, usando la clave de `admin_secret_key` de `server/config.yml`:
+Antes de tocar la API necesitas una cuenta de administrador. Se crea una vez, en la máquina del servidor, desde la consola. Te pedirá la contraseña dos veces, sin mostrarla:
 
 ```bash
-ADMIN=$(sed -n 's/^admin_secret_key: "\(.*\)"/\1/p' server/config.yml)
+lipstick-server admin create -username jtorres
+```
+
+### Crear el dominio
+
+Cada dominio necesita un registro con una clave que el cliente usará. Esa clave no es una cuenta de admin. Entra con tu cuenta y créala con la admin API. El `TOKEN` de abajo lo obtiene de `/login`; reemplaza la contraseña por la tuya:
+
+```bash
+TOKEN=$(curl -sk -X POST https://127.0.0.1:5052/login -H 'Content-Type: application/json' -d '{"username":"jtorres","password":"<tu contraseña>"}' | python3 -c 'import sys,json; print(json.load(sys.stdin)["token"])')
 CLIENT_KEY=$(openssl rand -hex 24)
 echo "$CLIENT_KEY" > client_key.txt   # guarda la clave del cliente
 
 curl -sk -X POST https://localhost:5052/domains \
-  -H "Authorization: $ADMIN" \
+  -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' \
   --data "{\"name\":\"localhost\",\"apiKey\":\"$CLIENT_KEY\",\"allowMultipleConnections\":true}"
 ```
 
-Para ver los dominios registrados: `curl -sk https://localhost:5052/domains -H "Authorization: $ADMIN"`. La respuesta no incluye la clave del cliente; la clave solo se puede escribir, no leer.
+Para ver los dominios registrados: `curl -sk https://localhost:5052/domains -H "Authorization: Bearer $TOKEN"`. La respuesta no incluye la clave del cliente; la clave solo se puede escribir, no leer.
 
-Para ver el consumo diario de un dominio entre dos fechas (formato `YYYY-MM-DD`): `curl -sk "https://localhost:5052/domains/localhost/traffic?from=2026-01-01&to=2026-12-31" -H "Authorization: $ADMIN"`. Ya no está en el puerto de clientes.
+Para ver el consumo diario de un dominio entre dos fechas (formato `YYYY-MM-DD`): `curl -sk "https://localhost:5052/domains/localhost/traffic?from=2026-01-01&to=2026-12-31" -H "Authorization: Bearer $TOKEN"`. Ya no está en el puerto de clientes.
 
 La admin API solo escucha en `127.0.0.1`, así que no es accesible desde otras máquinas. Usa `-k` porque el certificado es autofirmado.
 

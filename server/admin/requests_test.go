@@ -36,7 +36,7 @@ func TestRequestsNeedNoKey(t *testing.T) {
 
 func TestRequestsFilterByDomain(t *testing.T) {
 	a := requestsAdmin()
-	rec := do(a, http.MethodGet, "/requests?domain=b.example.com", testKey)
+	rec := do(a, http.MethodGet, "/requests?domain=b.example.com", "Bearer "+testKey)
 	var got []manager.RequestRecord
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || len(got) != 1 || got[0].Path != "/y" {
 		t.Fatalf("filter wrong: %s (%v)", rec.Body.String(), err)
@@ -46,7 +46,7 @@ func TestRequestsFilterByDomain(t *testing.T) {
 func TestRequestsRejectBadLimit(t *testing.T) {
 	a := requestsAdmin()
 	for _, q := range []string{"limit=0", "limit=abc", "limit=-3"} {
-		if rec := do(a, http.MethodGet, "/requests?"+q, testKey); rec.Code != http.StatusBadRequest {
+		if rec := do(a, http.MethodGet, "/requests?"+q, "Bearer "+testKey); rec.Code != http.StatusBadRequest {
 			t.Errorf("%s: got %d, want 400", q, rec.Code)
 		}
 	}
@@ -61,7 +61,7 @@ func TestRequestsParseTimeRange(t *testing.T) {
 		got = q
 		return nil, nil
 	})
-	rec := do(a, http.MethodGet, "/requests?from=2026-11-01&to=2026-11-02", testKey)
+	rec := do(a, http.MethodGet, "/requests?from=2026-11-01&to=2026-11-02", "Bearer "+testKey)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("got %d: %s", rec.Code, rec.Body.String())
 	}
@@ -72,7 +72,7 @@ func TestRequestsParseTimeRange(t *testing.T) {
 
 func TestRequestsRejectBadTime(t *testing.T) {
 	a := requestsAdmin()
-	if rec := do(a, http.MethodGet, "/requests?from=yesterday", testKey); rec.Code != http.StatusBadRequest {
+	if rec := do(a, http.MethodGet, "/requests?from=yesterday", "Bearer "+testKey); rec.Code != http.StatusBadRequest {
 		t.Fatalf("bad from: got %d, want 400", rec.Code)
 	}
 }

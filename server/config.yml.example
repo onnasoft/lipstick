@@ -6,8 +6,9 @@
 # TLS es obligatorio: el servidor no acepta conexiones en texto plano.
 # Las claves desconocidas hacen que el servidor no arranque.
 
-# CAMBIAR. Clave de la admin API. Genera una con: openssl rand -hex 24
-admin_secret_key: "change-me-run-openssl-rand-hex-24"
+# Las cuentas de la admin API se crean desde la consola del servidor:
+#   lipstick-server admin create -username NOMBRE
+# No hace falta ninguna clave aquí.
 
 # Visitantes: aquí entran las peticiones públicas (https://).
 proxy:

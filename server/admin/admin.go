@@ -14,7 +14,8 @@ type Admin struct {
 	engine      *gin.Engine
 	authManager auth.AuthManager
 	addr        string
-	adminKey    string
+	store       adminStore // admin accounts and sessions
+	logins      loginLimiter
 	tlsConfig   *tls.Config
 	onChanged   func(domain string)
 	stats       func() []manager.DomainStats
@@ -44,16 +45,15 @@ func (a *Admin) domainChanged(domain string) {
 	}
 }
 
-// SetupAdmin builds the admin API. adminKey is the value clients must send in
-// the Authorization header. When tlsConfig is not nil, the API is served over
-// TLS, so the key is not sent in plain text.
-func SetupAdmin(addr, adminKey string, tlsConfig *tls.Config) *Admin {
+// SetupAdmin builds the admin API. Changes need a session token from /login, so
+// the API is served over TLS.
+func SetupAdmin(addr string, store adminStore, tlsConfig *tls.Config) *Admin {
 	gin.SetMode(gin.ReleaseMode)
 
 	admin := &Admin{
 		authManager: auth.MakeAuthManager(),
 		addr:        addr,
-		adminKey:    adminKey,
+		store:       store,
 		tlsConfig:   tlsConfig,
 	}
 
