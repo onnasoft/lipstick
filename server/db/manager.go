@@ -16,11 +16,16 @@ var (
 	defaultConnection *gorm.DB
 )
 
-func NewConnection(conf config.DatabaseConfig) (*gorm.DB, error) {
-	dsn := fmt.Sprintf(
-		"host=%s user=%s dbname=%s sslmode=%s password=%s",
-		conf.Host, conf.User, conf.Database, conf.SSLMode, conf.Password,
+// databaseDSN builds the connection string. Every field matters: the port in particular.
+func databaseDSN(conf config.DatabaseConfig) string {
+	return fmt.Sprintf(
+		"host=%s port=%d user=%s dbname=%s sslmode=%s password=%s",
+		conf.Host, conf.Port, conf.User, conf.Database, conf.SSLMode, conf.Password,
 	)
+}
+
+func NewConnection(conf config.DatabaseConfig) (*gorm.DB, error) {
+	dsn := databaseDSN(conf)
 
 	connection, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
 	if err != nil {
