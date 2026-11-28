@@ -684,6 +684,11 @@ Lipstick exposes local ports to the internet through a reverse tunnel. The main 
 - **Checked and accepted as RFC 7230 allows:** absolute-form request targets, and bare LF line endings.
 - **Verified:** helper tests for each case, and the live probes through the TLS proxy. Valid chunked and Content-Length uploads (5 MiB and 20 MiB) still arrive with the same digests.
 
+### 72. Database restarts validated; the configured database port was ignored (validation and fix)
+- **Found and fixed:** the connection string left out the port, so `database.port` was validated and documented but never used; every connection went to 5432. Production runs on 5432, so nothing changed for it, but any other port was silently ignored. The string is now built by `databaseDSN`, with the port (`db/manager_test.go`).
+- **Validated, on a throwaway PostgreSQL 18 instance on port 5433 with its own database, a second server on other ports, and a connected client:** while the database was stopped, `/health` answered 503 with `{"database":"down"}`, visitors kept receiving 200 (the proxy does not ask the database for each request), and the server logged the failures and kept the requests for a retry. After the database returned, `/health` answered 200 within about 12 seconds, the node status reporting resumed, and the requests held during the outage were stored.
+- **Not done:** production's database was not restarted. The retry logs are noisy (one line per failed write), which is acceptable for now but worth limiting.
+
 ## Recommended order
 
 1. Items 1, 2, 3, and 4: authentication, unpredictable tickets, TLS verification, and admin API hardening.

@@ -128,7 +128,7 @@ The system must remain stable under network failures, client disconnections, bac
 - [x] Validate backend timeouts. (a silent backend gets 504 after 60 s; found missing and fixed, item 68)
 - [x] Validate abrupt client disconnections. (aborted downloads leave the server serving)
 - [x] Validate server restarts. (restarted several times; visitors served again and the tunnel reconnects)
-- [ ] Validate database restarts.
+- [x] Validate database restarts. (run on a throwaway PostgreSQL instance, not production: health 503 with database down while visitors kept being served, requests held during the outage were stored after recovery, health back to 200. Production's database was not restarted; see revision.md, item 72)
 - [x] Validate TLS errors. (plain HTTP, junk and a bad handshake on the TLS ports; the server keeps serving)
 - [x] Validate reconnect behavior. (the tunnel client reconnects after a server restart)
 - [x] Validate concurrent access and race conditions. (full suite under -race, several runs)
