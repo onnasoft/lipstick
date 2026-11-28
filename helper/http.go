@@ -105,6 +105,9 @@ const (
 	headerReadTimeout = 10 * time.Second
 )
 
+// ErrHeadersTooLarge is returned when a request's headers pass maxHeaderBytes.
+var ErrHeadersTooLarge = errors.New("headers exceed 64 KiB")
+
 // ReadUntilHeadersEnd reads a header block up to and including the empty line
 // that ends it. Both \r\n and \n line endings are accepted.
 //
@@ -126,7 +129,7 @@ func ReadUntilHeadersEnd(conn net.Conn) ([]byte, error) {
 		}
 		result = append(result, one[0])
 		if len(result) > maxHeaderBytes {
-			return nil, errors.New("headers exceed 64 KiB")
+			return nil, ErrHeadersTooLarge
 		}
 		// An empty line ends the headers: "\n\n", "\r\n\r\n", or a mix.
 		if n := len(result); n >= 2 && (string(result[n-2:]) == "\n\n" || (n >= 3 && string(result[n-3:]) == "\n\r\n")) {

@@ -116,7 +116,7 @@ The system must remain stable under network failures, client disconnections, bac
 ### Required improvements
 
 - [x] Review open concurrency issues. (the race-enabled suite passes; see revision.md, item 68)
-- [ ] Validate domain/client association consistency.
+- [x] Validate domain/client association consistency. (a key of one domain cannot open another domain's tunnel or mux session; with two live clients on two domains, each domain answers only from its own client, 100 simultaneous visitors split correctly, and a client with the other domain's key gets 401)
 - [ ] Improve handling of HTTP edge cases. (partly: a request the parser cannot read, such as a non-numeric `Content-Length`, now gets 400; other edge cases are not reviewed yet)
 - [x] Validate chunked transfer encoding. (5 MiB chunked upload, digest verified live)
 - [x] Validate `Expect: 100-continue`. (20 MiB upload with the header, digest verified live)

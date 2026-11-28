@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"strings"
 )
 
 // NewListenerManagerTCP listens for TLS connections only. A nil tlsConfig is a
@@ -93,15 +94,28 @@ func (l *ListenerManager) handleHTTPConn(conn *ConnWithBuffer) error {
 	if l.onHTTPConn != nil {
 		b, err := ReadUntilHeadersEnd(conn)
 		if err != nil {
+			if errors.Is(err, ErrHeadersTooLarge) {
+				conn.Write([]byte(RequestHeaderFieldsTooLargeResponse))
+			}
 			return err
 		}
 		conn.Unread(b)
+		// Checked on the raw header block: the parser drops Content-Length when a request
+		// also has Transfer-Encoding, so the parsed request no longer shows the conflict.
+		if hasHeader(b, "Content-Length") && hasHeader(b, "Transfer-Encoding") {
+			conn.Write([]byte(BadRequestResponse))
+			return errors.New("Content-Length and Transfer-Encoding cannot both be sent")
+		}
 		req, err := http.ReadRequest(bufio.NewReader(bytes.NewBuffer(b)))
 		if err != nil {
 			// A request the parser cannot read (a bad Content-Length, a broken header)
 			// gets a 400 before the connection is closed, instead of silence.
 			conn.Write([]byte(BadRequestResponse))
 			return err
+		}
+		if reason := invalidRequest(req); reason != "" {
+			conn.Write([]byte(BadRequestResponse))
+			return errors.New(reason)
 		}
 		l.onHTTPConn(conn, req)
 	}
@@ -113,4 +127,25 @@ func (l *ListenerManager) handleTCPConn(conn net.Conn) error {
 		l.onTCPConn(conn)
 	}
 	return nil
+}
+
+// invalidRequest names the reason a parsed request must not be served, or "" when it may be.
+// Routing needs a Host. (Content-Length with Transfer-Encoding is refused on the raw headers
+// in handleHTTPConn: they describe the body's end differently, so a proxy and a backend that
+// disagree about it can be made to read one request as two.)
+func invalidRequest(req *http.Request) string {
+	if req.Host == "" {
+		return "a Host header is required"
+	}
+	return ""
+}
+
+// hasHeader reports whether a raw header block contains the named field, in any case.
+func hasHeader(block []byte, name string) bool {
+	for _, line := range bytes.Split(block, []byte("\n")) {
+		if i := bytes.IndexByte(line, ':'); i > 0 && strings.EqualFold(strings.TrimSpace(string(line[:i])), name) {
+			return true
+		}
+	}
+	return false
 }

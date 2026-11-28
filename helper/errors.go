@@ -35,3 +35,10 @@ var BadRequestResponse = "HTTP/1.1 400 Bad Request\r\n" +
 	"Content-Length: 0\r\n" +
 	"Connection: close\r\n" +
 	"\r\n"
+
+// RequestHeaderFieldsTooLargeResponse is a complete HTTP/1.1 431 response, sent when the
+// headers of a request exceed the limit. The connection is closed after it.
+var RequestHeaderFieldsTooLargeResponse = "HTTP/1.1 431 Request Header Fields Too Large\r\n" +
+	"Content-Length: 0\r\n" +
+	"Connection: close\r\n" +
+	"\r\n"

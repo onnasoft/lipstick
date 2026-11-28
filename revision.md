@@ -673,6 +673,12 @@ Lipstick exposes local ports to the internet through a reverse tunnel. The main 
 - **Now:** the listener answers `400 Bad Request` with `Connection: close` before closing (`helper.BadRequestResponse`, `helper/listener.go`).
 - **Verified:** `TestMalformedContentLengthGets400` (helper); live, through the TLS proxy: `HTTP/1.1 400 Bad Request`, and the proxy keeps serving 200. The manager package passes under `-race`.
 
+### 70. Domain and client association validated (validation)
+- **Rule checked:** a tunnel client proves the key of the domain named in its Host header. A proof made with another domain's key must not open that domain's tunnel or mux session, and the domain's own key must.
+- **Verified:** `TestTunnelProofBelongsToItsDomain` and `TestMuxProofBelongsToItsDomain` (two domains, two keys, wrong key refused without a reply, right key accepted); live: a visitor for a domain with no client gets 502 while the connected domain answers 200.
+- **Closed later (see the next validation step):** two real clients on two domains, live. Results: each domain answered only from its own client and backend; a Host header for the other domain was routed to it; 50 simultaneous visitors per domain all got their own domain's answer; a client with the other domain's key got 401 and was refused.
+- **Changes left in place:** the server certificate was regenerated with `DNS:other.localhost` added (same CA-less self-signed setup, one year). The old pair is kept in /tmp/claude-1000/certs-backup. The test domain was created and deleted with direct SQL, so those two writes are not in the audit log.
+
 ## Recommended order
 
 1. Items 1, 2, 3, and 4: authentication, unpredictable tickets, TLS verification, and admin API hardening.
