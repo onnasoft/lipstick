@@ -28,6 +28,16 @@ func (manager *Manager) admitVisitor(conn net.Conn, domain string, answerHTTP bo
 	if rc, ok := conn.(*helper.RemoteConn); ok {
 		return rc, true
 	}
+	// A disabled domain serves nobody: its visitors get 503 and nothing is counted against
+	// its limits.
+	if rec, ok := manager.domainRecord(domain); ok && rec.Disabled {
+		manager.refusals.note("domain_disabled", domain, conn.RemoteAddr())
+		if answerHTTP {
+			fmt.Fprint(conn, "HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+		}
+		conn.Close()
+		return nil, false
+	}
 	refused := manager.quotaRefusal(domain)
 	var release func()
 	if refused == nil {

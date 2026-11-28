@@ -21,9 +21,17 @@ func (f *fakeAuth) GetDomain(name string) (*auth.Domain, error) {
 	}
 	return nil, http.ErrNoCookie
 }
-func (f *fakeAuth) AddDomain(*auth.Domain) error                  { return nil }
-func (f *fakeAuth) UpdateDomain(*auth.Domain) error               { return nil }
-func (f *fakeAuth) DelDomain(uint) error                          { return nil }
+func (f *fakeAuth) AddDomain(*auth.Domain) error    { return nil }
+func (f *fakeAuth) UpdateDomain(*auth.Domain) error { return nil }
+func (f *fakeAuth) DelDomain(uint) error            { return nil }
+func (f *fakeAuth) SetDomainDisabled(name string, disabled bool) error {
+	d, ok := f.domains[name]
+	if !ok {
+		return auth.ErrDomainNotFound
+	}
+	d.Disabled = disabled
+	return nil
+}
 func (f *fakeAuth) AddVisitorUser(d, u, s string) (string, error) { return "", nil }
 func (f *fakeAuth) RotateVisitorUser(d, u string) (string, error) { return "", nil }
 func (f *fakeAuth) DeleteVisitorUser(d, u string) error           { return nil }

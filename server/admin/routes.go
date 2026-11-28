@@ -67,6 +67,8 @@ func configureRouter(admin *Admin) {
 	r.GET(domainNamePath, router.getDomain)
 	r.GET(domainNamePath+"/traffic", router.getTraffic)
 	r.POST("/domains", router.audited("domain.create", nil, router.addDomain))
+	r.POST(domainNamePath+"/disable", router.audited("domain.disable", targetOf("domainName"), router.disableDomain))
+	r.POST(domainNamePath+"/enable", router.audited("domain.enable", targetOf("domainName"), router.enableDomain))
 	r.PATCH(domainNamePath, router.audited("domain.update", targetOf("domainName"), router.updateDomain))
 	r.DELETE(domainNamePath, router.audited("domain.delete", targetOf("domainName"), router.deleteDomain))
 
@@ -93,6 +95,7 @@ type domainView struct {
 	AllowedCIDRs             []string `json:"allowedCidrs"`
 	BandwidthBytesPerSecond  int64    `json:"bandwidthBytesPerSecond"`
 	MonthlyQuotaBytes        int64    `json:"monthlyQuotaBytes"`
+	Disabled                 bool     `json:"disabled"`
 }
 
 func toDomainView(d *auth.Domain) domainView {
@@ -105,6 +108,7 @@ func toDomainView(d *auth.Domain) domainView {
 		AllowedCIDRs:             splitRules(d.AllowedCIDRs),
 		BandwidthBytesPerSecond:  d.BandwidthBytesPerSecond,
 		MonthlyQuotaBytes:        d.MonthlyQuotaBytes,
+		Disabled:                 d.Disabled,
 	}
 }
 
@@ -211,14 +215,85 @@ func (r *router) addDomain(c *gin.Context) {
 		return
 	}
 
+	if err := validDomainName(domain.Name); err != nil {
+		c.JSON(http.StatusBadRequest, errorResponse{Error: err.Error()})
+		return
+	}
+	// A key is the client's password. Omitted, the server makes one and returns it once;
+	// given, it must be long enough to guess only with great effort.
+	generated := false
+	if domain.ApiKey == "" {
+		key, err := newAPIKey()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, errorResponse{Error: "Unable to create the key"})
+			return
+		}
+		domain.ApiKey = key
+		generated = true
+	} else if len(domain.ApiKey) < minAPIKeyLength {
+		c.JSON(http.StatusBadRequest, errorResponse{Error: "apiKey must be at least 32 characters, or omitted so the server generates one"})
+		return
+	}
+	if _, err := r.admin.authManager.GetDomain(domain.Name); err == nil {
+		c.JSON(http.StatusConflict, errorResponse{Error: "a domain with that name already exists"})
+		return
+	}
+
 	if err := r.admin.authManager.AddDomain(domain); err != nil {
 		c.JSON(http.StatusInternalServerError, errorResponse{Error: "Unable to add domain"})
 		return
 	}
 
-	setAudit(c, domain.Name, map[string]any{"fields": bodyFields(raw)})
+	setAudit(c, domain.Name, map[string]any{"fields": bodyFields(raw), "generatedKey": generated})
+	if generated {
+		c.JSON(http.StatusOK, domainCreated{Status: "ok", ApiKey: domain.ApiKey})
+		return
+	}
 	c.JSON(http.StatusOK, statusResponse{Status: "ok"})
 }
+
+// setDomainDisabled turns a domain off or on. Turning it off disconnects its client at
+// once; the client keeps retrying and is refused until the domain is enabled again.
+func (r *router) setDomainDisabled(c *gin.Context, disabled bool) {
+	if !r.authorized(c) {
+		return
+	}
+	name := c.Param("domainName")
+	if err := r.admin.authManager.SetDomainDisabled(name, disabled); err != nil {
+		writeLookupError(c, err)
+		return
+	}
+	r.admin.domainChanged(name)
+	c.JSON(http.StatusOK, statusResponse{Status: "ok"})
+}
+
+// @Summary Disable a domain
+// @Description Turns the domain off: its client is disconnected and refused, and its visitors get 503. Settings, visitor users and traffic history are kept; enable the domain to bring it back.
+// @Tags domains
+// @Security BearerAuth
+// @Produce json
+// @Param domainName path string true "Domain name"
+// @Success 200 {object} statusResponse
+// @Failure 401 {object} errorResponse "Missing, expired or invalid session token. Error: 'Unauthorized'"
+// @Failure 404 {object} errorResponse "The domain does not exist. Error: 'Domain not found'"
+// @Failure 500 {object} errorResponse "The domain could not be changed. Error: 'Unable to update domain'"
+// @Failure 503 {object} errorResponse "The change was not made: the audit log is not available"
+// @Router /domains/{domainName}/disable [post]
+func (r *router) disableDomain(c *gin.Context) { r.setDomainDisabled(c, true) }
+
+// @Summary Enable a domain
+// @Description Turns a disabled domain back on: its client may connect again, and its visitors are served.
+// @Tags domains
+// @Security BearerAuth
+// @Produce json
+// @Param domainName path string true "Domain name"
+// @Success 200 {object} statusResponse
+// @Failure 401 {object} errorResponse "Missing, expired or invalid session token. Error: 'Unauthorized'"
+// @Failure 404 {object} errorResponse "The domain does not exist. Error: 'Domain not found'"
+// @Failure 500 {object} errorResponse "The domain could not be changed. Error: 'Unable to update domain'"
+// @Failure 503 {object} errorResponse "The change was not made: the audit log is not available"
+// @Router /domains/{domainName}/enable [post]
+func (r *router) enableDomain(c *gin.Context) { r.setDomainDisabled(c, false) }
 
 // @Summary Change a domain
 // @Description Changes any of: apiKey, allowMultipleConnections, passthrough (not while the domain requires visitor auth), allowedCidrs (an empty list removes the rules), authLatched (only false: clearing the restricted mode). Clients of the domain are disconnected and reconnect with the new policy.
@@ -257,8 +332,8 @@ func (r *router) updateDomain(c *gin.Context) {
 	// Checked assertions: a wrong JSON type is a 400, not a panic.
 	if raw, ok := domain["apiKey"]; ok {
 		key, isString := raw.(string)
-		if !isString || key == "" {
-			c.JSON(http.StatusBadRequest, errorResponse{Error: "apiKey must be a non-empty string"})
+		if !isString || len(key) < minAPIKeyLength {
+			c.JSON(http.StatusBadRequest, errorResponse{Error: "apiKey must be a string of at least 32 characters"})
 			return
 		}
 		record.ApiKey = key

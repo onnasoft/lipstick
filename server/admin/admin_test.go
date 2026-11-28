@@ -28,6 +28,7 @@ func (fakeAuth) GetDomain(name string) (*auth.Domain, error) {
 func (fakeAuth) AddDomain(*auth.Domain) error                               { return nil }
 func (fakeAuth) UpdateDomain(*auth.Domain) error                            { return nil }
 func (fakeAuth) DelDomain(uint) error                                       { return nil }
+func (fakeAuth) SetDomainDisabled(string, bool) error                       { return nil }
 func (fakeAuth) AddVisitorUser(d, u, s string) (string, error)              { return "", nil }
 func (fakeAuth) RotateVisitorUser(d, u string) (string, error)              { return "", nil }
 func (fakeAuth) DeleteVisitorUser(d, u string) error                        { return nil }
@@ -191,6 +192,11 @@ type recordingAuth struct {
 	added *auth.Domain
 }
 
+// recordingAuth knows no domain yet, so a create is not a duplicate.
+func (r *recordingAuth) GetDomain(string) (*auth.Domain, error) {
+	return nil, auth.ErrDomainNotFound
+}
+
 func (r *recordingAuth) AddDomain(d *auth.Domain) error {
 	r.added = d
 	return nil
@@ -213,14 +219,14 @@ func TestCreateDomainMultipleConnectionsDefaults(t *testing.T) {
 	a.SetAudit(newMemAudit())
 	configureRouter(a)
 
-	if r := postDomain(a, `{"name":"a.example.com","apiKey":"0123456789abcdef"}`); r.Code != http.StatusOK {
+	if r := postDomain(a, `{"name":"a.example.com","apiKey":"0123456789abcdef0123456789abcdef0123456789abcdef"}`); r.Code != http.StatusOK {
 		t.Fatalf("create without field: %d", r.Code)
 	}
 	if !rec.added.AllowMultipleConnections {
 		t.Fatal("omitted field should default to true")
 	}
 
-	if r := postDomain(a, `{"name":"b.example.com","apiKey":"0123456789abcdef","allowMultipleConnections":false}`); r.Code != http.StatusOK {
+	if r := postDomain(a, `{"name":"b.example.com","apiKey":"0123456789abcdef0123456789abcdef0123456789abcdef","allowMultipleConnections":false}`); r.Code != http.StatusOK {
 		t.Fatalf("create with false: %d", r.Code)
 	}
 	if rec.added.AllowMultipleConnections {

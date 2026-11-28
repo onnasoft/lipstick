@@ -89,6 +89,12 @@ func (manager *Manager) handleMux(conn net.Conn, req *http.Request) {
 		conn.Close()
 		return
 	}
+	if record.Disabled {
+		countTunnelFailure("domain_disabled")
+		logger.Default.With("domain", domainName, "reason", "domain_disabled").Error("tunnel setup refused")
+		conn.Close()
+		return
+	}
 	if !manager.nonces.take(nonce, now) {
 		logger.Default.Error("Mux connection with a replayed nonce for domain:", domainName)
 		countTunnelFailure("mux_replayed_nonce")

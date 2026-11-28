@@ -101,3 +101,10 @@ type readyResponse struct {
 	Status  string   `json:"status" example:"ready"`
 	Reasons []string `json:"reasons" example:"draining"`
 }
+
+// domainCreated answers POST /domains. ApiKey is present only when the server made the key:
+// it is shown once, and the server never returns it again.
+type domainCreated struct {
+	Status string `json:"status" example:"ok"`
+	ApiKey string `json:"apiKey,omitempty" example:"3f9c0e5a7b1d4e2f8a6c9b0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f"`
+}

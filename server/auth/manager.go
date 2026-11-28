@@ -19,6 +19,8 @@ type Domain struct {
 	// BandwidthBytesPerSecond and MonthlyQuotaBytes: 0 means the server default.
 	BandwidthBytesPerSecond int64 `json:"bandwidthBytesPerSecond"`
 	MonthlyQuotaBytes       int64 `json:"monthlyQuotaBytes"`
+	// Disabled domains refuse their client and answer their visitors with 503.
+	Disabled bool `json:"disabled"`
 }
 
 type AuthManager interface {
@@ -27,6 +29,8 @@ type AuthManager interface {
 	AddDomain(domain *Domain) error
 	UpdateDomain(domain *Domain) error
 	DelDomain(id uint) error
+	// SetDomainDisabled turns a domain off or on. ErrDomainNotFound if it does not exist.
+	SetDomainDisabled(name string, disabled bool) error
 
 	// Visitor authentication. See visitor.go.
 	AddVisitorUser(domain, username, secret string) (string, error)

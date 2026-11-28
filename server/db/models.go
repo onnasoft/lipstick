@@ -20,6 +20,9 @@ type Domain struct {
 	BandwidthBytesPerSecond int64 `gorm:"not null;default:0"`
 	// MonthlyQuotaBytes caps the traffic of the domain in a calendar month. 0 uses the server default.
 	MonthlyQuotaBytes int64 `gorm:"not null;default:0"`
+	// Disabled turns the domain off: its client cannot connect and its visitors get 503.
+	// Its settings and its history stay; enabling it again brings it back.
+	Disabled bool `gorm:"not null;default:false"`
 }
 
 // VisitorUser is a user of a restricted domain. Each user has a secret of its own,

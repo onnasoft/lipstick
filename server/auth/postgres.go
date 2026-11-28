@@ -97,6 +97,7 @@ func (p *PostgresAuthManager) GetDomains() ([]*Domain, error) {
 				AllowedCIDRs:             domain.AllowedCIDRs,
 				BandwidthBytesPerSecond:  domain.BandwidthBytesPerSecond,
 				MonthlyQuotaBytes:        domain.MonthlyQuotaBytes,
+				Disabled:                 domain.Disabled,
 			}
 		}
 		return result, nil
@@ -128,6 +129,7 @@ func (p *PostgresAuthManager) GetDomain(domain string) (*Domain, error) {
 			AllowedCIDRs:             result.AllowedCIDRs,
 			BandwidthBytesPerSecond:  result.BandwidthBytesPerSecond,
 			MonthlyQuotaBytes:        result.MonthlyQuotaBytes,
+			Disabled:                 result.Disabled,
 		}, nil
 	})
 	if err != nil {
@@ -174,6 +176,9 @@ func (p *PostgresAuthManager) UpdateDomain(domain *Domain) error {
 	return nil
 }
 
+// DelDomain deletes a domain with the visitor users and tokens that belong to it. Their
+// secrets must not outlive the domain. Its traffic history is kept, as the record of what
+// it served.
 func (p *PostgresAuthManager) DelDomain(id uint) error {
 	result := &db.Domain{}
 	tx := p.db.First(result, id)
@@ -181,12 +186,35 @@ func (p *PostgresAuthManager) DelDomain(id uint) error {
 		return tx.Error
 	}
 
-	tx = p.db.Delete(&db.Domain{}, id)
-	if tx.Error != nil {
-		return tx.Error
+	err := p.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("domain_id = ?", id).Delete(&db.VisitorUser{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("domain_id = ?", id).Delete(&db.VisitorToken{}).Error; err != nil {
+			return err
+		}
+		return tx.Delete(&db.Domain{}, id).Error
+	})
+	if err != nil {
+		return err
 	}
 
 	p.cache.Delete("domain_" + result.Name)
+	p.cache.Delete("all_domains")
+	return nil
+}
+
+// SetDomainDisabled turns a domain off or on. The cache is cleared at once, so this server
+// sees the change without waiting for the cache to expire.
+func (p *PostgresAuthManager) SetDomainDisabled(name string, disabled bool) error {
+	tx := p.db.Model(&db.Domain{}).Where("name = ?", name).Update("disabled", disabled)
+	if tx.Error != nil {
+		return tx.Error
+	}
+	if tx.RowsAffected == 0 {
+		return ErrDomainNotFound
+	}
+	p.cache.Delete("domain_" + name)
 	p.cache.Delete("all_domains")
 	return nil
 }

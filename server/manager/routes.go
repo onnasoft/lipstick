@@ -55,6 +55,14 @@ func (r *router) upgrade(c *gin.Context) {
 		return
 	}
 
+	// A disabled domain takes no tunnel client, not even with the right key.
+	if domain.Disabled {
+		countTunnelFailure("domain_disabled")
+		logger.Default.With("domain", domainName, "reason", "domain_disabled").Error("tunnel setup refused")
+		c.JSON(http.StatusForbidden, gin.H{"error": "Domain disabled"})
+		return
+	}
+
 	// Authenticate the tunnel client before hijacking the connection.
 	// An empty ApiKey must never match, so a misconfigured domain stays closed.
 	providedKey := c.GetHeader("Authorization")

@@ -21,15 +21,15 @@ func findEvent(t *testing.T, mem *memAudit, action string) audit.Event {
 // A change is recorded with who and what, and its outcome. The record names the
 // fields that were set, never their values.
 func TestDomainChangeIsRecordedWithFieldNamesOnly(t *testing.T) {
-	a := newTestAdmin(testKey)
+	a, _ := lifecycleAdmin()
 	mem := a.audit.(*memAudit)
 	const secret = "secret-key-value-that-must-not-appear"
-	rec := send(a, http.MethodPost, "/domains", testKey, `{"name":"app.example.com","apiKey":"`+secret+`"}`)
+	rec := send(a, http.MethodPost, "/domains", testKey, `{"name":"new.example.com","apiKey":"`+secret+`"}`)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("create: %d %s", rec.Code, rec.Body.String())
 	}
 	e := findEvent(t, mem, "domain.create")
-	if e.Outcome != audit.OutcomeSucceeded || e.Target != "app.example.com" || e.Actor != "tester" || e.StatusCode != 200 {
+	if e.Outcome != audit.OutcomeSucceeded || e.Target != "new.example.com" || e.Actor != "tester" || e.StatusCode != 200 {
 		t.Fatalf("event: %+v", e)
 	}
 	fields, _ := e.Details["fields"].([]string)
@@ -45,7 +45,7 @@ func TestDomainChangeIsRecordedWithFieldNamesOnly(t *testing.T) {
 func TestFailedChangeIsRecorded(t *testing.T) {
 	a := newTestAdmin(testKey)
 	mem := a.audit.(*memAudit)
-	if rec := send(a, http.MethodPatch, "/domains/missing.example.com", testKey, `{"apiKey":"0123456789abcdef"}`); rec.Code != http.StatusNotFound {
+	if rec := send(a, http.MethodPatch, "/domains/missing.example.com", testKey, `{"apiKey":"0123456789abcdef0123456789abcdef"}`); rec.Code != http.StatusNotFound {
 		t.Fatalf("patch unknown domain: %d", rec.Code)
 	}
 	e := findEvent(t, mem, "domain.update")
@@ -60,7 +60,7 @@ func TestChangeIsRefusedWhenItCannotBeRecorded(t *testing.T) {
 	a := newTestAdmin(testKey)
 	mem := a.audit.(*memAudit)
 	mem.failBegin = true
-	rec := send(a, http.MethodPost, "/domains", testKey, `{"name":"app.example.com","apiKey":"0123456789abcdef"}`)
+	rec := send(a, http.MethodPost, "/domains", testKey, `{"name":"app.example.com","apiKey":"0123456789abcdef0123456789abcdef"}`)
 	if rec.Code != http.StatusServiceUnavailable || !strings.Contains(rec.Body.String(), "not made") {
 		t.Fatalf("change without a record: %d %s", rec.Code, rec.Body.String())
 	}
@@ -74,7 +74,7 @@ func TestChangeIsRefusedWhenItCannotBeRecorded(t *testing.T) {
 func TestNoAuditLogMeansNoChanges(t *testing.T) {
 	a := newTestAdmin(testKey)
 	a.audit = nil
-	if rec := send(a, http.MethodPost, "/domains", testKey, `{"name":"app.example.com","apiKey":"0123456789abcdef"}`); rec.Code != http.StatusServiceUnavailable {
+	if rec := send(a, http.MethodPost, "/domains", testKey, `{"name":"app.example.com","apiKey":"0123456789abcdef0123456789abcdef"}`); rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("change with no audit log: %d", rec.Code)
 	}
 }
