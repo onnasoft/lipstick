@@ -121,7 +121,7 @@ func writeLookupError(c *gin.Context, err error) {
 // @Tags domains
 // @Produce json
 // @Success 200 {array} domainView
-// @Failure 500 {object} errorResponse "Internal error"
+// @Failure 500 {object} errorResponse "The domains could not be read. Error: 'Unable to get domains'"
 // @Router /domains [get]
 func (r *router) getDomains(c *gin.Context) {
 
@@ -145,8 +145,8 @@ func (r *router) getDomains(c *gin.Context) {
 // @Produce json
 // @Param domainName path string true "Domain name"
 // @Success 200 {object} domainView
-// @Failure 404 {object} errorResponse "Domain or user not found"
-// @Failure 500 {object} errorResponse "Internal error"
+// @Failure 404 {object} errorResponse "The domain does not exist. Error: 'Domain not found'"
+// @Failure 500 {object} errorResponse "The domain could not be read. Error: 'Unable to get domain'"
 // @Router /domains/{domainName} [get]
 func (r *router) getDomain(c *gin.Context) {
 
@@ -168,9 +168,9 @@ func (r *router) getDomain(c *gin.Context) {
 // @Produce json
 // @Param domain body domainCreateBody true "Domain to create"
 // @Success 200 {object} statusResponse
-// @Failure 400 {object} errorResponse "Bad request: a field is missing, malformed or not allowed"
-// @Failure 401 {object} errorResponse "Missing or wrong admin key"
-// @Failure 500 {object} errorResponse "Internal error"
+// @Failure 400 {object} errorResponse "Invalid body. The message names the field, for example 'allowedCidrs must be a list of strings' or an invalid network or address"
+// @Failure 401 {object} errorResponse "Missing or wrong admin key. Error: 'Unauthorized'"
+// @Failure 500 {object} errorResponse "The domain could not be saved. Error: 'Unable to add domain'"
 // @Router /domains [post]
 func (r *router) addDomain(c *gin.Context) {
 	if !r.authorized(c) {
@@ -218,11 +218,11 @@ func (r *router) addDomain(c *gin.Context) {
 // @Param domainName path string true "Domain name"
 // @Param changes body domainChangeBody true "Fields to change; send only those"
 // @Success 200 {object} statusResponse
-// @Failure 400 {object} errorResponse "Bad request: a field is missing, malformed or not allowed"
-// @Failure 401 {object} errorResponse "Missing or wrong admin key"
-// @Failure 404 {object} errorResponse "Domain or user not found"
-// @Failure 409 {object} errorResponse "Conflict with the domain's current state"
-// @Failure 500 {object} errorResponse "Internal error"
+// @Failure 400 {object} errorResponse "Invalid body. The message names the field, for example 'allowMultipleConnections must be true or false', 'passthrough must be true or false', 'allowedCidrs must be a list of addresses or networks', or 'authLatched can only be set to false: clients set the restricted mode'"
+// @Failure 401 {object} errorResponse "Missing or wrong admin key. Error: 'Unauthorized'"
+// @Failure 404 {object} errorResponse "The domain does not exist. Error: 'Domain not found'"
+// @Failure 409 {object} errorResponse "Passthrough cannot be turned on for a domain that requires visitor authentication. Error: 'passthrough cannot be turned on: the domain requires visitor authentication'"
+// @Failure 500 {object} errorResponse "The domain could not be updated. Error: 'Unable to update domain'"
 // @Router /domains/{domainName} [patch]
 func (r *router) updateDomain(c *gin.Context) {
 	if !r.authorized(c) {
@@ -321,9 +321,9 @@ func (r *router) updateDomain(c *gin.Context) {
 // @Produce json
 // @Param domainName path string true "Domain name"
 // @Success 200 {object} statusResponse
-// @Failure 401 {object} errorResponse "Missing or wrong admin key"
-// @Failure 404 {object} errorResponse "Domain or user not found"
-// @Failure 500 {object} errorResponse "Internal error"
+// @Failure 401 {object} errorResponse "Missing or wrong admin key. Error: 'Unauthorized'"
+// @Failure 404 {object} errorResponse "The domain does not exist. Error: 'Domain not found'"
+// @Failure 500 {object} errorResponse "The domain could not be deleted. Error: 'Unable to delete domain'"
 // @Router /domains/{domainName} [delete]
 func (r *router) deleteDomain(c *gin.Context) {
 	if !r.authorized(c) {
@@ -367,8 +367,8 @@ func (r *router) health(c *gin.Context) {
 // @Param from query string true "First day, YYYY-MM-DD"
 // @Param to query string true "Last day, YYYY-MM-DD"
 // @Success 200 {object} trafficResponse
-// @Failure 400 {object} errorResponse "Bad request: a field is missing, malformed or not allowed"
-// @Failure 500 {object} errorResponse "Internal error"
+// @Failure 400 {object} errorResponse "Invalid date. Error: 'Invalid 'from' parameter, use YYYY-MM-DD' or 'Invalid 'to' parameter, use YYYY-MM-DD'"
+// @Failure 500 {object} errorResponse "The traffic could not be read. Error: 'Unable to get config', 'Unable to connect to database' or 'Unable to read traffic'"
 // @Router /domains/{domainName}/traffic [get]
 func (r *router) getTraffic(c *gin.Context) {
 	domainName := c.Param("domainName")
@@ -466,8 +466,8 @@ func (r *router) ui(c *gin.Context) {
 // @Param from query string false "Start of the range: RFC 3339 or YYYY-MM-DD"
 // @Param to query string false "End of the range: RFC 3339 or YYYY-MM-DD (a date includes the whole day)"
 // @Success 200 {array} manager.RequestRecord
-// @Failure 400 {object} errorResponse "Bad request: a field is missing, malformed or not allowed"
-// @Failure 500 {object} errorResponse "Internal error"
+// @Failure 400 {object} errorResponse "Invalid parameter. Error: 'port must be between 1 and 65535', 'limit must be a positive number', 'from must be RFC 3339 or YYYY-MM-DD', 'to must be RFC 3339 or YYYY-MM-DD', or a range error"
+// @Failure 500 {object} errorResponse "The request log could not be read. Error: 'could not read the request log'"
 // @Router /requests [get]
 func (r *router) getRequests(c *gin.Context) {
 	q := manager.RequestQuery{Domain: c.Query("domain"), Limit: 100}
@@ -556,6 +556,7 @@ type visitorUserBody struct {
 
 // @Summary Add a visitor user
 // @Description Creates a user of a restricted domain with its own secret. Send the secret in the body (at least 32 characters) or omit it: then the server generates one and returns it in this response, the only time it is shown. The user signs each request with HMAC-SHA256 using that secret and sends it in the Authorization header as LipstickHMAC user, ts, nonce and sig. Usernames: 1 to 64 letters, digits, dots, underscores, at signs or hyphens.
+// @Description Example: curl -k -X POST 'https://127.0.0.1:5052/domains/localhost/visitor-users' -H 'Content-Type: application/json' -H 'Authorization: <admin_secret_key>' -d '{"username": "jtorres"}'. Without the Authorization header the answer is 401.
 // @Tags visitor-auth
 // @Security AdminKey
 // @Accept json
@@ -563,10 +564,10 @@ type visitorUserBody struct {
 // @Param domainName path string true "Domain name"
 // @Param user body visitorUserBody true "Username and optional secret"
 // @Success 200 {object} visitorUserResponse
-// @Failure 400 {object} errorResponse "Bad request: a field is missing, malformed or not allowed"
-// @Failure 401 {object} errorResponse "Missing or wrong admin key"
-// @Failure 404 {object} errorResponse "Domain or user not found"
-// @Failure 500 {object} errorResponse "Internal error"
+// @Failure 400 {object} errorResponse "Invalid body, or the user could not be created. Errors: 'username must be 1 to 64 letters, digits, dots, underscores, at signs or hyphens', 'secret must be at least 32 characters', 'a visitor user with that name already exists', or malformed JSON"
+// @Failure 401 {object} errorResponse "Missing or wrong admin key. Error: 'Unauthorized'"
+// @Failure 404 {object} errorResponse "The domain does not exist. Error: 'Domain not found'"
+// @Failure 500 {object} errorResponse "The domain could not be read. Error: 'Unable to get domain'"
 // @Router /domains/{domainName}/visitor-users [post]
 func (r *router) addVisitorUser(c *gin.Context) {
 	name, ok := r.visitorDomain(c)
@@ -600,9 +601,9 @@ func (r *router) addVisitorUser(c *gin.Context) {
 // @Param domainName path string true "Domain name"
 // @Param username path string true "Username"
 // @Success 200 {object} visitorUserResponse
-// @Failure 401 {object} errorResponse "Missing or wrong admin key"
-// @Failure 404 {object} errorResponse "Domain or user not found"
-// @Failure 500 {object} errorResponse "Internal error"
+// @Failure 401 {object} errorResponse "Missing or wrong admin key. Error: 'Unauthorized'"
+// @Failure 404 {object} errorResponse "The domain or the user does not exist. Errors: 'Domain not found' or 'visitor user not found'"
+// @Failure 500 {object} errorResponse "The secret could not be rotated. Error: 'unable to rotate secret'"
 // @Router /domains/{domainName}/visitor-users/{username}/rotate [post]
 func (r *router) rotateVisitorUser(c *gin.Context) {
 	name, ok := r.visitorDomain(c)
@@ -629,9 +630,9 @@ func (r *router) rotateVisitorUser(c *gin.Context) {
 // @Produce json
 // @Param domainName path string true "Domain name"
 // @Success 200 {array} string
-// @Failure 401 {object} errorResponse "Missing or wrong admin key"
-// @Failure 404 {object} errorResponse "Domain or user not found"
-// @Failure 500 {object} errorResponse "Internal error"
+// @Failure 401 {object} errorResponse "Missing or wrong admin key. Error: 'Unauthorized'"
+// @Failure 404 {object} errorResponse "The domain does not exist. Error: 'Domain not found'"
+// @Failure 500 {object} errorResponse "The users could not be listed. Error: 'unable to list users'"
 // @Router /domains/{domainName}/visitor-users [get]
 func (r *router) listVisitorUsers(c *gin.Context) {
 	name, ok := r.visitorDomain(c)
@@ -654,9 +655,9 @@ func (r *router) listVisitorUsers(c *gin.Context) {
 // @Param domainName path string true "Domain name"
 // @Param username path string true "Username"
 // @Success 200 {object} statusResponse
-// @Failure 401 {object} errorResponse "Missing or wrong admin key"
-// @Failure 404 {object} errorResponse "Domain or user not found"
-// @Failure 500 {object} errorResponse "Internal error"
+// @Failure 401 {object} errorResponse "Missing or wrong admin key. Error: 'Unauthorized'"
+// @Failure 404 {object} errorResponse "The domain or the user does not exist. Errors: 'Domain not found' or 'visitor user not found'"
+// @Failure 500 {object} errorResponse "The domain could not be read. Error: 'Unable to get domain'"
 // @Router /domains/{domainName}/visitor-users/{username} [delete]
 func (r *router) deleteVisitorUser(c *gin.Context) {
 	name, ok := r.visitorDomain(c)
@@ -686,10 +687,10 @@ type visitorTokenBody struct {
 // @Param domainName path string true "Domain name"
 // @Param token body visitorTokenBody true "Name, methods and path prefixes"
 // @Success 200 {object} visitorTokenCreated
-// @Failure 400 {object} errorResponse "Bad request: a field is missing, malformed or not allowed"
-// @Failure 401 {object} errorResponse "Missing or wrong admin key"
-// @Failure 404 {object} errorResponse "Domain or user not found"
-// @Failure 500 {object} errorResponse "Internal error"
+// @Failure 400 {object} errorResponse "Invalid body, or the token could not be created. Errors: 'token name must be 1 to 64 characters', 'a token needs at least one method, or *', or malformed JSON"
+// @Failure 401 {object} errorResponse "Missing or wrong admin key. Error: 'Unauthorized'"
+// @Failure 404 {object} errorResponse "The domain does not exist. Error: 'Domain not found'"
+// @Failure 500 {object} errorResponse "The domain could not be read. Error: 'Unable to get domain'"
 // @Router /domains/{domainName}/visitor-tokens [post]
 func (r *router) addVisitorToken(c *gin.Context) {
 	name, ok := r.visitorDomain(c)
@@ -716,9 +717,9 @@ func (r *router) addVisitorToken(c *gin.Context) {
 // @Produce json
 // @Param domainName path string true "Domain name"
 // @Success 200 {array} visitorTokenItem
-// @Failure 401 {object} errorResponse "Missing or wrong admin key"
-// @Failure 404 {object} errorResponse "Domain or user not found"
-// @Failure 500 {object} errorResponse "Internal error"
+// @Failure 401 {object} errorResponse "Missing or wrong admin key. Error: 'Unauthorized'"
+// @Failure 404 {object} errorResponse "The domain does not exist. Error: 'Domain not found'"
+// @Failure 500 {object} errorResponse "The tokens could not be listed. Error: 'unable to list tokens'"
 // @Router /domains/{domainName}/visitor-tokens [get]
 func (r *router) listVisitorTokens(c *gin.Context) {
 	name, ok := r.visitorDomain(c)
@@ -748,10 +749,10 @@ func (r *router) listVisitorTokens(c *gin.Context) {
 // @Param domainName path string true "Domain name"
 // @Param id path int true "Token id"
 // @Success 200 {object} statusResponse
-// @Failure 400 {object} errorResponse "Bad request: a field is missing, malformed or not allowed"
-// @Failure 401 {object} errorResponse "Missing or wrong admin key"
-// @Failure 404 {object} errorResponse "Domain or user not found"
-// @Failure 500 {object} errorResponse "Internal error"
+// @Failure 400 {object} errorResponse "The id is not a number. Error: 'id must be a number'"
+// @Failure 401 {object} errorResponse "Missing or wrong admin key. Error: 'Unauthorized'"
+// @Failure 404 {object} errorResponse "The domain or the token does not exist. Errors: 'Domain not found' or 'visitor token not found'"
+// @Failure 500 {object} errorResponse "The domain could not be read. Error: 'Unable to get domain'"
 // @Router /domains/{domainName}/visitor-tokens/{id} [delete]
 func (r *router) revokeVisitorToken(c *gin.Context) {
 	name, ok := r.visitorDomain(c)

@@ -5,9 +5,10 @@ import "time"
 // The response bodies of the admin API. Each handler writes one of these types, so
 // the published reference cannot drift from what the server sends.
 
-// errorResponse is the body of every failed request.
+// errorResponse is the body of every failed request. The message says what went
+// wrong. Each response in the reference lists the messages that can appear there.
 type errorResponse struct {
-	Error string `json:"error" example:"Domain not found"`
+	Error string `json:"error" example:"message describing what went wrong"`
 }
 
 // statusResponse confirms a change or reports health.
