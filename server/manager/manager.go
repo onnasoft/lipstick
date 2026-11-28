@@ -209,11 +209,15 @@ func (manager *Manager) Listen() {
 		log.Fatalf("manager cannot listen on %s: %v (check manager.address in the configuration)", config.Manager.Address, err)
 	}
 
-	l := NewCustomListener(listener, manager)
-	engineErr := manager.engine.RunListener(l)
-	if engineErr != nil {
+	if engineErr := manager.ServeListener(listener); engineErr != nil {
 		log.Fatalf("manager stopped serving: %v", engineErr)
 	}
+}
+
+// ServeListener serves the manager API and tunnel connections on an already open
+// listener. Listen uses it, and the integration tests use it too.
+func (manager *Manager) ServeListener(listener net.Listener) error {
+	return manager.engine.RunListener(NewCustomListener(listener, manager))
 }
 
 func (manager *Manager) HandleHTTPConn(conn net.Conn, req *http.Request) {

@@ -7,7 +7,7 @@ require (
 	github.com/nats-io/nats.go v1.37.0
 	github.com/redis/go-redis/v9 v9.7.3
 	gopkg.in/yaml.v3 v3.0.1
-	gorm.io/gorm v1.25.12
+	gorm.io/gorm v1.30.0
 )
 
 require (
@@ -19,6 +19,7 @@ require (
 	github.com/jinzhu/now v1.1.5 // indirect
 	github.com/klauspost/compress v1.18.7 // indirect
 	github.com/kr/text v0.2.0 // indirect
+	github.com/mattn/go-sqlite3 v1.14.22 // indirect
 	github.com/nats-io/nkeys v0.4.7 // indirect
 	github.com/nats-io/nuid v1.0.1 // indirect
 	github.com/pion/dtls/v3 v3.1.16 // indirect
@@ -26,6 +27,7 @@ require (
 	github.com/pion/transport/v5 v5.0.0 // indirect
 	github.com/rogpeppe/go-internal v1.13.1 // indirect
 	golang.org/x/sync v0.20.0 // indirect
+	gorm.io/driver/sqlite v1.6.0 // indirect
 )
 
 require (

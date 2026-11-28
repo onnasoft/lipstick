@@ -33,6 +33,12 @@ func NewPostgresAuthManager() AuthManager {
 		log.Fatal(err)
 	}
 
+	return NewAuthManagerWithDB(conn)
+}
+
+// NewAuthManagerWithDB returns an auth manager on an open connection. The schema
+// must already be migrated. Production uses PostgreSQL; the tests use SQLite.
+func NewAuthManagerWithDB(conn *gorm.DB) AuthManager {
 	return &PostgresAuthManager{
 		db:       conn,
 		cacheTTL: 5 * time.Minute,

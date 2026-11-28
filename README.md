@@ -691,15 +691,26 @@ docker run -v /srv/lipstick:/etc/lipstick -p 5050:5050 -p 5051:5051 lipstick
 ```bash
 go build ./...
 go vet ./...
-go test -race ./server/... ./client/... ./helper/...
+go test -race ./...
 ```
 
-- `server/manager`: hub, listener, upgrade y ciclo de vida.
-- `server/config`: validación, flags y generación de certificados.
-- `client/tlsconf`: política de verificación.
-- `helper`: lectura de headers.
+Las pruebas se dividen en tres grupos. Ninguno necesita PostgreSQL ni NATS: la base de datos de las pruebas es SQLite (con el mismo esquema), y la presencia del cluster usa un bus en memoria que reemplaza a NATS.
 
-Las pruebas no necesitan PostgreSQL ni NATS. Las comprobaciones de extremo a extremo están descritas en `revision.md`.
+- **Unitarias** de cada paquete: framing UDP, lectura de SNI (TLS y DTLS), pruebas de nonce y prueba HMAC, relay de visitantes restringidos (orden de respuestas, cuerpos, límites), permisos de token, limitador de fuerza bruta, validación de configuración, y el paquete `helper`.
+- **De integración** (`server/manager/integration_test.go`): un servidor completo corre en el proceso de prueba con un almacén de dominios en memoria, y el cliente real se compila y se ejecuta como proceso hijo. Cubren:
+  - HTTP por el túnel, con TLS terminado en el servidor y con `https://` en el destino.
+  - Keep-alive, subida de 1 MiB verificada por hash, y 50 visitantes en paralelo.
+  - Passthrough: el visitante ve el certificado del servicio, y no el del servidor.
+  - Puertos de intranet TCP (1 MiB con cierre de escritura) y UDP (200 datagramas).
+  - Proxy DTLS hacia un servicio UDP plano, hacia un servicio DTLS verificado, y con 8 visitantes DTLS a la vez. Un servicio DTLS no confiable no recibe respuesta.
+  - Dominio restringido: sin credenciales 401, usuario 200, token inválido 401, latch activo; un cliente que pide autenticación en un dominio con passthrough es rechazado con el motivo.
+  - Dos clientes para el mismo dominio, reconexión tras reiniciar el cliente, y el puerto registrado en el log de peticiones.
+  - Un host sin túnel recibe 502.
+  - Un cluster de dos servidores que comparten base y bus: una visita que entra por uno llega al cliente conectado al otro.
+
+Para ejecutar solo las de integración: `go test -race -run '^TestIntegration' ./server/manager/`. Requiere `go build` del cliente, que el propio test hace.
+
+Lo que no cubren las pruebas automáticas: cluster entre máquinas, carga sostenida, WebSocket en dominios restringidos, expiración de flujos UDP bajo carga, y el instalador con systemd real. Esas comprobaciones están descritas en `revision.md`.
 
 ## Licencia
 

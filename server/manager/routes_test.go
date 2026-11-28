@@ -33,7 +33,6 @@ func (f *fakeAuth) CountVisitorCredentials(d string) (int, error)              {
 func (f *fakeAuth) SetAuthLatched(d string, l bool) error                      { return nil }
 
 func newTestRouter(domains map[string]*auth.Domain) *router {
-	gin.SetMode(gin.TestMode)
 	m := &Manager{authManager: &fakeAuth{domains: domains}}
 	return &router{manager: m}
 }

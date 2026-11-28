@@ -28,9 +28,10 @@ import (
 // sessions for. A visitor that reaches a server with no session for its domain is
 // relayed to a server that has one. The relay is a TLS connection to that server's
 // manager port, authenticated with a proof made with the domain key.
+var presenceEvery = 5 * time.Second // a variable so the tests can run it faster
+
 const (
 	presenceSubject  = "lipstick.presence"
-	presenceEvery    = 5 * time.Second
 	presenceTTL      = 15 * time.Second
 	relayDialTimeout = 5 * time.Second
 	relayWriteWait   = 5 * time.Second
@@ -92,17 +93,40 @@ func (c *cluster) peerFor(domain string, now time.Time) (string, bool) {
 	return best, best != ""
 }
 
-// StartCluster joins the cluster. It needs NATS, which the configuration requires
-// for a cluster. The certificate of this server is trusted for the other servers
-// unless cluster.ca_file names their CA.
-func (manager *Manager) StartCluster(conf config.ClusterConfig, tlsConfig *tls.Config) error {
+// PresenceBus carries presence messages between the servers of a cluster. NATS
+// implements it in production (see NatsBus). The tests use an in-memory bus.
+type PresenceBus interface {
+	Publish(topic string, data []byte) error
+	SubscribeBroadcast(topic string, cb func(data []byte)) error
+}
+
+// natsBus adapts the shared NATS connection to PresenceBus.
+type natsBus struct {
+	mgr *subscriptions.SubscriptionManager
+}
+
+func (b natsBus) Publish(topic string, data []byte) error { return b.mgr.Publish(topic, data) }
+
+func (b natsBus) SubscribeBroadcast(topic string, cb func(data []byte)) error {
+	_, err := b.mgr.SubscribeBroadcast(topic, func(msg *nats.Msg) { cb(msg.Data) })
+	return err
+}
+
+// NatsBus returns the presence bus on the shared NATS connection.
+func NatsBus() (PresenceBus, error) {
+	mgr, err := subscriptions.GetSubscriptionManager()
+	if err != nil {
+		return nil, fmt.Errorf("cluster needs NATS: %w", err)
+	}
+	return natsBus{mgr: mgr}, nil
+}
+
+// StartCluster joins the cluster over bus. The certificate of this server is trusted
+// for the other servers unless cluster.ca_file names their CA.
+func (manager *Manager) StartCluster(conf config.ClusterConfig, tlsConfig *tls.Config, bus PresenceBus) error {
 	roots, err := clusterRoots(conf.CAFile, tlsConfig)
 	if err != nil {
 		return err
-	}
-	mgr, err := subscriptions.GetSubscriptionManager()
-	if err != nil {
-		return fmt.Errorf("cluster needs NATS: %w", err)
 	}
 	c := &cluster{
 		advertise: conf.AdvertiseAddress,
@@ -110,16 +134,16 @@ func (manager *Manager) StartCluster(conf config.ClusterConfig, tlsConfig *tls.C
 		peers:     make(map[string]map[string]time.Time),
 		relays:    make(map[string]*relaySession),
 	}
-	if _, err := mgr.SubscribeBroadcast(presenceSubject, func(msg *nats.Msg) {
+	if err := bus.SubscribeBroadcast(presenceSubject, func(data []byte) {
 		var m presenceMsg
-		if err := json.Unmarshal(msg.Data, &m); err == nil {
+		if err := json.Unmarshal(data, &m); err == nil {
 			c.observe(m, time.Now())
 		}
 	}); err != nil {
 		return fmt.Errorf("cluster cannot subscribe to presence: %w", err)
 	}
 	manager.cluster = c
-	go manager.publishPresence(mgr)
+	go manager.publishPresence(bus)
 	logger.Default.Info("Cluster joined as", conf.AdvertiseAddress)
 	return nil
 }
@@ -149,7 +173,7 @@ func clusterRoots(caFile string, tlsConfig *tls.Config) (*x509.CertPool, error) 
 }
 
 // publishPresence announces, every presenceEvery, the domains with sessions here.
-func (manager *Manager) publishPresence(mgr *subscriptions.SubscriptionManager) {
+func (manager *Manager) publishPresence(bus PresenceBus) {
 	ticker := time.NewTicker(presenceEvery)
 	defer ticker.Stop()
 	for range ticker.C {
@@ -161,7 +185,7 @@ func (manager *Manager) publishPresence(mgr *subscriptions.SubscriptionManager) 
 			}
 			data, err := json.Marshal(presenceMsg{Server: manager.cluster.advertise, Domain: key.(string), Sessions: n})
 			if err == nil {
-				err = mgr.Publish(presenceSubject, data)
+				err = bus.Publish(presenceSubject, data)
 			}
 			if err != nil {
 				logger.Default.Error("Cannot publish presence:", err)

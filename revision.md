@@ -509,6 +509,23 @@ Lipstick exposes local ports to the internet through a reverse tunnel. The main 
 - **Not verified:** WebSocket traffic on a restricted domain; many concurrent visitors with credentials; cluster consistency of the latch (it lives in the database, and each server reads it through its cache).
 - **Limits (stated):** no per-route permissions for users; no cache for verified Basic credentials, so each Basic request costs one argon2id check; a client refused for passthrough keeps retrying with backoff.
 
+### 52. Regression suite: unit and in-process integration tests (quality)
+- **Where:** `server/manager/harness_test.go`, `server/manager/integration_test.go`, and the unit tests of each package. The client binary is built by the test itself.
+- **What:** a real server runs in-process with an in-memory domain store, the real proxy wiring (SNI, TCP, HTTP, passthrough, DTLS, intranet TCP and UDP), and the real client as a child process. No PostgreSQL or NATS is needed. Fifteen end-to-end scenarios cover TCP and UDP paths and their configurations (see the README, "Desarrollo y pruebas").
+- **Bugs found by the suite and fixed:**
+  - *Passthrough startup race (client):* the mux sessions were opened before the passthrough certificate check, so the first sessions did not carry the passthrough header, and a passthrough visitor got the server's certificate. The check now runs first.
+  - *DTLS handshake never completing in the untrusted-service scenario:* this is correct behaviour (the server drops the visitor when the local service refuses), but the test assumed the handshake completes. The test now accepts either outcome, and the helpers bound their handshakes so a stuck one fails fast instead of hanging for minutes.
+- **Verified:** `go vet ./...` is clean. `go test -race ./...` passes for every package. The integration scenarios pass three times in a row under `-race`, and the passthrough scenario five times.
+- **Not covered by the suite:** a cluster across machines; sustained load; WebSocket on a restricted domain; UDP flow expiry under load; the installer with a real systemd; PostgreSQL and NATS paths (covered by the live checks in the entries above).
+
+### 53. Tests on SQLite and an in-memory presence bus (quality)
+- **Where:** `server/auth/postgres.go` (`NewAuthManagerWithDB`), `server/manager/cluster.go` (`PresenceBus`, `NatsBus`, `StartCluster(conf, tls, bus)`), `server/manager/harness_test.go` (SQLite per test, `memBus`), `server/manager/cluster_integration_test.go`, `server/auth/visitor_db_test.go`.
+- **What:** the test suite no longer uses an in-memory domain store. Each test opens its own SQLite database with the production schema, through the production auth code (`gorm.io/driver/sqlite`). Presence between servers goes through a small `PresenceBus` interface: NATS in production, an in-memory bus in the tests. This made a two-server cluster testable in-process.
+- **Bugs found while doing it:**
+  - `gin.SetMode` was called per test server, which wrote a global while the previous server read it (a data race reported only under `-race`). It is now set once.
+- **Verified:** `go test -race ./...` passes. The integration scenarios pass three times in a row under `-race`. The cluster scenario passes repeatedly: a visit that enters one server reaches the client on the other.
+- **Not covered by the tests:** PostgreSQL-specific SQL (the SQL used is portable, but the production database is PostgreSQL); the real NATS server and its failure modes; a cluster across machines.
+
 ## Recommended order
 
 1. Items 1, 2, 3, and 4: authentication, unpredictable tickets, TLS verification, and admin API hardening.

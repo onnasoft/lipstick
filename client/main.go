@@ -75,6 +75,9 @@ const (
 // was established resets the wait.
 func startClient(proxyTarget string) {
 	fmt.Println("Connecting to", serverURL)
+	// The passthrough check comes before the sessions: a session opened earlier would
+	// not carry the passthrough header, and the server would end TLS for this client.
+	passthroughOK.Store(configuration.Passthrough && probePassthrough(proxyTarget, serverURL))
 	startMux(proxyTarget)
 	headers := http.Header{}
 	headers.Set("authorization", configuration.APISecret)

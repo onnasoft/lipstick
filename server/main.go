@@ -70,12 +70,20 @@ func main() {
 		log.Fatal(err)
 	}
 
+	// The presence bus is NATS. It is opened before the manager variable shadows the package.
+	var presenceBus manager.PresenceBus
+	if conf.Cluster != nil {
+		presenceBus, err = manager.NatsBus()
+		if err != nil {
+			log.Fatalf("cluster: %v", err)
+		}
+	}
 	requestStore := manager.NewGormRequestStore(conn)
 	manager := manager.SetupManager(tlsConfig)
 	sniProxy.SetRoute(manager.RoutePassthrough)
 	manager.StartRequestPersistence(requestStore)
 	if conf.Cluster != nil {
-		if err := manager.StartCluster(*conf.Cluster, tlsConfig); err != nil {
+		if err := manager.StartCluster(*conf.Cluster, tlsConfig, presenceBus); err != nil {
 			log.Fatalf("cluster: %v", err)
 		}
 	}

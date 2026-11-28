@@ -11,7 +11,6 @@ import (
 )
 
 func managerEngine(domains map[string]*auth.Domain) *gin.Engine {
-	gin.SetMode(gin.TestMode)
 	m := &Manager{authManager: &fakeAuth{domains: domains}}
 	configureRouter(m)
 	return m.engine
