@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"crypto/subtle"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"strconv"
@@ -109,6 +110,29 @@ func (r *router) upgrade(c *gin.Context) {
 		}
 	}
 
+	// A client may ask for visitor authentication. Asking makes the domain restricted
+	// for good: it stays restricted for every client until an admin clears it.
+	if c.GetHeader(visitorAuthHeader) == "required" {
+		if domain.Passthrough {
+			writeReason(rw, conn, "409 Conflict: visitor authentication cannot be used with passthrough")
+			return
+		}
+		n, err := r.manager.authManager.CountVisitorCredentials(domain.Name)
+		if err != nil || n == 0 {
+			writeReason(rw, conn, "409 Conflict: the domain has no visitor users or tokens; create one first")
+			return
+		}
+		if !domain.AuthLatched {
+			if err := r.manager.authManager.SetAuthLatched(domain.Name, true); err != nil {
+				writeReason(rw, conn, "500 Internal Server Error: cannot store the restricted mode")
+				return
+			}
+			logger.Default.Info(fmt.Sprintf("restricted mode latched for domain %s, requested by client at %s", domain.Name, conn.RemoteAddr()))
+		}
+	} else if domain.AuthLatched {
+		logger.Default.Info(fmt.Sprintf("client connected without requested auth: domain %s remains restricted (client at %s)", domain.Name, conn.RemoteAddr()))
+	}
+
 	hub := r.manager.getOrCreateHub(domain.Name)
 
 	rw.WriteString("HTTP/1.1 200 OK\r\n")
@@ -135,6 +159,17 @@ func (r *router) upgrade(c *gin.Context) {
 
 // intranetPortHeader carries the port a client asks to reserve.
 const intranetPortHeader = "X-Lipstick-Intranet-Port"
+
+// visitorAuthHeader is sent by a client that asks for visitor authentication.
+const visitorAuthHeader = "X-Lipstick-Visitor-Auth"
+
+// writeReason answers the upgrade with a status line that carries the reason, and closes.
+func writeReason(rw *bufio.ReadWriter, conn net.Conn, status string) {
+	rw.WriteString("HTTP/1.1 " + status + "\r\n")
+	rw.WriteString("Content-Length: 0\r\n\r\n")
+	rw.Flush()
+	conn.Close()
+}
 
 // intranetUDPPortHeader carries the UDP port a client asks to reserve.
 const intranetUDPPortHeader = "X-Lipstick-Intranet-UDP-Port"

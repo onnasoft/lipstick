@@ -78,15 +78,15 @@ The current tunnel authentication protects the connection between the client and
 
 ### Required improvements
 
-- [ ] Visitor authentication.
-- [ ] Configurable HTTP Basic Authentication.
-- [ ] Token-based access control.
+- [x] Visitor authentication. (implemented: see README, Autenticación de visitantes)
+- [x] Configurable HTTP Basic Authentication. (implemented: see README, Autenticación de visitantes)
+- [x] Token-based access control. (implemented: see README, Autenticación de visitantes)
 - [ ] IP allowlisting.
 - [ ] CIDR-based access rules.
 - [ ] Rate limiting by IP.
 - [ ] Rate limiting by domain.
 - [ ] Connection limits.
-- [ ] Protection against brute-force attempts.
+- [x] Protection against brute-force attempts. (implemented: see README, Autenticación de visitantes)
 - [ ] Configurable bandwidth limits.
 - [ ] Configurable traffic quotas.
 - [ ] Client credential revocation.

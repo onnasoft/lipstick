@@ -39,6 +39,10 @@ type Config struct {
 	// it, for domains that have passthrough on. It is offered only when proxy_pass
 	// presents a valid certificate for the domain, checked at every connection.
 	Passthrough bool `yaml:"passthrough"`
+	// VisitorAuth asks the server to restrict the domain to authenticated visitors
+	// (users or tokens). The domain then stays restricted for every client, and the
+	// connection is refused if the domain uses passthrough or has no credentials.
+	VisitorAuth bool `yaml:"visitor_auth"`
 }
 
 const (

@@ -467,6 +467,28 @@ curl -sk -X POST https://127.0.0.1:5052/domains \
   --data '{"name":"robot-42.example.com","apiKey":"<clave-larga-aleatoria>","allowMultipleConnections":false}'
 ```
 
+## Autenticación de visitantes
+
+Un dominio puede exigir credenciales a sus visitantes: un usuario con contraseña (HTTP Basic) o un token de API con permisos. Es opcional, y solo se activa si el cliente lo pide.
+
+**Cómo se activa.** El cliente pide la restricción con `visitor_auth: true` en su configuración. Desde ese momento el dominio queda **restringido para siempre**: aunque otros clientes no lo pidan, las visitas siguen exigiendo credenciales. Solo un administrador puede quitarlo (`PATCH /domains/:name` con `{"authLatched": false}`), y cada activación y cada desactivación quedan en el log.
+
+**Reglas.**
+- Un cliente que pide autenticación recibe un error y no se conecta si el dominio usa passthrough (el servidor no puede leer las cabeceras), o si el dominio no tiene usuarios ni tokens. El motivo aparece en el log del cliente.
+- Un administrador no puede activar passthrough en un dominio restringido.
+- Un dominio restringido solo sirve HTTP(S). El tráfico TCP o UDP hacia ese dominio se rechaza.
+
+**Credenciales** (solo con la clave de admin):
+- `POST /domains/:name/visitor-users` con `{"username", "password"}`. La contraseña tiene al menos 12 caracteres y se guarda con argon2id.
+- `POST /domains/:name/visitor-tokens` con `{"name", "methods", "pathPrefixes"}`. El token se devuelve una sola vez; el servidor guarda solo su hash SHA-256. `methods` admite `"*"`, y `pathPrefixes` limita las rutas.
+- `DELETE` de usuarios y tokens. La revocación es inmediata.
+
+**Cómo se verifica.** El servidor lee cada petición de la conexión, no solo la primera, porque una conexión persistente puede llevar varias. Cada petición se verifica antes de llegar al servicio. Las respuestas se devuelven en el mismo orden que las peticiones. Una petición sin credenciales válidas recibe `401`; un token sin permiso para ese método o esa ruta recibe `403`.
+
+**Fuerza bruta.** Después de cinco contraseñas incorrectas para el mismo usuario, desde la misma IP, el intento espera. La espera se duplica en cada fallo y llega a 15 minutos como máximo. Mientras espera, la respuesta es `429`.
+
+**Lo que no cubre todavía.** Un WebSocket se verifica en su petición de upgrade, y después pasa sin verificar cada mensaje. Los usuarios no tienen permisos por ruta: cualquier usuario válido accede a todo el dominio. Las credenciales no se cachean, así que cada petición Basic paga la verificación de argon2id.
+
 ## Cluster (varios servidores)
 
 Varios servidores pueden servir los mismos dominios. Todos usan la misma base de datos, el mismo NATS y el mismo certificado (o certificados firmados por la misma CA, indicada en `cluster.ca_file`).
@@ -623,6 +645,7 @@ Los flags reemplazan al archivo. Una clave desconocida es un error.
 - **TLS obligatorio** hacia visitantes, clientes y admin API. La única excepción son los puertos de `intranet_ports`: opcionales, en una interfaz de la intranet, un dominio por puerto y redes permitidas por la política (ver [Puertos sin TLS](#puertos-sin-tls-para-la-intranet)).
 - **Claves de dominio** comparadas en tiempo constante. Una clave vacía nunca autoriza.
 - **Tickets** de 128 bits aleatorios, de un solo uso.
+- **Autenticación de visitantes** por dominio, con usuarios y tokens, opcional y restringida una vez activada. Ver [Autenticación de visitantes](#autenticación-de-visitantes).
 - **Sesiones autenticadas.** Cada conexión que el cliente abre hacia el servidor (`GET /<ticket>` o `GET /mux`) lleva una prueba `X-Lipstick-Proof`: HMAC-SHA256 de la clave del dominio. Para un ticket, la prueba cubre el ticket. Para una sesión de multiplexación, cubre un nonce de un solo uso que contiene la hora, y el servidor rechaza un nonce repetido o con más de dos minutos de diferencia con su reloj. La clave nunca viaja en esas conexiones, y una conexión sin prueba válida se cierra sin responder. Dentro de una sesión autenticada, el servidor abre streams y el cliente los acepta: solo el cliente que abrió la sesión recibe tráfico por ella. Un cliente anterior a estos cambios no sirve tráfico: hay que actualizar servidor y clientes juntos.
 - **Admin API** solo en loopback por defecto. Las lecturas (`GET`) no piden clave; crear, cambiar o borrar dominios sí, con la clave de admin. Si expones el puerto 5052 fuera de la máquina, cualquiera podrá ver dominios y tráfico.
 - **Secretos fuera del repositorio.** `config.yml`, `client_key.txt`, `certs/` y las claves privadas están en `.gitignore`, y `.dockerignore` los excluye de la imagen.

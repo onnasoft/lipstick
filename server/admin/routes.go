@@ -3,6 +3,7 @@ package admin
 import (
 	"crypto/subtle"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -38,6 +39,14 @@ func configureRouter(admin *Admin) {
 	r.PATCH(domainNamePath, router.updateDomain)
 	r.DELETE(domainNamePath, router.deleteDomain)
 
+	// Visitor authentication: users and API tokens of a domain.
+	r.POST(domainNamePath+"/visitor-users", router.addVisitorUser)
+	r.GET(domainNamePath+"/visitor-users", router.listVisitorUsers)
+	r.DELETE(domainNamePath+"/visitor-users/:username", router.deleteVisitorUser)
+	r.POST(domainNamePath+"/visitor-tokens", router.addVisitorToken)
+	r.GET(domainNamePath+"/visitor-tokens", router.listVisitorTokens)
+	r.DELETE(domainNamePath+"/visitor-tokens/:id", router.revokeVisitorToken)
+
 	admin.engine = r
 }
 
@@ -48,6 +57,7 @@ type domainView struct {
 	Name                     string `json:"name"`
 	AllowMultipleConnections bool   `json:"allowMultipleConnections"`
 	Passthrough              bool   `json:"passthrough"`
+	AuthLatched              bool   `json:"authLatched"`
 }
 
 func toDomainView(d *auth.Domain) domainView {
@@ -56,6 +66,7 @@ func toDomainView(d *auth.Domain) domainView {
 		Name:                     d.Name,
 		AllowMultipleConnections: d.AllowMultipleConnections,
 		Passthrough:              d.Passthrough,
+		AuthLatched:              d.AuthLatched,
 	}
 }
 
@@ -182,7 +193,21 @@ func (r *router) updateDomain(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "passthrough must be true or false"})
 			return
 		}
+		if pass && record.AuthLatched {
+			c.JSON(http.StatusConflict, gin.H{"error": "passthrough cannot be turned on: the domain requires visitor authentication"})
+			return
+		}
 		record.Passthrough = pass
+	}
+	if raw, ok := domain["authLatched"]; ok {
+		// Clients set the restricted mode by asking for it. An admin can only clear it.
+		clear, isBool := raw.(bool)
+		if !isBool || clear {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "authLatched can only be set to false: clients set the restricted mode"})
+			return
+		}
+		record.AuthLatched = false
+		logger.Default.Info(fmt.Sprintf("restricted mode cleared by admin for domain %s", record.Name))
 	}
 
 	if err := r.admin.authManager.UpdateDomain(record); err != nil {
@@ -361,4 +386,126 @@ func parseTimeParam(raw string, asEnd bool) (time.Time, error) {
 		t = t.AddDate(0, 0, 1)
 	}
 	return t, nil
+}
+
+// domainNameParam returns the domain named in the path, after checking the admin key.
+func (r *router) visitorDomain(c *gin.Context) (string, bool) {
+	if !r.authorized(c) {
+		return "", false
+	}
+	name := c.Param("domainName")
+	if _, err := r.admin.authManager.GetDomain(name); err != nil {
+		writeLookupError(c, err)
+		return "", false
+	}
+	return name, true
+}
+
+type visitorUserBody struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
+
+func (r *router) addVisitorUser(c *gin.Context) {
+	name, ok := r.visitorDomain(c)
+	if !ok {
+		return
+	}
+	var body visitorUserBody
+	if err := c.BindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if err := r.admin.authManager.AddVisitorUser(name, body.Username, body.Password); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "ok", "username": body.Username})
+}
+
+func (r *router) listVisitorUsers(c *gin.Context) {
+	name, ok := r.visitorDomain(c)
+	if !ok {
+		return
+	}
+	users, err := r.admin.authManager.ListVisitorUsers(name)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "unable to list users"})
+		return
+	}
+	c.JSON(http.StatusOK, users)
+}
+
+func (r *router) deleteVisitorUser(c *gin.Context) {
+	name, ok := r.visitorDomain(c)
+	if !ok {
+		return
+	}
+	if err := r.admin.authManager.DeleteVisitorUser(name, c.Param("username")); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+}
+
+type visitorTokenBody struct {
+	Name         string   `json:"name"`
+	Methods      []string `json:"methods"`
+	PathPrefixes []string `json:"pathPrefixes"`
+}
+
+// addVisitorToken returns the token once. It is not stored and cannot be read again.
+func (r *router) addVisitorToken(c *gin.Context) {
+	name, ok := r.visitorDomain(c)
+	if !ok {
+		return
+	}
+	var body visitorTokenBody
+	if err := c.BindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	token, err := r.admin.authManager.AddVisitorToken(name, body.Name, body.Methods, body.PathPrefixes)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"name": body.Name, "token": token, "note": "shown once; store it now"})
+}
+
+func (r *router) listVisitorTokens(c *gin.Context) {
+	name, ok := r.visitorDomain(c)
+	if !ok {
+		return
+	}
+	recs, err := r.admin.authManager.ListVisitorTokens(name)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "unable to list tokens"})
+		return
+	}
+	out := make([]gin.H, 0, len(recs))
+	for _, t := range recs {
+		out = append(out, gin.H{
+			"id": t.ID, "name": t.Name, "methods": t.Methods, "pathPrefixes": t.PathPrefixes,
+			"createdAt": t.CreatedAt, "revoked": t.RevokedAt != nil,
+		})
+	}
+	c.JSON(http.StatusOK, out)
+}
+
+func (r *router) revokeVisitorToken(c *gin.Context) {
+	name, ok := r.visitorDomain(c)
+	if !ok {
+		return
+	}
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "id must be a number"})
+		return
+	}
+	if err := r.admin.authManager.RevokeVisitorToken(name, uint(id)); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }

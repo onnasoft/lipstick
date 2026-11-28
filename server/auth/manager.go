@@ -14,6 +14,7 @@ type Domain struct {
 	ApiKey                   string `json:"apiKey"`
 	AllowMultipleConnections bool   `json:"allowMultipleConnections"`
 	Passthrough              bool   `json:"passthrough"`
+	AuthLatched              bool   `json:"authLatched"`
 }
 
 type AuthManager interface {
@@ -22,6 +23,18 @@ type AuthManager interface {
 	AddDomain(domain *Domain) error
 	UpdateDomain(domain *Domain) error
 	DelDomain(id uint) error
+
+	// Visitor authentication. See visitor.go.
+	AddVisitorUser(domain, username, password string) error
+	DeleteVisitorUser(domain, username string) error
+	VerifyVisitorUser(domain, username, password string) (bool, error)
+	ListVisitorUsers(domain string) ([]string, error)
+	AddVisitorToken(domain, name string, methods, prefixes []string) (string, error)
+	RevokeVisitorToken(domain string, id uint) error
+	FindVisitorToken(domain, token string) (*VisitorToken, error)
+	ListVisitorTokens(domain string) ([]VisitorToken, error)
+	CountVisitorCredentials(domain string) (int, error)
+	SetAuthLatched(domain string, latched bool) error
 }
 
 var (

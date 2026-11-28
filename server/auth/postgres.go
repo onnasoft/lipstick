@@ -85,6 +85,7 @@ func (p *PostgresAuthManager) GetDomains() ([]*Domain, error) {
 				ApiKey:                   domain.ApiKey,
 				AllowMultipleConnections: domain.AllowMultipleConnections,
 				Passthrough:              domain.Passthrough,
+				AuthLatched:              domain.AuthLatched,
 			}
 		}
 		return result, nil
@@ -112,6 +113,7 @@ func (p *PostgresAuthManager) GetDomain(domain string) (*Domain, error) {
 			ApiKey:                   result.ApiKey,
 			AllowMultipleConnections: result.AllowMultipleConnections,
 			Passthrough:              result.Passthrough,
+			AuthLatched:              result.AuthLatched,
 		}, nil
 	})
 	if err != nil {
@@ -141,6 +143,7 @@ func (p *PostgresAuthManager) UpdateDomain(domain *Domain) error {
 		"api_key":                    domain.ApiKey,
 		"allow_multiple_connections": domain.AllowMultipleConnections,
 		"passthrough":                domain.Passthrough,
+		"auth_latched":               domain.AuthLatched,
 	})
 	if tx.Error != nil {
 		return tx.Error

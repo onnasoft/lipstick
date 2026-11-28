@@ -23,9 +23,19 @@ func (fakeAuth) GetDomain(name string) (*auth.Domain, error) {
 	}
 	return &auth.Domain{ID: 1, Name: name, ApiKey: clientSecret}, nil
 }
-func (fakeAuth) AddDomain(*auth.Domain) error    { return nil }
-func (fakeAuth) UpdateDomain(*auth.Domain) error { return nil }
-func (fakeAuth) DelDomain(uint) error            { return nil }
+func (fakeAuth) AddDomain(*auth.Domain) error                               { return nil }
+func (fakeAuth) UpdateDomain(*auth.Domain) error                            { return nil }
+func (fakeAuth) DelDomain(uint) error                                       { return nil }
+func (fakeAuth) AddVisitorUser(d, u, p string) error                        { return nil }
+func (fakeAuth) DeleteVisitorUser(d, u string) error                        { return nil }
+func (fakeAuth) VerifyVisitorUser(d, u, p string) (bool, error)             { return false, nil }
+func (fakeAuth) ListVisitorUsers(d string) ([]string, error)                { return nil, nil }
+func (fakeAuth) AddVisitorToken(d, n string, m, p []string) (string, error) { return "", nil }
+func (fakeAuth) RevokeVisitorToken(d string, id uint) error                 { return nil }
+func (fakeAuth) FindVisitorToken(d, t string) (*auth.VisitorToken, error)   { return nil, nil }
+func (fakeAuth) ListVisitorTokens(d string) ([]auth.VisitorToken, error)    { return nil, nil }
+func (fakeAuth) CountVisitorCredentials(d string) (int, error)              { return 0, nil }
+func (fakeAuth) SetAuthLatched(d string, l bool) error                      { return nil }
 
 func newTestAdmin(key string) *Admin {
 	a := &Admin{authManager: fakeAuth{}, adminKey: key}

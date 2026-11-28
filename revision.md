@@ -499,6 +499,16 @@ Lipstick exposes local ports to the internet through a reverse tunnel. The main 
 - **What it means:** passthrough removes one TLS layer from every byte and the server's handshake from every new connection. With keep-alive it is about 3.7 times faster than terminated and about 40% of direct TLS. The remaining cost is the tunnel's own encryption between server and client, and the service's TLS.
 - **Limits of the measurement:** one machine, loopback, one domain, one service, no packet loss. Production numbers need a real network.
 
+### 51. Visitor authentication: users, tokens, and a restricted mode that latches (feature)
+- **Where:** `server/auth/visitor.go` (argon2id passwords, hashed tokens, latch), `server/manager/guard.go` (per-request relay, checks, brute-force limiter), `server/manager/routes.go` (latch at upgrade, refusal reasons), `server/admin/routes.go` (credential endpoints, latch rules), `server/db/models.go` (`VisitorUser`, `VisitorToken`, `AuthLatched`).
+- **Behavior:** a client asks with `visitor_auth: true`. The domain latches to restricted for good, until an admin clears it. A client that asks on a passthrough domain, or on a domain with no credentials, is refused with the reason. An admin cannot turn passthrough on for a restricted domain.
+- **Design choice:** a restricted domain is served through a relay that reads and checks every request, not only the first on a connection. Responses are kept in the order of their requests: the next request is read only after the response to the previous one is complete.
+- **Bug found during testing:** a refused second request could be answered before the first one's response, which breaks HTTP ordering. Fixed by waiting for each response to end before reading the next request.
+- **Also fixed:** the admin API and the proxy had separate auth managers with separate caches, so a passthrough change could take minutes to apply on one of them (see entry 48, which this supersedes for the cause).
+- **Verified:** tests for per-request checks, pipelined requests, chunked bodies, Content-Length bodies, head size limits, token scopes, the brute-force limiter, and the password and token hashing. Live: no credentials gives 401 with the challenge; a user and password give 200; a wrong one gives 401, and after five attempts 429; a token gives 200 inside its scope and 403 outside it; a bad token gives 401; a good and a bad request pipelined on one connection give 200 then 401; a client that does not ask still gets enforcement; clearing the latch opens the domain; a client asking on a passthrough domain is refused with the reason; passthrough cannot be turned on for a restricted domain.
+- **Not verified:** WebSocket traffic on a restricted domain; many concurrent visitors with credentials; cluster consistency of the latch (it lives in the database, and each server reads it through its cache).
+- **Limits (stated):** no per-route permissions for users; no cache for verified Basic credentials, so each Basic request costs one argon2id check; a client refused for passthrough keeps retrying with backoff.
+
 ## Recommended order
 
 1. Items 1, 2, 3, and 4: authentication, unpredictable tickets, TLS verification, and admin API hardening.

@@ -76,7 +76,8 @@ type Manager struct {
 	reqlog         *RequestLog
 	persist        *persister
 	nonces         nonceCache
-	cluster        *cluster // nil on a single server
+	cluster        *cluster       // nil on a single server
+	failures       failureLimiter // failed visitor logins, see guard.go
 }
 
 // requestLogSize is how many finished requests the admin panel keeps in memory.
@@ -219,6 +220,12 @@ func (manager *Manager) HandleHTTPConn(conn net.Conn, req *http.Request) {
 	host := req.Host
 	domain := strings.Split(host, ":")[0]
 
+	// A restricted domain checks every request on the connection, so it has its own path.
+	if rec, err := manager.authManager.GetDomain(domain); err == nil && rec.AuthLatched {
+		manager.serveRestricted(domain, conn)
+		return
+	}
+
 	hub, ok := manager.GetHub(domain)
 	if !ok && manager.cluster != nil {
 		// This server has no tunnel for the domain. Another server of the cluster may.
@@ -261,6 +268,12 @@ func (manager *Manager) HandleTCPConn(conn net.Conn) {
 		return
 	}
 
+	if rec, err := manager.authManager.GetDomain(domain); err == nil && rec.AuthLatched {
+		// Only HTTP can be checked. Other traffic to a restricted domain is refused.
+		writeStatus(conn, 403, "")
+		return
+	}
+
 	hub, ok := manager.GetHub(domain)
 	if !ok && manager.cluster != nil {
 		// This server has no tunnel for the domain. Another server of the cluster may.
@@ -297,7 +310,7 @@ func (manager *Manager) HandleTCPConn(conn net.Conn) {
 // the connection is then ended here as usual. prefix holds the bytes already read.
 func (manager *Manager) RoutePassthrough(domain string, conn net.Conn, prefix []byte) bool {
 	record, err := manager.authManager.GetDomain(domain)
-	if err != nil || !record.Passthrough {
+	if err != nil || !record.Passthrough || record.AuthLatched {
 		return false
 	}
 	hub, ok := manager.GetHub(domain)

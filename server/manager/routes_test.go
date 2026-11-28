@@ -18,9 +18,19 @@ func (f *fakeAuth) GetDomain(name string) (*auth.Domain, error) {
 	}
 	return nil, http.ErrNoCookie
 }
-func (f *fakeAuth) AddDomain(*auth.Domain) error    { return nil }
-func (f *fakeAuth) UpdateDomain(*auth.Domain) error { return nil }
-func (f *fakeAuth) DelDomain(uint) error            { return nil }
+func (f *fakeAuth) AddDomain(*auth.Domain) error                               { return nil }
+func (f *fakeAuth) UpdateDomain(*auth.Domain) error                            { return nil }
+func (f *fakeAuth) DelDomain(uint) error                                       { return nil }
+func (f *fakeAuth) AddVisitorUser(d, u, p string) error                        { return nil }
+func (f *fakeAuth) DeleteVisitorUser(d, u string) error                        { return nil }
+func (f *fakeAuth) VerifyVisitorUser(d, u, p string) (bool, error)             { return false, nil }
+func (f *fakeAuth) ListVisitorUsers(d string) ([]string, error)                { return nil, nil }
+func (f *fakeAuth) AddVisitorToken(d, n string, m, p []string) (string, error) { return "", nil }
+func (f *fakeAuth) RevokeVisitorToken(d string, id uint) error                 { return nil }
+func (f *fakeAuth) FindVisitorToken(d, t string) (*auth.VisitorToken, error)   { return nil, nil }
+func (f *fakeAuth) ListVisitorTokens(d string) ([]auth.VisitorToken, error)    { return nil, nil }
+func (f *fakeAuth) CountVisitorCredentials(d string) (int, error)              { return 0, nil }
+func (f *fakeAuth) SetAuthLatched(d string, l bool) error                      { return nil }
 
 func newTestRouter(domains map[string]*auth.Domain) *router {
 	gin.SetMode(gin.TestMode)
