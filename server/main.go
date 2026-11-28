@@ -125,6 +125,7 @@ func main() {
 	// Visitor limits (per address and per domain, connections) and the admin request limit.
 	limitSettings := limits.Settings(conf.Limits)
 	manager.ConfigureLimits(limitSettings)
+	manager.SetQuotaStore(conn)
 	admin.SetRateLimit(limits.AdminLimiter(limitSettings, nil))
 	checks := map[string]func() error{
 		"database": func() error {

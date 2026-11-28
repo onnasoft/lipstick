@@ -73,6 +73,8 @@ type Manager struct {
 	trafficManager *traffic.TrafficManager
 	visitors       *limits.Visitors // rate and connection limits, see limits.go
 	refusals       refusalLog
+	settings       limits.Settings // server-wide defaults for bandwidth and quota
+	quota          quotaState      // monthly usage, see quota.go
 	authManager    auth.AuthManager
 	tlsConfig      *tls.Config
 	intranet       *intranetPorts
@@ -116,6 +118,7 @@ func (m *Manager) getOrCreateHub(domain string) *NetworkHub {
 	}
 
 	hub := NewNetworkHub(domain, m.trafficManager, 64*1024)
+	hub.pacer = limits.NewPacer(m.bandwidthFor(domain), nil)
 	hub.route = m.routeVisitor
 	hub.requests = m.reqlog
 	// When the hub stops for lack of clients, forget it. CompareAndDelete leaves

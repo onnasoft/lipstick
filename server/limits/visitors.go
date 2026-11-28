@@ -16,6 +16,10 @@ type Settings struct {
 	// AdminIPRate is admin API requests per second from one IP address.
 	AdminIPRate  float64
 	AdminIPBurst int
+	// DomainBandwidth is bytes per second for a domain's visitor data, used when the domain
+	// sets none. DomainMonthlyQuota is bytes per calendar month, likewise. 0 is unlimited.
+	DomainBandwidth    int64
+	DomainMonthlyQuota int64
 }
 
 // Defaults are generous: a busy office behind one address, or a page that opens many
@@ -39,6 +43,7 @@ const (
 	ReasonDomainRate  = "domain_rate"
 	ReasonIPConns     = "ip_connections"
 	ReasonDomainConns = "domain_connections"
+	ReasonQuota = "monthly_quota"
 )
 
 // Refusal says why a connection was not admitted, and when to try again.

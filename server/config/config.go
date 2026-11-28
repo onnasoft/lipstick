@@ -554,6 +554,10 @@ type LimitsConfig struct {
 	ConnsPerDomain int     `yaml:"connections_per_domain"`
 	AdminIPRate    float64 `yaml:"admin_ip_rate"`
 	AdminIPBurst   int     `yaml:"admin_ip_burst"`
+	// DomainBandwidth is bytes per second for a domain that sets none; 0 is unlimited.
+	DomainBandwidth int64 `yaml:"domain_bandwidth_bytes_per_second"`
+	// DomainMonthlyQuota is bytes per calendar month for a domain that sets none; 0 is unlimited.
+	DomainMonthlyQuota int64 `yaml:"domain_monthly_quota_bytes"`
 }
 
 // validateLimits refuses values that cannot mean anything, such as a negative rate, or
@@ -562,6 +566,9 @@ func (l LimitsConfig) validate() []error {
 	var errs []error
 	if l.VisitorIPRate < 0 || l.DomainRate < 0 || l.AdminIPRate < 0 {
 		errs = append(errs, errors.New("limits: rates cannot be negative"))
+	}
+	if l.DomainBandwidth < 0 || l.DomainMonthlyQuota < 0 {
+		errs = append(errs, errors.New("limits: bandwidth and quotas cannot be negative"))
 	}
 	if l.ConnsPerIP < 0 || l.ConnsPerDomain < 0 {
 		errs = append(errs, errors.New("limits: connection limits cannot be negative"))

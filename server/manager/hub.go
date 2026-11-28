@@ -3,6 +3,7 @@ package manager
 import (
 	"bufio"
 	"encoding/json"
+	"github.com/OnnaSoft/lipstick/server/limits"
 	"net"
 	"strconv"
 	"strings"
@@ -69,6 +70,7 @@ type NetworkHub struct {
 	serverRequests                  chan *request
 	trafficManager                  *traffic.TrafficManager
 	dataUsageAccumulator            int64
+	pacer                           *limits.Pacer // bandwidth of the domain's visitor data, see limits.Pacer
 	threshold                       int64
 	mu                              sync.Mutex
 	totalDataTransferred            int64
@@ -189,6 +191,7 @@ func (hub *NetworkHub) syncConnections(pipe net.Conn, destination net.Conn) {
 		for {
 			n, err := pipe.Read(buffer)
 			if n > 0 {
+				hub.pace(n)
 				written, werr := destination.Write(buffer[:n])
 				originToDest += int64(written)
 				hub.addDataUsage(int64(written))
@@ -210,6 +213,7 @@ func (hub *NetworkHub) syncConnections(pipe net.Conn, destination net.Conn) {
 	for {
 		n, err := destination.Read(buffer)
 		if n > 0 {
+			hub.pace(n)
 			written, werr := pipe.Write(buffer[:n])
 			destToOrigin += int64(written)
 			hub.addDataUsage(int64(written))
@@ -242,6 +246,13 @@ func (hub *NetworkHub) flushUsage() {
 	if hub.dataUsageAccumulator > 0 {
 		hub.trafficManager.AddTraffic(hub.HubName, hub.dataUsageAccumulator)
 		hub.dataUsageAccumulator = 0
+	}
+}
+
+// pace makes a write of n bytes wait as long as the domain's bandwidth requires.
+func (hub *NetworkHub) pace(n int) {
+	if d := hub.pacer.Reserve(n); d > 0 {
+		time.Sleep(d)
 	}
 }
 

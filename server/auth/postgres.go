@@ -95,6 +95,8 @@ func (p *PostgresAuthManager) GetDomains() ([]*Domain, error) {
 				Passthrough:              domain.Passthrough,
 				AuthLatched:              domain.AuthLatched,
 				AllowedCIDRs:             domain.AllowedCIDRs,
+				BandwidthBytesPerSecond:  domain.BandwidthBytesPerSecond,
+				MonthlyQuotaBytes:        domain.MonthlyQuotaBytes,
 			}
 		}
 		return result, nil
@@ -124,6 +126,8 @@ func (p *PostgresAuthManager) GetDomain(domain string) (*Domain, error) {
 			Passthrough:              result.Passthrough,
 			AuthLatched:              result.AuthLatched,
 			AllowedCIDRs:             result.AllowedCIDRs,
+			BandwidthBytesPerSecond:  result.BandwidthBytesPerSecond,
+			MonthlyQuotaBytes:        result.MonthlyQuotaBytes,
 		}, nil
 	})
 	if err != nil {
@@ -139,6 +143,8 @@ func (p *PostgresAuthManager) AddDomain(domain *Domain) error {
 		AllowMultipleConnections: domain.AllowMultipleConnections,
 		Passthrough:              domain.Passthrough,
 		AllowedCIDRs:             domain.AllowedCIDRs,
+		BandwidthBytesPerSecond:  domain.BandwidthBytesPerSecond,
+		MonthlyQuotaBytes:        domain.MonthlyQuotaBytes,
 	})
 	if tx.Error != nil {
 		return tx.Error
@@ -156,6 +162,8 @@ func (p *PostgresAuthManager) UpdateDomain(domain *Domain) error {
 		"passthrough":                domain.Passthrough,
 		"auth_latched":               domain.AuthLatched,
 		"allowed_cidrs":              domain.AllowedCIDRs,
+		"bandwidth_bytes_per_second": domain.BandwidthBytesPerSecond,
+		"monthly_quota_bytes":        domain.MonthlyQuotaBytes,
 	})
 	if tx.Error != nil {
 		return tx.Error

@@ -14,6 +14,7 @@ import (
 
 // ConfigureLimits replaces the visitor limits. It is called once at startup.
 func (manager *Manager) ConfigureLimits(s limits.Settings) {
+	manager.settings = s
 	manager.visitors = limits.NewVisitors(s, nil)
 }
 
@@ -27,7 +28,11 @@ func (manager *Manager) admitVisitor(conn net.Conn, domain string, answerHTTP bo
 	if rc, ok := conn.(*helper.RemoteConn); ok {
 		return rc, true
 	}
-	release, refused := manager.visitors.Admit(hostOnly(conn.RemoteAddr()), domain)
+	refused := manager.quotaRefusal(domain)
+	var release func()
+	if refused == nil {
+		release, refused = manager.visitors.Admit(hostOnly(conn.RemoteAddr()), domain)
+	}
 	if refused == nil {
 		return &helper.RemoteConn{Conn: conn, Domain: domain, OnClose: release}, true
 	}

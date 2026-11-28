@@ -87,6 +87,8 @@ type domainView struct {
 	Passthrough              bool     `json:"passthrough"`
 	AuthLatched              bool     `json:"authLatched"`
 	AllowedCIDRs             []string `json:"allowedCidrs"`
+	BandwidthBytesPerSecond  int64    `json:"bandwidthBytesPerSecond"`
+	MonthlyQuotaBytes        int64    `json:"monthlyQuotaBytes"`
 }
 
 func toDomainView(d *auth.Domain) domainView {
@@ -97,6 +99,8 @@ func toDomainView(d *auth.Domain) domainView {
 		Passthrough:              d.Passthrough,
 		AuthLatched:              d.AuthLatched,
 		AllowedCIDRs:             splitRules(d.AllowedCIDRs),
+		BandwidthBytesPerSecond:  d.BandwidthBytesPerSecond,
+		MonthlyQuotaBytes:        d.MonthlyQuotaBytes,
 	}
 }
 
@@ -292,6 +296,22 @@ func (r *router) updateDomain(c *gin.Context) {
 			return
 		}
 		record.AllowedCIDRs = normalized
+	}
+	if raw, ok := domain["bandwidthBytesPerSecond"]; ok {
+		n, valid := wholeNonNegative(raw)
+		if !valid {
+			c.JSON(http.StatusBadRequest, errorResponse{Error: "bandwidthBytesPerSecond must be a whole number, 0 or more (0 uses the server default)"})
+			return
+		}
+		record.BandwidthBytesPerSecond = n
+	}
+	if raw, ok := domain["monthlyQuotaBytes"]; ok {
+		n, valid := wholeNonNegative(raw)
+		if !valid {
+			c.JSON(http.StatusBadRequest, errorResponse{Error: "monthlyQuotaBytes must be a whole number, 0 or more (0 uses the server default)"})
+			return
+		}
+		record.MonthlyQuotaBytes = n
 	}
 	if raw, ok := domain["authLatched"]; ok {
 		// Clients set the restricted mode by asking for it. An admin can only clear it.
@@ -831,4 +851,13 @@ func toDailyConsumptions(rows []db.DailyConsumption) []dailyConsumption {
 			BytesUsed: r.BytesUsed, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt})
 	}
 	return out
+}
+
+// wholeNonNegative reads a JSON number that is a whole number, 0 or more.
+func wholeNonNegative(raw any) (int64, bool) {
+	f, ok := raw.(float64)
+	if !ok || f < 0 || f != float64(int64(f)) {
+		return 0, false
+	}
+	return int64(f), true
 }

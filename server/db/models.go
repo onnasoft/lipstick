@@ -16,6 +16,10 @@ type Domain struct {
 	// AllowedCIDRs lists the networks visitors may come from, comma-separated. Empty
 	// means no restriction.
 	AllowedCIDRs string `gorm:"column:allowed_cidrs;not null;default:''"`
+	// BandwidthBytesPerSecond paces the data of this domain's visitors. 0 uses the server default.
+	BandwidthBytesPerSecond int64 `gorm:"not null;default:0"`
+	// MonthlyQuotaBytes caps the traffic of the domain in a calendar month. 0 uses the server default.
+	MonthlyQuotaBytes int64 `gorm:"not null;default:0"`
 }
 
 // VisitorUser is a user of a restricted domain. Each user has a secret of its own,

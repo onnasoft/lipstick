@@ -16,6 +16,9 @@ type Domain struct {
 	Passthrough              bool   `json:"passthrough"`
 	AuthLatched              bool   `json:"authLatched"`
 	AllowedCIDRs             string `json:"-"` // exposed as a list by the admin API
+	// BandwidthBytesPerSecond and MonthlyQuotaBytes: 0 means the server default.
+	BandwidthBytesPerSecond int64 `json:"bandwidthBytesPerSecond"`
+	MonthlyQuotaBytes       int64 `json:"monthlyQuotaBytes"`
 }
 
 type AuthManager interface {
