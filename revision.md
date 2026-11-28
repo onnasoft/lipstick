@@ -679,6 +679,11 @@ Lipstick exposes local ports to the internet through a reverse tunnel. The main 
 - **Closed later (see the next validation step):** two real clients on two domains, live. Results: each domain answered only from its own client and backend; a Host header for the other domain was routed to it; 50 simultaneous visitors per domain all got their own domain's answer; a client with the other domain's key got 401 and was refused.
 - **Changes left in place:** the server certificate was regenerated with `DNS:other.localhost` added (same CA-less self-signed setup, one year). The old pair is kept in /tmp/claude-1000/certs-backup. The test domain was created and deleted with direct SQL, so those two writes are not in the audit log.
 
+### 71. HTTP edge cases reviewed and fixed (fix)
+- **Fixed:** a request with no Host gets 400; a request with both Content-Length and Transfer-Encoding gets 400 (the check runs on the raw header block, because the parser drops Content-Length in that case, and the request could otherwise be read two ways by a proxy and a backend: request smuggling); headers over 64 KiB get 431; HTTP/1.0 without Host gets 400.
+- **Checked and accepted as RFC 7230 allows:** absolute-form request targets, and bare LF line endings.
+- **Verified:** helper tests for each case, and the live probes through the TLS proxy. Valid chunked and Content-Length uploads (5 MiB and 20 MiB) still arrive with the same digests.
+
 ## Recommended order
 
 1. Items 1, 2, 3, and 4: authentication, unpredictable tickets, TLS verification, and admin API hardening.

@@ -117,7 +117,7 @@ The system must remain stable under network failures, client disconnections, bac
 
 - [x] Review open concurrency issues. (the race-enabled suite passes; see revision.md, item 68)
 - [x] Validate domain/client association consistency. (a key of one domain cannot open another domain's tunnel or mux session; with two live clients on two domains, each domain answers only from its own client, 100 simultaneous visitors split correctly, and a client with the other domain's key gets 401)
-- [ ] Improve handling of HTTP edge cases. (partly: a request the parser cannot read, such as a non-numeric `Content-Length`, now gets 400; other edge cases are not reviewed yet)
+- [x] Improve handling of HTTP edge cases. (live-checked: non-numeric or duplicate Content-Length, Content-Length with Transfer-Encoding, unknown transfer coding, missing Host, duplicate Host, headers over 64 KiB, HTTP/1.0 without Host: all get 400 or 431; absolute-form URIs and bare LF line endings are accepted as RFC 7230 allows; see revision.md, items 69 and 71)
 - [x] Validate chunked transfer encoding. (5 MiB chunked upload, digest verified live)
 - [x] Validate `Expect: 100-continue`. (20 MiB upload with the header, digest verified live)
 - [x] Validate HTTP keep-alive. (20 held connections each answered a second request)
