@@ -117,6 +117,46 @@ func (manager *Manager) handleMux(conn net.Conn, req *http.Request) {
 		<-session.CloseChan()
 		hub.removeMux(ms)
 	}()
+	go hub.probeTunnel(ms)
+}
+
+// tunnelProbeEvery is how often a session's round trip is measured. A variable so tests
+// can make it short.
+var tunnelProbeEvery = 5 * time.Second
+
+// probeTunnel measures the round trip of a mux session with yamux's ping, every
+// tunnelProbeEvery, until the session closes. The ping goes through the same connection
+// as the visitors' data, so the time includes any wait behind data frames: it is the
+// latency a request would see on the tunnel, not the idle wire time.
+func (hub *NetworkHub) probeTunnel(ms *muxSession) {
+	ticker := time.NewTicker(tunnelProbeEvery)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ms.session.CloseChan():
+			return
+		case <-ticker.C:
+		}
+		type result struct {
+			rtt time.Duration
+			err error
+		}
+		done := make(chan result, 1)
+		go func() {
+			rtt, err := ms.session.Ping()
+			done <- result{rtt, err}
+		}()
+		select {
+		case r := <-done:
+			if r.err == nil {
+				tunnelLatency.Observe(hub.HubName, r.rtt.Seconds())
+			}
+		case <-ms.session.CloseChan():
+			return
+		case <-time.After(10 * time.Second):
+			// No answer in ten seconds: yamux's keep-alive closes a stalled session soon.
+		}
+	}
 }
 
 // addMux adds a session to the hub. It refuses when the hub has stopped or is full.

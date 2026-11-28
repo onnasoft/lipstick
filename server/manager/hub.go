@@ -225,7 +225,10 @@ func (hub *NetworkHub) syncConnections(pipe net.Conn, destination net.Conn) {
 		destination.SetReadDeadline(time.Now().Add(backendPollInterval))
 		n, err := destination.Read(buffer)
 		if n > 0 {
-			answered.Store(true)
+			// The first byte of a reply to the visitor's latest request: the time it took.
+			if !answered.Swap(true) && requestAt.Load() != 0 {
+				connectionLatency.Observe(hub.HubName, time.Since(time.Unix(0, requestAt.Load())).Seconds())
+			}
 			hub.pace(n)
 			written, werr := pipe.Write(buffer[:n])
 			destToOrigin += int64(written)

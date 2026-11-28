@@ -13,12 +13,15 @@ import (
 type Type string
 
 const (
-	Counter Type = "counter"
-	Gauge   Type = "gauge"
+	Counter   Type = "counter"
+	Gauge     Type = "gauge"
+	Histogram Type = "histogram"
 )
 
-// Sample is one value, with its labels.
+// Sample is one value, with its labels. Suffix is appended to the family name for the
+// parts of a histogram: "_bucket", "_sum" or "_count".
 type Sample struct {
+	Suffix string
 	Labels map[string]string
 	Value  float64
 }
@@ -39,7 +42,7 @@ func Render(w io.Writer, families []Family) error {
 			return err
 		}
 		for _, s := range f.Samples {
-			if _, err := fmt.Fprintf(w, "%s%s %s\n", f.Name, labels(s.Labels), formatValue(s.Value)); err != nil {
+			if _, err := fmt.Fprintf(w, "%s%s%s %s\n", f.Name, s.Suffix, labels(s.Labels), formatValue(s.Value)); err != nil {
 				return err
 			}
 		}

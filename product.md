@@ -258,7 +258,7 @@ The existing logs and traffic statistics should be expanded to provide sufficien
 - [x] Pending visitors metric. (`lipstick_pending_visitors`, `lipstick_visitors_pending`)
 - [x] Traffic throughput. (`lipstick_traffic_bytes_since_start` is a counter; the rate is read with `rate()` in Prometheus)
 - [x] Traffic consumption by domain. (the same counter, per domain, since this process started; monthly totals stay in the database and the panel)
-- [ ] Connection latency.
+- [x] Connection latency. (`lipstick_connection_latency_seconds`, a histogram per domain: time from a visitor's request to the first byte of the reply; see revision.md, item 74. Time to accept the TCP connection is not measured)
 - [ ] Tunnel latency.
 - [x] HTTP response status metrics. (`lipstick_http_responses_total` by status class)
 - [ ] Connection errors. (partly: refused visitor connections are counted by reason in `lipstick_visitor_refusals_total`; failures of tunnel setup are not yet counted)

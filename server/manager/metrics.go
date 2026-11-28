@@ -9,6 +9,18 @@ import (
 
 // Counters that have no per-manager home: a 504 is written by a relay, and a tunnel is
 // opened by a handshake. They count since the process started.
+// connectionLatency measures, per domain, the time from a visitor's request to the first
+// byte of the reply, as the relay sees it. It is recorded on the request's first reply.
+var connectionLatency = metrics.NewHistogramSet("domain", []float64{
+	0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60,
+})
+
+// tunnelLatency is the round trip of each mux session, per domain, measured with yamux's
+// ping. Buckets start at 0.5 ms, since a tunnel on a local network is fast.
+var tunnelLatency = metrics.NewHistogramSet("domain", []float64{
+	0.0005, 0.001, 0.002, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1,
+})
+
 var (
 	backendTimeouts atomic.Int64 // visitor requests answered 504 because the backend was silent
 	tunnelsOpened   atomic.Int64 // tunnel connections accepted from clients
@@ -60,6 +72,8 @@ func (manager *Manager) Metrics() []metrics.Family {
 		{Name: "lipstick_http_responses_total", Help: "HTTP responses to visitors, by status class.", Type: metrics.Counter, Samples: responses},
 		{Name: "lipstick_backend_timeouts_total", Help: "Visitor requests answered 504 because the backend stayed silent.", Type: metrics.Counter, Samples: []metrics.Sample{{Value: float64(backendTimeouts.Load())}}},
 		{Name: "lipstick_tunnels_opened_total", Help: "Tunnel connections accepted from clients.", Type: metrics.Counter, Samples: []metrics.Sample{{Value: float64(tunnelsOpened.Load())}}},
+		{Name: "lipstick_connection_latency_seconds", Help: "Time from a visitor's request to the first byte of the reply, per domain.", Type: metrics.Histogram, Samples: connectionLatency.Samples()},
+		{Name: "lipstick_tunnel_latency_seconds", Help: "Round trip of each tunnel session, per domain, measured with a ping every few seconds.", Type: metrics.Histogram, Samples: tunnelLatency.Samples()},
 		{Name: "lipstick_go_goroutines", Help: "Goroutines in the server process.", Type: metrics.Gauge, Samples: []metrics.Sample{{Value: float64(runtime.NumGoroutine())}}},
 		{Name: "lipstick_go_memory_alloc_bytes", Help: "Heap memory in use by the server process.", Type: metrics.Gauge, Samples: []metrics.Sample{{Value: float64(mem.HeapAlloc)}}},
 	}

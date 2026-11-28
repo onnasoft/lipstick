@@ -695,6 +695,11 @@ Lipstick exposes local ports to the internet through a reverse tunnel. The main 
 - **Not yet:** CPU time, connection and tunnel latency, reconnection counts, failures of tunnel setup, structured logging, readiness checks, alert rules.
 - **Verified:** unit tests for the text format (escaping, name order), status-class counting, and the rendered families; the live output is checked after the restart.
 
+### 74. Connection latency (feature)
+- **Added:** `lipstick_connection_latency_seconds`, a histogram per domain. It records the time from a visitor's latest request to the first byte of the reply, at the point where the relay sees that byte. Buckets run from 5 ms to 60 s.
+- **Not measured:** the time to accept the TCP or TLS connection, which happens before the relay starts.
+- **Verified:** a test with a backend that answers after 300 ms records at least 0.25 s; live, five visits to the local backend all fall in the 10 ms bucket.
+
 ## Recommended order
 
 1. Items 1, 2, 3, and 4: authentication, unpredictable tickets, TLS verification, and admin API hardening.

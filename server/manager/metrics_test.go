@@ -41,3 +41,23 @@ func TestMetricsCountResponsesAndRefusals(t *testing.T) {
 		}
 	}
 }
+
+func TestConnectionLatencyIsAHistogram(t *testing.T) {
+	connectionLatency.Observe("latency.test", 0.03)
+	connectionLatency.Observe("latency.test", 0.3)
+	var b bytes.Buffer
+	if err := metrics.Render(&b, (&Manager{reqlog: NewRequestLog(10)}).Metrics()); err != nil {
+		t.Fatal(err)
+	}
+	out := b.String()
+	for _, want := range []string{
+		"# TYPE lipstick_connection_latency_seconds histogram",
+		`lipstick_connection_latency_seconds_bucket{domain="latency.test",le="0.05"} 1`,
+		`lipstick_connection_latency_seconds_bucket{domain="latency.test",le="+Inf"} 2`,
+		`lipstick_connection_latency_seconds_count{domain="latency.test"} 2`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q", want)
+		}
+	}
+}
