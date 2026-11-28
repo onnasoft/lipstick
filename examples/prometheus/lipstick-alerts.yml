@@ -1,0 +1,129 @@
+# Alert rules for Lipstick, for Prometheus. Load them with rule_files in prometheus.yml.
+# Every expression uses a metric the server exports on GET /metrics (see README, "Alertas
+# y métricas"). The thresholds are a starting point: adjust them to the traffic of your
+# deployment before relying on them.
+groups:
+  - name: lipstick-availability
+    rules:
+      - alert: LipstickDown
+        expr: up{job="lipstick"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Lipstick is not answering its metrics endpoint"
+          description: "Prometheus cannot scrape {{ $labels.instance }}. The process may be stopped or the admin address unreachable."
+
+      - alert: LipstickNotReady
+        expr: lipstick_ready == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Lipstick is not ready to take traffic"
+          description: "/ready is failing on {{ $labels.instance }}: the server is draining, not listening, or a dependency is down. GET /ready names the condition."
+
+      - alert: LipstickDependencyDown
+        expr: lipstick_dependency_up == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "A Lipstick dependency is down: {{ $labels.check }}"
+          description: "The {{ $labels.check }} check fails on {{ $labels.instance }}. Visitors may get errors until it answers again."
+
+      - alert: LipstickNoTunnelClients
+        expr: sum(lipstick_connected_clients) == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "No tunnel client is connected to Lipstick"
+          description: "No domain has a connected client, so visitors get 502. Expected when no client should be running."
+
+  - name: lipstick-traffic
+    rules:
+      - alert: LipstickBackendTimeouts
+        expr: sum(rate(lipstick_backend_timeouts_total[5m])) > 0.1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Visitors are getting 504 from silent backends"
+          description: "More than 6 requests a minute end in 504 because the backend stays silent. Check the services behind the tunnel clients."
+
+      - alert: LipstickServerErrors
+        expr: sum(rate(lipstick_http_responses_total{class="5xx"}[10m])) / clamp_min(sum(rate(lipstick_http_responses_total[10m])), 1e-9) > 0.05
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "More than 5% of visitor responses are 5xx"
+          description: "Most visitors are getting server errors. Compare with the timeout and setup failure metrics to find the cause."
+
+      - alert: LipstickVisitorRefusals
+        expr: sum by (reason) (rate(lipstick_visitor_refusals_total[5m])) > 5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Visitor connections are being refused ({{ $labels.reason }})"
+          description: "Refusals by {{ $labels.reason }} above 5 a second. This is the limit working, or an attack; check the reason before changing the limit."
+
+      - alert: LipstickTunnelSetupFailures
+        expr: sum by (reason) (rate(lipstick_tunnel_setup_failures_total{reason!="mux_no_hub"}[10m])) > 0.05
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Tunnel setups are failing ({{ $labels.reason }})"
+          description: "Clients are being refused with reason {{ $labels.reason }}. unauthorized means a wrong key; policy_refused and port_refused come from configuration."
+
+      - alert: LipstickTunnelFlapping
+        expr: sum by (domain) (rate(lipstick_tunnel_losses_total[30m])) > 0.01
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "The tunnel of {{ $labels.domain }} keeps going down"
+          description: "The last client of {{ $labels.domain }} has left more than once every two minutes for 15 minutes. Look at the client's network or its logs."
+
+  - name: lipstick-latency
+    rules:
+      - alert: LipstickTunnelLatencyHigh
+        expr: histogram_quantile(0.99, sum by (domain, le) (rate(lipstick_tunnel_latency_seconds_bucket[5m]))) > 0.5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Tunnel round trip is slow on {{ $labels.domain }}"
+          description: "The 99th percentile of the tunnel round trip is above 0.5 s. The link to the client or its load is the likely cause."
+
+      - alert: LipstickConnectionLatencyHigh
+        expr: histogram_quantile(0.99, sum by (domain, le) (rate(lipstick_connection_latency_seconds_bucket[5m]))) > 5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Visitors wait long for the first byte on {{ $labels.domain }}"
+          description: "The 99th percentile of the time to the first byte of a reply is above 5 s. The backend behind the tunnel is the likely cause."
+
+  - name: lipstick-resources
+    rules:
+      - alert: LipstickCPUHigh
+        expr: rate(lipstick_process_cpu_seconds_total[5m]) > 0.9
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Lipstick is using a full CPU core"
+          description: "The process has used more than 0.9 CPU seconds per second for 15 minutes. Check the traffic and the bandwidth limits."
+
+      - alert: LipstickMemoryHigh
+        expr: lipstick_go_memory_alloc_bytes > 1.5e9
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Lipstick holds more than 1.5 GB of heap"
+          description: "Heap in use has stayed above 1.5 GB for 15 minutes. Adjust the threshold to the machine's memory."

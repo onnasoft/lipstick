@@ -30,6 +30,7 @@ type Admin struct {
 	health      []healthCheck
 	requests    func(q manager.RequestQuery) ([]manager.RequestRecord, error)
 	metrics     func() []metrics.Family // read on each /metrics scrape
+	readiness   func() []string         // names of the conditions not met, see SetReadiness
 }
 
 // SetRequestSource sets the function that returns finished requests.
@@ -92,6 +93,13 @@ func (a *Admin) Listen() {
 type healthCheck struct {
 	name  string
 	check func() error
+}
+
+// SetReadiness sets the server's own readiness conditions. The function returns the names
+// of the conditions that are not met, such as "draining"; none means the server can take
+// new traffic. The dependencies of /health are checked as well.
+func (a *Admin) SetReadiness(fn func() []string) {
+	a.readiness = fn
 }
 
 // SetMetricsSource sets what /metrics reports. Without one, /metrics answers 503.

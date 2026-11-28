@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"sync/atomic"
 	"time"
 
 	"net/http"
@@ -89,6 +90,7 @@ func main() {
 		}
 	}
 
+	var listening, draining atomic.Bool
 	interrupt := make(chan os.Signal, 1)
 	signal.Notify(interrupt, os.Interrupt)
 
@@ -161,7 +163,21 @@ func main() {
 		logger.Default.Info("Intranet ports enabled on", conf.IntranetPorts.BindAddress, "range", conf.IntranetPorts.PortRange)
 	}
 
-	proxy.OnListen(func() { logger.Default.Info("Listening proxy on ", conf.Proxy.Address) })
+	proxy.OnListen(func() {
+		listening.Store(true)
+		logger.Default.Info("Listening proxy on ", conf.Proxy.Address)
+	})
+	// Readiness: not ready until the proxy listens, and not once shutdown has begun.
+	admin.SetReadiness(func() []string {
+		var reasons []string
+		if !listening.Load() {
+			reasons = append(reasons, "not_listening")
+		}
+		if draining.Load() {
+			reasons = append(reasons, "draining")
+		}
+		return reasons
+	})
 	proxy.OnClose(func() { logger.Default.Info("Proxy closed") })
 	proxy.OnTCPConn(func(c net.Conn) {
 		go manager.HandleTCPConn(c)
@@ -180,6 +196,7 @@ func main() {
 		logger.Default.Info("Listening DTLS proxy on", conf.Proxy.Address)
 	}
 	<-interrupt
+	draining.Store(true)
 	fmt.Println("Desconectando...")
 	manager.Close()
 }

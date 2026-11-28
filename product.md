@@ -265,10 +265,10 @@ The existing logs and traffic statistics should be expanded to provide sufficien
 - [x] Reconnection metrics. (`lipstick_tunnel_reconnections_total` and `lipstick_tunnel_losses_total`, per domain: a domain's tunnel is lost when its last client leaves, and a reconnection is the tunnel coming back; counted within this process only, see revision.md, item 77)
 - [x] Timeout metrics. (`lipstick_backend_timeouts_total`, the 504s)
 - [x] CPU and memory information. (`lipstick_process_cpu_seconds_total`, user and system time from getrusage, on Unix; `lipstick_go_memory_alloc_bytes` for heap in use; `lipstick_go_goroutines`; see revision.md, item 78)
-- [ ] Structured logging.
+- [x] Structured logging. (`logging: format: json` in config.yml writes one JSON object per line with time, level, msg and fields; the default `text` keeps the colored terminal lines. The tunnel, hub, timeout and setup-refusal events carry fields such as domain and reason; other messages are still plain text. See revision.md, item 79)
 - [x] Health checks. (`/health`, which checks the database and reports 503 when it is down)
-- [ ] Readiness checks.
-- [ ] Alerting integration.
+- [x] Readiness checks. (`GET /ready`: 503 when the server is draining, not listening, or a dependency is down, naming the condition; `lipstick_ready` and `lipstick_dependency_up` on /metrics; see revision.md, item 80)
+- [x] Alerting integration. (`examples/prometheus/lipstick-alerts.yml`: 13 rules for availability, traffic, latency and resources; the scrape setup is in the README. The rules are not yet checked with promtool, which could not be built here)
 
 ### Optional integrations
 
@@ -442,16 +442,16 @@ Less urgent: idle session timeout and a "sign out everywhere" action; permission
 
 ### Tasks
 
-- [ ] Prometheus endpoint.
-- [ ] Structured logging.
-- [ ] Health endpoints.
+- [x] Prometheus endpoint. (`GET /metrics`, see section 3.5)
+- [x] Structured logging. (`logging: format: json`, see section 3.5)
+- [x] Health endpoints. (`/health`, with the database check)
 - [ ] Readiness endpoints.
-- [ ] Connection metrics.
-- [ ] Traffic metrics.
-- [ ] Error metrics.
-- [ ] Latency metrics.
-- [ ] Resource metrics.
-- [ ] Alerting documentation.
+- [x] Connection metrics. (visitor connections open, connected clients, active sessions, refusals, setup failures)
+- [x] Traffic metrics. (bytes per domain since start)
+- [x] Error metrics. (responses by status class, 504s, refusals and setup failures by reason)
+- [x] Latency metrics. (connection latency and tunnel latency histograms)
+- [x] Resource metrics. (CPU time, heap in use, goroutines)
+- [x] Alerting documentation. (README, "Métricas, readiness y alertas")
 - [ ] Grafana dashboard examples.
 
 **Deliverable:** Operational observability baseline.

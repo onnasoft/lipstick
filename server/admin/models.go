@@ -95,3 +95,9 @@ type healthResponse struct {
 	Status string            `json:"status" example:"ok"`
 	Checks map[string]string `json:"checks"`
 }
+
+// readyResponse answers /ready. Reasons names the conditions not met; it is empty when ready.
+type readyResponse struct {
+	Status  string   `json:"status" example:"ready"`
+	Reasons []string `json:"reasons" example:"draining"`
+}

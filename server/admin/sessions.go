@@ -112,6 +112,7 @@ func sessionFromRequest(req *http.Request) (token string, fromCookie bool) {
 var publicPaths = map[string]bool{
 	"/health":    true,
 	"/metrics":   true,
+	"/ready":     true,
 	"/login":     true,
 	"/web/login": true,
 }

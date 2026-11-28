@@ -37,6 +37,7 @@ func configureRouter(admin *Admin) {
 
 	r.GET("/health", router.health)
 	r.GET("/metrics", router.metrics)
+	r.GET("/ready", router.ready)
 	r.GET("/admin/js/*file", serveStatic("js"))
 	r.GET("/admin/css/*file", serveStatic("css"))
 	r.GET("/admin/img/*file", serveStatic("img"))
@@ -401,6 +402,66 @@ func (r *router) health(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, healthResponse{Status: "ok", Checks: checks})
+}
+
+// unreadyReasons returns why the server should not take new traffic: its own conditions
+// that are not met, then each dependency that is down. Only names are returned, never
+// error texts, for the same reason as /health.
+func (r *router) unreadyReasons(report bool) []string {
+	var reasons []string
+	if r.admin.readiness != nil {
+		reasons = append(reasons, r.admin.readiness()...)
+	}
+	for _, h := range r.admin.health {
+		if err := runCheck(h.check); err != nil {
+			if report {
+				logger.Default.Error("readiness: ", h.name, " is down:", err)
+			}
+			reasons = append(reasons, h.name)
+		}
+	}
+	return reasons
+}
+
+// readinessFamilies exports readiness for /metrics: lipstick_ready is 1 when the server
+// can take traffic, and lipstick_dependency_up is 1 or 0 for each dependency.
+func (r *router) readinessFamilies() []metrics.Family {
+	down := map[string]bool{}
+	for _, reason := range r.unreadyReasons(false) {
+		down[reason] = true
+	}
+	ready := 1.0
+	if len(down) > 0 {
+		ready = 0
+	}
+	var deps []metrics.Sample
+	for _, h := range r.admin.health {
+		up := 1.0
+		if down[h.name] {
+			up = 0
+		}
+		deps = append(deps, metrics.Sample{Labels: map[string]string{"check": h.name}, Value: up})
+	}
+	return []metrics.Family{
+		{Name: "lipstick_ready", Help: "1 when the server can take new traffic, 0 when it is draining or a dependency is down.", Type: metrics.Gauge, Samples: []metrics.Sample{{Value: ready}}},
+		{Name: "lipstick_dependency_up", Help: "1 when a dependency answers its check, 0 when it does not.", Type: metrics.Gauge, Samples: deps},
+	}
+}
+
+// @Summary Readiness
+// @Description Whether this server should take new traffic. 200 when it is listening, not shutting down, and every dependency answers. 503 lists the conditions that are not met, by name. Public, like /health; a load balancer should use this one, /health reports state for people.
+// @Tags health
+// @Produce json
+// @Success 200 {object} readyResponse
+// @Failure 503 {object} readyResponse "Not ready: the reasons name what is not met"
+// @Router /ready [get]
+func (r *router) ready(c *gin.Context) {
+	reasons := r.unreadyReasons(true)
+	if len(reasons) > 0 {
+		c.JSON(http.StatusServiceUnavailable, readyResponse{Status: "not ready", Reasons: reasons})
+		return
+	}
+	c.JSON(http.StatusOK, readyResponse{Status: "ready", Reasons: []string{}})
 }
 
 // runCheck runs one check with a deadline, so a hung dependency cannot hang /health.
@@ -881,8 +942,9 @@ func (r *router) metrics(c *gin.Context) {
 		c.JSON(http.StatusServiceUnavailable, errorResponse{Error: "metrics are not configured on this server"})
 		return
 	}
+	families := append(r.admin.metrics(), r.readinessFamilies()...)
 	var b bytes.Buffer
-	if err := metrics.Render(&b, r.admin.metrics()); err != nil {
+	if err := metrics.Render(&b, families); err != nil {
 		c.JSON(http.StatusInternalServerError, errorResponse{Error: "metrics could not be written"})
 		return
 	}

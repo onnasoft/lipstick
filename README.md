@@ -848,6 +848,67 @@ docker run -v /srv/lipstick:/etc/lipstick -p 5050:5050 -p 5051:5051 lipstick
 
 `/srv/lipstick` debe contener `config.yml`. Si los certificados no existen, se generan en `/srv/lipstick/certs`, así que ese directorio debe ser escribible por el usuario `65532`. La admin API escucha en `127.0.0.1` dentro del contenedor, así que no es accesible desde el host. Para usarla, entra al contenedor o cambia `admin.address` a `0.0.0.0:5052` bajo tu propio control de acceso.
 
+## Métricas, readiness y alertas
+
+El servidor expone su estado en el listener de administración (por defecto `127.0.0.1:5052`, en HTTPS):
+
+- **`GET /health`** informa del estado de las dependencias (base de datos, NATS). Responde 503 con `degraded` si alguna falla. Es para personas.
+- **`GET /ready`** dice si el servidor debe recibir tráfico nuevo. Responde 503 cuando el servidor está apagándose, todavía no escucha, o una dependencia falla, y nombra la condición (`draining`, `not_listening`, `database`…) sin mostrar textos de error. Un balanceador debe usar este.
+- **`GET /metrics`** exporta métricas en formato Prometheus. Es público, como `/health`: el listener debe quedar en una dirección privada.
+
+Métricas principales:
+
+| Métrica | Qué es |
+|---|---|
+| `lipstick_ready`, `lipstick_dependency_up{check}` | Readiness, y cada dependencia |
+| `lipstick_connected_clients{domain}` | Clientes conectados por dominio |
+| `lipstick_active_sessions`, `lipstick_pending_visitors` | Sesiones abiertas y visitantes en espera |
+| `lipstick_visitor_connections_open` | Conexiones de visitantes abiertas ahora |
+| `lipstick_traffic_bytes_since_start{domain}` | Bytes servidos por dominio desde el arranque (contador) |
+| `lipstick_connection_latency_seconds{domain}` | Histograma: de la petición del visitante al primer byte de respuesta |
+| `lipstick_tunnel_latency_seconds{domain}` | Histograma: ida y vuelta de cada sesión del túnel |
+| `lipstick_http_responses_total{class}` | Respuestas a visitantes por clase (1xx a 5xx) |
+| `lipstick_visitor_refusals_total{reason}` | Conexiones de visitantes rechazadas, por motivo |
+| `lipstick_tunnel_setup_failures_total{reason}` | Túneles rechazados o fallidos, por motivo |
+| `lipstick_backend_timeouts_total` | Peticiones contestadas 504 porque el backend calló |
+| `lipstick_tunnel_reconnections_total{domain}`, `lipstick_tunnel_losses_total{domain}` | Caídas y vueltas de los túneles, por dominio |
+| `lipstick_process_cpu_seconds_total`, `lipstick_go_memory_alloc_bytes`, `lipstick_go_goroutines` | Recursos del proceso |
+
+Los contadores se reinician cuando el proceso arranca. Las reconexiones se cuentan dentro del proceso: un reinicio del servidor no se cuenta como reconexión.
+
+### Configurar Prometheus
+
+En `prometheus.yml`, apunta al listener de administración y confía en su certificado:
+
+```yaml
+rule_files:
+  - /etc/prometheus/lipstick-alerts.yml
+
+scrape_configs:
+  - job_name: lipstick
+    scheme: https
+    scrape_interval: 15s
+    static_configs:
+      - targets: ['127.0.0.1:5052']
+    tls_config:
+      ca_file: /ruta/a/tu/certificado.crt   # el de tls.certificate_path
+```
+
+Las reglas de alerta están en `examples/prometheus/lipstick-alerts.yml`. Cubren la disponibilidad (servidor caído, no listo, dependencia caída, sin clientes), el tráfico (504, respuestas 5xx, rechazos, fallos de túnel, túneles que caen y vuelven), la latencia (túnel y conexión) y los recursos (CPU y memoria). Los umbrales son de partida: ajústalos al tráfico de tu despliegue. Para validarlas: `promtool check rules examples/prometheus/lipstick-alerts.yml`.
+
+Para recibir las alertas, configura Alertmanager en tu Prometheus; las reglas ya traen `severity` (`critical` o `warning`) para enrutarlas.
+
+### Formato de los logs
+
+Por defecto, los logs van a la terminal con colores. Para un colector de logs, en `config.yml`:
+
+```yaml
+logging:
+  format: json
+```
+
+Cada línea es un objeto con `time`, `level`, `msg` y, cuando el evento los tiene, `fields` (por ejemplo `domain` y `reason`).
+
 ## Desarrollo y pruebas
 
 ```bash

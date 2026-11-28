@@ -721,6 +721,18 @@ Lipstick exposes local ports to the internet through a reverse tunnel. The main 
 - **Not exported:** the memory the process holds from the operating system (resident size) and the garbage collector's totals.
 - **Verified:** a test checks the CPU time grows after work; the suite passes with `-race`; live, the counter grew between two readings (0.048 s, then 0.053 s).
 
+### 79. Structured logging (feature)
+- **Added:** `logging: format: json` (or `text`, the default) in config.yml. JSON writes one object per line: `time`, `level`, `msg`, and the event's fields under `fields`, so a field name cannot overwrite a core key. The logger has `With(key, value, ...)`, which attaches fields to an event in both formats. Text lines show the same fields after the message, sorted.
+- **Converted:** tunnel connected, tunnel hub created, tunnel lost, backend timeout (504), tunnel setup refused (unauthorized, mux proof). Other messages still use plain text; they can be converted the same way.
+- **Verified:** logger tests for both formats and for the rules above (core keys, missing values, unknown format names); config tests for the new section; the full suite with `-race`. Production stays on text, so its log is unchanged; the JSON output was not checked against the running server.
+
+### 80. Readiness and alerting (feature)
+- **Readiness:** `GET /ready` is public, like `/health`. It answers 200 when the proxy listens, the server is not shutting down, and every dependency answers. Otherwise 503, with the names of the conditions not met (`not_listening`, `draining`, or a dependency name such as `database`), never the error text. The shutdown sets `draining` first, so a load balancer takes the server out before the tunnels close. `/health` keeps reporting state for people.
+- **Metrics:** `lipstick_ready` (1 or 0) and `lipstick_dependency_up{check}` on /metrics, computed the same way as /ready.
+- **Alerts:** `examples/prometheus/lipstick-alerts.yml`, 13 rules in four groups (availability, traffic, latency, resources), each with a `for` and a `severity`. The README covers the scrape configuration and the log format.
+- **Verified:** readiness tests (ready, draining, a down dependency without its error text, public path); the full suite with `-race`; live, `/ready` answers 200 and `lipstick_ready` is 1 on the production server.
+- **Not verified:** the rules were not checked with promtool. Building it failed: the Go module path for the Prometheus release does not resolve here. The YAML parses; the PromQL is unchecked. Run `promtool check rules examples/prometheus/lipstick-alerts.yml` before relying on them.
+
 ## Recommended order
 
 1. Items 1, 2, 3, and 4: authentication, unpredictable tickets, TLS verification, and admin API hardening.
